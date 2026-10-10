@@ -63,36 +63,29 @@ image; only the DNS target changes.
 
 ## Custom domain — DNS records for Erwin
 
-Buy the domain at any registrar, then wire it to the Fly app. Values below
-assume the app name `chain-reaction` and the domain `your-domain.example` —
-substitute the real ones.
+The demo lives at **demo.petrochain.xyz** (decided 2026-10-10). The apex
+`petrochain.xyz` and `www` belong to the main website — keep them pointed
+wherever the site is hosted, never at Fly. Because the demo is a subdomain,
+one CNAME record is all the DNS needs.
 
 1. Register the hostnames with Fly (provisions TLS certificates):
 
    ```sh
-   fly certs add your-domain.example
-   fly certs add www.your-domain.example
-   fly ips list        # shows the app's dedicated IPv4/IPv6
+   fly certs add demo.petrochain.xyz
    ```
 
    If cert validation needs TXT records, `fly certs add` prints the exact
    `_acme-challenge` records — create them at the registrar, then check with
-   `fly certs check your-domain.example`.
+   `fly certs check demo.petrochain.xyz`.
 
-2. Create these records at the registrar (apex values come from
-   `fly ips list`; the CNAME target is the app's `fly.dev` name):
+2. Create this record at the registrar (the CNAME target is the app's
+   `fly.dev` name):
 
-   | Type  | Name | Value                        | Notes |
-   |-------|------|------------------------------|-------|
-   | A     | `@`  | the dedicated IPv4 address   | apex → Fly dedicated IP |
-   | AAAA  | `@`  | the dedicated IPv6 address   | apex, IPv6 |
-   | CNAME | `www`| `chain-reaction.fly.dev.`    | www subdomain |
+   | Type  | Name   | Value                     | Notes |
+   |-------|--------|---------------------------|-------|
+   | CNAME | `demo` | `chain-reaction.fly.dev.` | demo subdomain → Fly app |
 
-   If the registrar supports apex CNAME flattening (Cloudflare and most
-   modern DNS providers do), a single flattened `CNAME @ → chain-reaction.fly.dev`
-   can replace the A/AAAA pair — but A/AAAA works everywhere.
-
-3. Verify propagation, then `https://your-domain.example` should serve the
+3. Verify propagation, then `https://demo.petrochain.xyz` should serve the
    demo. Until DNS propagates, `https://<app>.fly.dev` always works — the
    demo link is a DNS record swap, never a rebuild (§14).
 
