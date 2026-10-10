@@ -1,0 +1,128 @@
+[
+  { "key": "FUEL_DEPOT_GASOLINE", "name": "City gasoline demand", "basis": "GASOLINE",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "FD-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
+        "recipes": [ { "in": { "GASOLINE": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "FUEL_DEPOT_DIESEL", "name": "City diesel demand", "basis": "DIESEL",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "FD-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
+        "recipes": [ { "in": { "DIESEL": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "FUEL_DEPOT_JET", "name": "City jet fuel demand", "basis": "JET",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "FD-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
+        "recipes": [ { "in": { "JET": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "FUEL_DEPOT_LPG", "name": "City LPG demand", "basis": "LPG",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "FD-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
+        "recipes": [ { "in": { "LPG": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "GAS_GRID_METHANE", "name": "Gas grid city demand", "basis": "METHANE",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "GG-OUT", "name": "Demand draw", "glyph": "pipe_rack", "trains": 1,
+        "recipes": [ { "in": { "METHANE": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "PACKAGING_PE", "name": "Packaging PE demand", "basis": "PE",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PK-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
+        "recipes": [ { "in": { "PE": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "PACKAGING_PP", "name": "Packaging PP demand", "basis": "PP",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PK-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
+        "recipes": [ { "in": { "PP": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "CONSTRUCTION_PVC", "name": "Construction PVC demand", "basis": "PVC",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "CN-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
+        "recipes": [ { "in": { "PVC": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "CONSUMER_GOODS_PS", "name": "Consumer goods PS demand", "basis": "PS",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "CG-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
+        "recipes": [ { "in": { "PS": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "CONSUMER_GOODS_PP", "name": "Consumer goods PP demand", "basis": "PP",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "CG-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
+        "recipes": [ { "in": { "PP": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "PAINTS_SOLVENT", "name": "Paints and coatings solvent demand", "basis": "SOLVENT",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PC-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
+        "recipes": [ { "in": { "SOLVENT": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "PAINTS_STYRENE", "name": "Paints and coatings styrene demand", "basis": "STYRENE",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PC-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
+        "recipes": [ { "in": { "STYRENE": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "PROCESS_INDUSTRIES_CAUSTIC", "name": "Process industries caustic demand", "basis": "CAUSTIC",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PI-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
+        "recipes": [ { "in": { "CAUSTIC": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "PORT_BUNKER_FUEL_OIL", "name": "Port bunkering fuel oil demand", "basis": "FUEL_OIL",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PT-BUNK", "name": "Bunkering draw", "glyph": "jetty", "trains": 1,
+        "recipes": [ { "in": { "FUEL_OIL": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  }
+]

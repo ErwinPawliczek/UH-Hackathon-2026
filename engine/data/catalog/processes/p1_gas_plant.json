@@ -1,0 +1,20 @@
+[
+  { "key": "NGL_RECOVERY", "name": "NGL recovery", "basis": "RAW_GAS", "modes": ["DEFAULT"],
+    "internal": ["treated", "ygrade"],
+    "turndown": 0.40, "ramp_per_h": 0.20, "restart_h": 12,
+    "units": [
+      { "key": "GP-AMINE", "name": "Amine treating and dehydration", "glyph": "column", "trains": 2,
+        "recipes": [ { "in": { "RAW_GAS": 1.000 },
+                       "out": { "treated": 0.960, "LOSS": 0.040 },
+                       "heat_gj": 0.20, "power_mwh": 0.005 } ] },
+      { "key": "GP-CRYO", "name": "Cryogenic expander, demethaniser", "glyph": "column", "trains": 2,
+        "recipes": [ { "in": { "treated": 0.960 },
+                       "out": { "METHANE": 0.787, "ygrade": 0.173 },
+                       "heat_gj": 0.0, "power_mwh": 0.030 } ] },
+      { "key": "GP-FRAC", "name": "NGL fractionation", "glyph": "column", "trains": 1,
+        "recipes": [ { "in": { "ygrade": 0.173 },
+                       "out": { "ETHANE": 0.078, "LPG": 0.074, "NAPHTHA": 0.021 },
+                       "heat_gj": 0.30, "power_mwh": 0.0 } ] }
+    ]
+  }
+]

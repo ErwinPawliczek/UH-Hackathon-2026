@@ -1,0 +1,60 @@
+[
+  { "key": "CRUDE_DISTILLATION", "name": "Crude distillation", "basis": "CRUDE",
+    "modes": ["DEFAULT"], "internal": ["resid"],
+    "turndown": 0.60, "ramp_per_h": 0.05, "restart_h": 48,
+    "units": [
+      { "key": "RF-CDU", "name": "Atmospheric column", "glyph": "column", "trains": 1,
+        "recipes": [ { "in": { "CRUDE": 1.000 },
+                       "out": { "LPG": 0.020, "NAPHTHA": 0.070, "HEAVY_NAPHTHA": 0.130,
+                                "JET": 0.100, "GASOIL": 0.250, "resid": 0.430 },
+                       "heat_gj": 0.70, "power_mwh": 0.005 } ] },
+      { "key": "RF-VDU", "name": "Vacuum column", "glyph": "column", "trains": 1,
+        "recipes": [ { "in": { "resid": 0.430 },
+                       "out": { "VGO": 0.250, "FUEL_OIL": 0.180 },
+                       "heat_gj": 0.25, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "REFORMING", "name": "Catalytic reforming", "basis": "HEAVY_NAPHTHA",
+    "modes": ["DEFAULT"], "internal": ["treated", "reformate"],
+    "turndown": 0.50, "ramp_per_h": 0.05, "restart_h": 36,
+    "units": [
+      { "key": "RF-NHT", "name": "Naphtha hydrotreater", "glyph": "reactor", "trains": 1,
+        "recipes": [ { "in": { "HEAVY_NAPHTHA": 1.000 },
+                       "out": { "treated": 0.995, "LOSS": 0.005 },
+                       "heat_gj": 0.30, "power_mwh": 0.0 } ] },
+      { "key": "RF-CCR", "name": "Catalytic reformer", "glyph": "furnace", "trains": 1,
+        "recipes": [ { "in": { "treated": 0.995 },
+                       "out": { "reformate": 0.850, "LPG": 0.080, "FUEL_GAS": 0.065 },
+                       "heat_gj": 2.00, "power_mwh": 0.02 } ] },
+      { "key": "RF-BTX", "name": "Aromatics extraction", "glyph": "column", "trains": 1,
+        "recipes": [ { "in": { "reformate": 0.850 },
+                       "out": { "GASOLINE": 0.690, "SOLVENT": 0.100, "BENZENE": 0.060 },
+                       "heat_gj": 1.00, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "FCC", "name": "Fluid catalytic cracking", "basis": "VGO",
+    "modes": ["DEFAULT"], "internal": ["vapour"],
+    "turndown": 0.60, "ramp_per_h": 0.05, "restart_h": 72,
+    "units": [
+      { "key": "RF-FCC", "name": "Riser and regenerator", "glyph": "reactor", "trains": 1,
+        "recipes": [ { "in": { "VGO": 1.000 },
+                       "out": { "vapour": 0.950, "LOSS": 0.050 },
+                       "heat_gj": 0.0, "power_mwh": 0.03 } ] },
+      { "key": "RF-FRAC", "name": "Main fractionator, gas plant", "glyph": "column", "trains": 1,
+        "recipes": [ { "in": { "vapour": 0.950 },
+                       "out": { "GASOLINE": 0.480, "DIESEL": 0.180, "LPG": 0.110,
+                                "FUEL_OIL": 0.070, "FUEL_GAS": 0.060, "PROPYLENE": 0.050 },
+                       "heat_gj": 0.20, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "DIESEL_HDT", "name": "Diesel hydrotreating", "basis": "GASOIL",
+    "modes": ["DEFAULT"], "internal": [],
+    "turndown": 0.50, "ramp_per_h": 0.10, "restart_h": 24,
+    "units": [
+      { "key": "RF-DHT", "name": "Diesel hydrotreater", "glyph": "reactor", "trains": 2,
+        "recipes": [ { "in": { "GASOIL": 1.000 },
+                       "out": { "DIESEL": 0.980, "LOSS": 0.020 },
+                       "heat_gj": 0.30, "power_mwh": 0.01 } ] }
+    ]
+  }
+]

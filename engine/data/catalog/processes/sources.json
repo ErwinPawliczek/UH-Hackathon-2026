@@ -1,0 +1,29 @@
+[
+  { "key": "OIL_PRODUCTION", "name": "Oil wellhead and gathering", "basis": "CRUDE",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "source",
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "OIL-WELLS", "name": "Wellheads", "glyph": "pipe_rack", "trains": 1,
+        "recipes": [ { "in": {}, "out": { "CRUDE": 1.000 },
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "GAS_PRODUCTION", "name": "Gas wellhead and gathering", "basis": "RAW_GAS",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "source",
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "GAS-WELLS", "name": "Wellheads", "glyph": "pipe_rack", "trains": 1,
+        "recipes": [ { "in": {}, "out": { "RAW_GAS": 1.000 },
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "SALT_MINING", "name": "Salt mining and crushing", "basis": "SALT",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "source",
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "SALT-MINE", "name": "Mine and crusher", "glyph": "silo", "trains": 1,
+        "recipes": [ { "in": {}, "out": { "SALT": 1.000 },
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  }
+]

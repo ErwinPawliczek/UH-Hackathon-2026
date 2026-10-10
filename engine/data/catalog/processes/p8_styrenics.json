@@ -1,0 +1,30 @@
+[
+  { "key": "STYRENE", "name": "Styrene from benzene and ethylene", "basis": "STYRENE",
+    "modes": ["DEFAULT"], "internal": ["eb", "crude"],
+    "turndown": 0.60, "ramp_per_h": 0.05, "restart_h": 36,
+    "units": [
+      { "key": "ST-ALK", "name": "Alkylation to ethylbenzene", "glyph": "reactor", "trains": 1,
+        "recipes": [ { "in": { "BENZENE": 0.780, "ETHYLENE": 0.285 },
+                       "out": { "eb": 1.050, "LOSS": 0.015 },
+                       "heat_gj": 0.50, "power_mwh": 0.0 } ] },
+      { "key": "ST-DEHY", "name": "Dehydrogenation reactors", "glyph": "reactor", "trains": 2,
+        "recipes": [ { "in": { "eb": 1.050 },
+                       "out": { "crude": 1.030, "FUEL_GAS": 0.020 },
+                       "heat_gj": 6.00, "power_mwh": 0.0 } ] },
+      { "key": "ST-DIST", "name": "Vacuum distillation", "glyph": "column", "trains": 1,
+        "recipes": [ { "in": { "crude": 1.030 },
+                       "out": { "STYRENE": 1.000, "SOLVENT": 0.020, "LOSS": 0.010 },
+                       "heat_gj": 1.50, "power_mwh": 0.02 } ] }
+    ]
+  },
+  { "key": "PS", "name": "Polystyrene mass polymerisation", "basis": "PS",
+    "modes": ["DEFAULT"], "internal": [],
+    "turndown": 0.50, "ramp_per_h": 0.10, "restart_h": 12,
+    "units": [
+      { "key": "ST-PS", "name": "Mass polymerisation, pelletising", "glyph": "reactor", "trains": 2,
+        "recipes": [ { "in": { "STYRENE": 1.010 },
+                       "out": { "PS": 1.000, "LOSS": 0.010 },
+                       "heat_gj": 0.50, "power_mwh": 0.15 } ] }
+    ]
+  }
+]
