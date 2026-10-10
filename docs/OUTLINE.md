@@ -1,6 +1,8 @@
 # Chain Reaction — technical outline
 
-Working title (rename freely). Code prefix `crx`. Outline v0.1, 2026-10-10.
+Working title (rename freely). Code prefix `crx`. Outline v0.2, 2026-10-10. v0.2 changes: terrain worldgen replaced by a template-based layout
+generator whose polyline arc lengths drive travel times; determinism rules relaxed to same-platform
+reproducibility; milestones reordered demo-first for the 48-hour build.
 
 A time-stepped simulation of a petrochemical supply chain in a fictional country. Plants are built from
 real unit-level mass and energy balances, materials move in pipelines, ships, barges and trucks, and every
@@ -25,33 +27,30 @@ and what do rationing and re-sourcing buy them?
 | Area | Decision | Reason |
 |---|---|---|
 | Engine | C++20, one static library `crx_engine`. No I/O, no threads, no globals. | Same code runs natively and in the browser; easy to test. |
-| Targets | Native (g++ 15, clang 21) for CLI, tests and the benchmark solver. WebAssembly (Emscripten 6.0) for the browser. | One engine, two compilers. |
+| Targets | Native (g++ 14+) for CLI, tests and the benchmark solver; clang welcome. WebAssembly (emsdk, latest) for the browser. | One engine, two compilers. |
 | Hosting | Static site. The engine runs inside the page. No server. | Demo is a link; nothing to keep alive during judging. |
 | Boundary | C ABI of 14 functions (§7). JSON for rare structured data (world, commands, event log). One binary snapshot for per-frame data, read as typed-array views with no copy. | Small, stable contract between C++ and TypeScript. |
 | Threading | Engine called synchronously on the main thread, time-sliced to ≤ 4 ms per frame. No Web Worker, no SharedArrayBuffer. | GitHub Pages cannot send the headers SharedArrayBuffer needs; the engine is fast enough without it. |
 | Build | CMake ≥ 3.28, Ninja, `CMakePresets.json` with `native-debug`, `native-release`, `wasm-release`. | One command per target. |
 | C++ deps | FetchContent, pinned: nlohmann/json 3.12.0, doctest 2.5.3, HiGHS 1.15.1 (native only, §10). | Header-only except HiGHS; nothing to install. |
-| Front end | TypeScript 7, Vite 8, React 19, three.js 0.186, zustand 5, uPlot 1.6, Tailwind 4, vitest 5. npm, exact versions in the lockfile. | Current stable releases; no map tiles or API keys needed. |
+| Front end | TypeScript, Vite, React, three.js, zustand, uPlot, Tailwind 4, vitest. npm; exact versions pinned in the lockfile at install. | Current stable releases; no map tiles or API keys needed. |
 | Deploy | GitHub Actions: native build and tests → wasm build → web build → GitHub Pages. | Every push to `main` updates the demo link. |
 | Quantities | `double`. Tonnes, hours, km, GJ, MWh, USD. Rates in t/h. | |
 | Time | Fixed tick of 0.25 h (96 per day). Time is an integer tick count. | |
 
 If a server is ever required, a native WebSocket host wraps the same C ABI; the engine does not change.
 
-### Determinism rules (the engine must give bit-identical results natively and in WebAssembly)
+### Determinism rules (v0.2: same-platform reproducibility, not cross-platform bit-identity)
 
-1. No transcendental functions in the engine: no `exp`, `log`, `pow`, `sin`, `cos`, `atan2`. Allowed: `+ − × ÷`, `sqrt`, `floor`, `ceil`, `fabs`, `min`, `max`, `clamp`.
-2. Compile with `-ffp-contract=off`. Never `-ffast-math` or `-march=native`.
-3. Own random generator (PCG32) and own distributions. Never `std::*_distribution` or `std::shuffle`.
-4. Iterate by index in ID order. No iteration over unordered containers. Every sort uses a total order that ends in an ID tie-break.
-5. Wall-clock time never enters the engine.
+Cross-compiler bit-identity is not a hackathon requirement. The state hash gates regressions on one
+platform (native CI), which is what replay, fork and the baseline twin actually need.
+
+1. Own random generator (PCG32) and own distributions. Never `std::*_distribution` or `std::shuffle`.
+2. Iterate by index in ID order. No iteration over unordered containers. Every sort uses a total order that ends in an ID tie-break.
+3. Wall-clock time never enters the engine.
+4. Compile with `-ffp-contract=off`. Never `-ffast-math` or `-march=native`.
+5. Prefer the smoothstep (§5.2) and other closed forms; `exp`/`log`/`pow` are allowed where clarity wins, since cross-platform bit-identity is no longer required.
 6. All mutable state lives in one copyable struct (§4.4), so a run can be forked, hashed, saved and replayed.
-
-**Checked on this machine with a throwaway engine** (2,000 tanks, 8,640 ticks, CMake presets as above): g++,
-clang++ and the WebAssembly build produce the same state hash under rules 1–4, and a probe of
-`exp/sin/pow/log` produces different bits natively and in WebAssembly, which is why rule 1 exists. The run
-took 0.15 s natively and 0.33 s in WebAssembly. The reference world (§6) has roughly a third as many
-entities, though the real engine will do more work on each, so the speed target in §12 still has to be measured.
 
 ---
 
@@ -469,8 +468,7 @@ struct Sim   { std::shared_ptr<const World> world; State state;
 
 ### 5.2 The S-curve and the tank signals
 
-One function is used everywhere. It is a smoothstep, chosen over the logistic curve because it needs no
-`exp` (determinism rule 1) and its two parameters have plain meanings: at or below `lo` the signal is 0,
+One function is used everywhere. It is a smoothstep, chosen over the logistic curve because it needs no transcendental functions (determinism rule 5) and its two parameters have plain meanings: at or below `lo` the signal is 0,
 at or above `hi` it is 1.
 
 ```
@@ -586,21 +584,38 @@ without it, so each measure is reported as a loss against the same world with no
 
 ---
 
-## 6. World generator
+## 6. Layout generator (v0.2: template-based, metric-first)
 
 Deterministic from a seed and a small parameter set (map 600 × 400 km, 8 cities, demand scale, target
-utilisation 0.88, tank cover multipliers). Runs in the browser, so it uses no solver.
+utilisation 0.88, tank cover multipliers). Runs in the browser and natively; no solver. The simulation
+consumes only positions, polylines and arc lengths — terrain is a render-time concern, derived from the
+same seed for looks, never an input to the sim.
 
-1. **Terrain.** 256 × 256 height grid from layered value noise (integer hash, polynomial interpolation) with a falloff toward the edges to make a coastline.
-2. **Rivers.** A few highland sources followed downhill to the sea. Stretches with enough accumulated flow become barge edges; mouths are port candidates.
-3. **Cities.** Placed by suitability (flat, near water) with minimum spacing. Population follows a rank-size rule.
-4. **Resources.** One oil basin, one gas basin, one salt deposit.
-5. **End demand.** Per-capita demand × population for each sink type.
-6. **Sizing.** Walk the materials from end products back to raw materials. For each, required production = the sum of what its consumers need; convert through the net recipes; credit co-products; send any residual to the ports as import or export. Plant count = required ÷ reference nameplate, rounded up; capacity = required ÷ count ÷ utilisation.
-7. **Siting.** By rule: refineries and crackers at ports; gas plants at the gas basin; polymer and derivative plants within 25 km of a cracker; chlor-alkali next to vinyls; sinks in cities.
-8. **Routes.** Roads: a spanning tree over all sites plus each site's two nearest neighbours, routed over the height grid with a slope penalty. Sea lanes: paths over water cells between ports, plus `OVERSEAS`. Pipelines: field → plant, gas plant → cracker, cracker → derivatives in its cluster, chlor-alkali → vinyls.
-9. **Tanks, fleet, contracts.** Tanks from cover days; vehicles per class from tonnes moved × round-trip time ÷ capacity, plus 20%; each buyer's contract is its cheapest feasible supplier.
-10. **Warm-up.** Run 20 days, check the steady-state test (§12), and take the result as time zero.
+The reference topology of §2 is the template. The generator randomises within it, never outside it:
+
+1. **Frame.** Sea occupies one map edge; `OVERSEAS` sits a fixed 18 ship-days out (~11,000 km at 26 km/h).
+2. **Features.** One oil basin, one gas basin, one salt deposit placed by seed; a river enters the
+   highlands and reaches the sea as a wiggled polyline; 8 cities on the remaining land with minimum
+   spacing; populations follow a rank-size rule.
+3. **Siting.** By rule, not search: refineries and crackers at ports; gas plants at the gas basin; polymer
+   and derivative plants within 25 km of a cracker; chlor-alkali next to vinyls; sinks in cities; barge
+   sites as nodes along the river polyline.
+4. **Routes.** Every route is a polyline and every distance is arc length — never the Euclidean gap
+   between sites. Roads: spanning tree plus nearest neighbours, straight segments with a deterministic
+   wiggle worth roughly the 1.2–1.4 detour factor of real road networks. River: the polyline itself; two
+   sites 40 km apart as the crow flies may be 150 km apart by barge — that asymmetry is what makes mode
+   choice matter. Sea: coastal arcs between ports. Pipelines: straight, short, field → plant and cluster
+   links as in v0.1.
+5. **Sizing.** Walk materials from end products back to raw materials: required production = the sum of
+   what consumers need, converted through the net recipes, co-products credited, residuals sent to the
+   ports as import or export. Plant count = required ÷ reference nameplate, rounded up; capacity =
+   required ÷ count ÷ utilisation.
+6. **Tanks, fleet, contracts.** Tanks from cover days; vehicles per class from tonnes moved × round-trip
+   time ÷ capacity, plus 20%; each buyer's contract is its cheapest feasible supplier.
+7. **Feasibility gate.** Warm-up 20 days, then require the steady-state test (§12) on the seed; reject and
+   reseed on failure. Also assert every site reaches every other in each available mode, and spot-check
+   travel times (truck covers at most ~300 km of driving per day, barge pace, port leg ≈ 18 days). The
+   gate is what makes every future random map trustworthy, not just the reference one.
 
 **Reference world:** about 30 sites (2 oil fields, 3 gas fields, 1 salt mine, 3 gas plants, 2 refineries,
 2 crackers of which one flex, 2 chlor-alkali, 3 polyethylene, 1 polypropylene, 2 vinyls, 1 styrenics,
@@ -767,12 +782,13 @@ The catalog JSON is embedded in the engine at build time, so the WebAssembly fil
 | 1 | Catalog validation | Every unit balances in every mode to 1e-9; every internal stream nets to zero; every traded material has a producer and a consumer. |
 | 2 | Mass conservation | Tanks + vehicle cargo + cumulative consumption and loss − cumulative supply is constant to 1e-9 relative, every tick. |
 | 3 | Bounds | `0 ≤ level ≤ capacity`; rate is 0 or within `[turndown, R_max]`; no negative reservations. |
-| 4 | Determinism | Same seed and commands give the same state hash; native and WebAssembly hashes match after 8,640 ticks. Runs in CI. |
+| 4 | Determinism | Same seed and commands give the same state hash natively (CI gate). Wasm hash checked once per release, not per commit. |
 | 5 | Fork | A fork stepped with the same commands matches its parent. |
 | 6 | Steady state | For seeds 1–20 with no events: after warm-up, service level ≥ 97%, every process within ±5% of its design rate, no stock-outs, for 60 days. |
 | 7 | Cascade | Cracker outage: downstream processes drop after roughly their days of cover, upstream processes slow as tanks fill, and all recover after repair. |
 | 8 | Speed | 90 days of the reference world in under 1 s in WebAssembly. |
 | 9 | Snapshot | TypeScript decodes a CLI-written snapshot and matches the CLI's text dump. |
+| 10 | Reachability and travel times | For 20 generated seeds: every site reaches every other in each available mode; spot-checked origin–destination travel times are plausible (truck day-distance, barge pace, port leg ≈ 18 days). |
 
 Tests 2, 3 and 6 are the gate for merging any change to the simulation systems.
 
@@ -782,10 +798,10 @@ Tests 2, 3 and 6 are the gate for merging any change to the simulation systems.
 
 | Milestone | Delivers | Done when |
 |---|---|---|
-| **M0 Contracts** | Repo layout, CMake presets, CI, catalog schema with loader and validator, core types, `api.h`, snapshot layout, a stub engine that animates fake data through the real API, a web shell that loads it. | CI is green for native, wasm and web; the determinism test runs in CI; the page shows the stub moving. |
+| **M0 Contracts** | Repo layout, CMake presets, CI, catalog schema with loader and validator, core types, `api.h`, snapshot layout, a stub engine that animates fake data through the real API, a web shell that loads it. | CI green for native and web; the page shows the stub moving. |
 | **M1 Plant core** | Signals, control, production, pipelines, events, recorder, CLI. A hand-written six-site world. | Tests 1–5 pass; a cracker outage in the six-site world starves downstream and backs up upstream in the CLI output. |
 | **M2 Logistics** | Route graph, path cache, procurement, market, dispatch, vehicle state machine, bays, adaptation. | Test 2 passes with vehicles; the six-site world holds steady state. |
-| **M3 World** | Full catalog (8 plant presets, sources, sinks, port), world generator. | Test 6 passes on 20 seeds. |
+| **M3 Layout generator** | Template-based generator (§6) with the feasibility gate; full catalog (8 plant presets, sources, sinks, port). | Tests 6 and 10 pass on 20 generated seeds. |
 | **M4 Front end** | Map, sites, vehicles, inspectors, timeline, scenario controls, baseline twin. | Three scenarios play end to end from the hosted link. |
 | **M5 Depth** | 3D unit glyphs, block diagrams with per-unit balances, live S-curves, shortage map, feed switching, random failures. | |
 | **M6 Stretch** | Benchmark, automated manager, extension presets, real-data loader. | |
@@ -804,6 +820,20 @@ Everything else can run in parallel once M0 has fixed the contracts:
 | CI, Pages deploy, snapshot golden test | M0 | everything |
 | Benchmark linear program | M3 | M4, M5 |
 
+**48-hour slice plan** (demo-first ordering):
+
+| Hours | Work |
+|---|---|
+| 0–4 | M0 contracts, presets, CI, toolchain (ninja, emsdk) |
+| 4–16 | M1 core engine on the tiny world; tests 1–3 green |
+| 16–28 | M2 logistics; six-site steady state |
+| 28–38 | M3 layout generator + feasibility gate; reference world |
+| 38–46 | M4 wasm + thin web scene + one scenario; Pages deploy live |
+| 46–48 | Polish, README, demo script, buffer |
+
+The web scene reads the same `world.json` and snapshots as the CLI, so M4 work starts as soon as M0's
+contracts exist and runs in parallel whenever hands allow.
+
 ---
 
 ## 14. Risks and cut lines
@@ -817,9 +847,9 @@ Everything else can run in parallel once M0 has fixed the contracts:
 | New major versions in the web stack | Exact versions pinned in the lockfile. |
 | Debugging in WebAssembly | All logic is tested natively; the wasm target adds one thin export file. |
 
-**Cut order if time runs short:** automated manager → benchmark → shortage map → terrain-routed roads
-(use straight lines) → barges → random failures → 3D unit glyphs (use extruded blocks) → feed switching
-(fix the cracker on ethane). M0–M4 with the first three scenarios is the submission.
+**Cut order if time runs short:** automated manager → benchmark → shortage map → random failures →
+3D unit glyphs (use extruded blocks) → adaptation → feed switching (fix the cracker on ethane) →
+barges (river freight moves by truck). M0–M4 with the first three scenarios is the submission.
 
 ---
 
