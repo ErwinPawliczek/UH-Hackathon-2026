@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="PetroGrid mark">
+  <polygon points="19.4,10 31.52,17 31.52,31 19.4,38 7.28,31 7.28,17" fill="none" stroke="#0a0a0a" stroke-width="2.6" stroke-linejoin="round"/>
+  <path d="M31.52 17 40.18 12" stroke="#1764d6" stroke-width="2.6" stroke-linecap="round"/>
+  <circle cx="19.4" cy="10" r="2.8" fill="#fff" stroke="#0a0a0a" stroke-width="2.2"/>
+  <circle cx="31.52" cy="31" r="2.8" fill="#fff" stroke="#0a0a0a" stroke-width="2.2"/>
+  <circle cx="19.4" cy="38" r="2.8" fill="#fff" stroke="#0a0a0a" stroke-width="2.2"/>
+  <circle cx="7.28" cy="31" r="2.8" fill="#fff" stroke="#0a0a0a" stroke-width="2.2"/>
+  <circle cx="7.28" cy="17" r="2.8" fill="#fff" stroke="#0a0a0a" stroke-width="2.2"/>
+  <circle cx="31.52" cy="17" r="2.8" fill="#0a0a0a"/>
+  <circle cx="40.18" cy="12" r="3.6" fill="#1764d6"/>
+</svg>
