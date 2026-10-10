@@ -1,0 +1,20 @@
+{
+  "vehicle_classes": [
+    { "key": "TRUCK_TANK", "mode": "road", "carries": "liquid",
+      "capacity_t": 25, "speed_kmh": 70, "load_t_h": 50, "freight": 0.10 },
+    { "key": "TRUCK_PRESS", "mode": "road", "carries": "liquefied_gas",
+      "capacity_t": 20, "speed_kmh": 70, "load_t_h": 40, "freight": 0.14 },
+    { "key": "TRUCK_BULK", "mode": "road", "carries": "solid",
+      "capacity_t": 25, "speed_kmh": 70, "load_t_h": 50, "freight": 0.10 },
+    { "key": "BARGE_TANK", "mode": "river", "carries": "liquid",
+      "capacity_t": 2000, "speed_kmh": 12, "load_t_h": 400, "freight": 0.025 },
+    { "key": "BARGE_DRY", "mode": "river", "carries": "solid",
+      "capacity_t": 1500, "speed_kmh": 12, "load_t_h": 300, "freight": 0.025 },
+    { "key": "SHIP_TANK", "mode": "sea", "carries": "liquid",
+      "capacity_t": 40000, "speed_kmh": 26, "load_t_h": 2500, "freight": 0.004 },
+    { "key": "SHIP_GAS", "mode": "sea", "carries": "liquefied_gas",
+      "capacity_t": 12000, "speed_kmh": 30, "load_t_h": 800, "freight": 0.008 },
+    { "key": "SHIP_DRY", "mode": "sea", "carries": "solid",
+      "capacity_t": 20000, "speed_kmh": 24, "load_t_h": 1000, "freight": 0.005 }
+  ]
+}

@@ -1,0 +1,38 @@
+[
+  { "key": "VCM", "name": "VCM from ethylene and chlorine", "basis": "VCM",
+    "modes": ["DEFAULT"], "internal": ["edc", "crude", "hcl"],
+    "turndown": 0.60, "ramp_per_h": 0.05, "restart_h": 48,
+    "units": [
+      { "key": "VN-DC", "name": "Direct chlorination", "glyph": "reactor", "trains": 1,
+        "recipes": [ { "in": { "ETHYLENE": 0.232, "CHLORINE": 0.585 },
+                       "out": { "edc": 0.800, "LOSS": 0.017 },
+                       "heat_gj": 0.0, "power_mwh": 0.01 } ] },
+      { "key": "VN-OXY", "name": "Oxychlorination", "glyph": "reactor", "trains": 1,
+        "recipes": [ { "in": { "ETHYLENE": 0.233, "hcl": 0.583, "AIR_O2": 0.135 },
+                       "out": { "edc": 0.790, "LOSS": 0.161 },
+                       "heat_gj": 0.0, "power_mwh": 0.02 } ] },
+      { "key": "VN-CRACK", "name": "EDC cracking furnaces", "glyph": "furnace", "trains": 4,
+        "recipes": [ { "in": { "edc": 1.590 },
+                       "out": { "crude": 1.590 },
+                       "heat_gj": 3.00, "power_mwh": 0.0 } ] },
+      { "key": "VN-PURIF", "name": "VCM purification, HCl column", "glyph": "column", "trains": 1,
+        "recipes": [ { "in": { "crude": 1.590 },
+                       "out": { "VCM": 1.000, "hcl": 0.583, "LOSS": 0.007 },
+                       "heat_gj": 1.00, "power_mwh": 0.0 } ] }
+    ]
+  },
+  { "key": "PVC", "name": "PVC suspension polymerisation", "basis": "PVC",
+    "modes": ["DEFAULT"], "internal": ["slurry"],
+    "turndown": 0.30, "ramp_per_h": 0.25, "restart_h": 8,
+    "units": [
+      { "key": "VN-POLY", "name": "Suspension reactors", "glyph": "reactor", "trains": 8,
+        "recipes": [ { "in": { "VCM": 1.020 },
+                       "out": { "slurry": 1.020 },
+                       "heat_gj": 0.0, "power_mwh": 0.10 } ] },
+      { "key": "VN-DRY", "name": "Stripping, centrifuge, dryer", "glyph": "column", "trains": 2,
+        "recipes": [ { "in": { "slurry": 1.020 },
+                       "out": { "PVC": 1.000, "LOSS": 0.020 },
+                       "heat_gj": 1.50, "power_mwh": 0.10 } ] }
+    ]
+  }
+]

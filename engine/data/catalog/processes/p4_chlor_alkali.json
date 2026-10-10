@@ -1,0 +1,25 @@
+[
+  { "key": "ELECTROLYSIS", "name": "Chlor-alkali electrolysis", "basis": "CHLORINE",
+    "modes": ["DEFAULT"], "internal": ["brine", "wet_cl2", "catholyte"],
+    "turndown": 0.30, "ramp_per_h": 0.30, "restart_h": 6,
+    "units": [
+      { "key": "CA-BRINE", "name": "Brine saturation and purification", "glyph": "tank", "trains": 1,
+        "recipes": [ { "in": { "SALT": 1.648, "WATER": 0.508 },
+                       "out": { "brine": 2.156 },
+                       "heat_gj": 0.0, "power_mwh": 0.02 } ] },
+      { "key": "CA-CELL", "name": "Membrane cell room", "glyph": "cell_room", "trains": 6,
+        "recipes": [ { "in": { "brine": 2.156 },
+                       "out": { "wet_cl2": 1.000, "catholyte": 1.128, "FUEL_GAS": 0.028 },
+                       "heat_gj": 0.0, "power_mwh": 2.40 } ] },
+      { "key": "CA-CL2", "name": "Chlorine drying, compression, liquefaction", "glyph": "compressor_house",
+        "trains": 1,
+        "recipes": [ { "in": { "wet_cl2": 1.000 },
+                       "out": { "CHLORINE": 1.000 },
+                       "heat_gj": 0.0, "power_mwh": 0.10 } ] },
+      { "key": "CA-EVAP", "name": "Caustic evaporation", "glyph": "exchanger_bank", "trains": 1,
+        "recipes": [ { "in": { "catholyte": 1.128 },
+                       "out": { "CAUSTIC": 1.128 },
+                       "heat_gj": 0.80, "power_mwh": 0.0 } ] }
+    ]
+  }
+]

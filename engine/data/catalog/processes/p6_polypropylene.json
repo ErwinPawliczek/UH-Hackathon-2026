@@ -1,0 +1,20 @@
+[
+  { "key": "PP_POLYMERISATION", "name": "Polypropylene polymerisation", "basis": "PP",
+    "modes": ["DEFAULT"], "internal": ["pure", "powder"],
+    "turndown": 0.50, "ramp_per_h": 0.10, "restart_h": 12,
+    "units": [
+      { "key": "PO-PURIF", "name": "Feed purification", "glyph": "column", "trains": 1,
+        "recipes": [ { "in": { "PROPYLENE": 1.020 },
+                       "out": { "pure": 1.020 },
+                       "heat_gj": 0.0, "power_mwh": 0.01 } ] },
+      { "key": "PO-RX", "name": "Gas-phase reactor", "glyph": "reactor", "trains": 2,
+        "recipes": [ { "in": { "pure": 1.020 },
+                       "out": { "powder": 1.000, "LOSS": 0.020 },
+                       "heat_gj": 0.0, "power_mwh": 0.15 } ] },
+      { "key": "PO-EXTR", "name": "Extruder and pelletiser", "glyph": "extruder_hall", "trains": 2,
+        "recipes": [ { "in": { "powder": 1.000 },
+                       "out": { "PP": 1.000 },
+                       "heat_gj": 0.0, "power_mwh": 0.25 } ] }
+    ]
+  }
+]

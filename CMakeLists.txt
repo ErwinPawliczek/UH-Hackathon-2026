@@ -14,7 +14,8 @@ FetchContent_Declare(doctest
 FetchContent_MakeAvailable(json doctest)
 
 add_library(crx_engine STATIC
-  engine/src/api.cpp)
+  engine/src/api.cpp
+  engine/src/catalog/catalog.cpp)
 target_include_directories(crx_engine PUBLIC engine/include)
 target_link_libraries(crx_engine PUBLIC nlohmann_json::nlohmann_json)
 target_compile_options(crx_engine PRIVATE
@@ -46,3 +47,9 @@ target_link_libraries(crx-server PRIVATE crx_server_core)
 add_executable(crx_server_tests apps/server/tests/test_server.cpp)
 target_link_libraries(crx_server_tests PRIVATE crx_server_core doctest::doctest)
 add_test(NAME server COMMAND crx_server_tests)
+
+add_executable(crx_catalog_tests engine/tests/test_catalog.cpp)
+target_link_libraries(crx_catalog_tests PRIVATE crx_engine doctest::doctest)
+target_compile_definitions(crx_catalog_tests PRIVATE
+  CRX_CATALOG_DIR="${CMAKE_SOURCE_DIR}/engine/data/catalog")
+add_test(NAME catalog COMMAND crx_catalog_tests)
