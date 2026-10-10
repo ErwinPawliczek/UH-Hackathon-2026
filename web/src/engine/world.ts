@@ -438,3 +438,92 @@ export function stubWorld(seed: number): WorldSpec {
 
   return { seed, wKm: 600, hKm: 400, terrain: makeTerrain(seed), sites, tanks, routes, pipelines, vehicles };
 }
+
+// ---- Engine world reconciliation (M0 stub ↔ WorldSpec) ----
+//
+// §7.4 says GET /world returns the static world description, and §7.3 that it
+// maps every index to name, geometry and catalog entry. The M0 stub engine
+// publishes only a minimal subset ({world:"stub", materials, sites[{i,name,x,y}],
+// tanks[{i,site,material}]}) — not enough to render the map. Until the engine
+// ships the full world (M1+), the client fills static geometry from its own
+// deterministic stubWorld(seed) — the same four-site M0 layout the engine
+// reports — and lets engine facts win wherever it provides them, by index.
+// A payload that already is a full WorldSpec passes through untouched, so the
+// upgrade path needs no client change.
+
+/** True when `w` already carries every array a scene needs (full §7.3 world). */
+export function isFullWorldSpec(w: unknown): w is WorldSpec {
+  if (typeof w !== 'object' || w === null) return false;
+  const r = w as Record<string, unknown>;
+  const terrain = r.terrain;
+  if (typeof terrain !== 'object' || terrain === null) return false;
+  const t = terrain as Record<string, unknown>;
+  const heightOk = Array.isArray(t.height) || t.height instanceof Float32Array;
+  return (
+    typeof t.cols === 'number' &&
+    typeof t.rows === 'number' &&
+    heightOk &&
+    Array.isArray(r.sites) &&
+    Array.isArray(r.tanks) &&
+    Array.isArray(r.routes) &&
+    Array.isArray(r.pipelines) &&
+    Array.isArray(r.vehicles)
+  );
+}
+
+/** Narrow readers for the M0 stub engine's world JSON; anything else is ignored. */
+function engineSites(world: unknown): { i: number; name?: string; x?: number; y?: number }[] {
+  if (typeof world !== 'object' || world === null) return [];
+  const sites = (world as Record<string, unknown>).sites;
+  if (!Array.isArray(sites)) return [];
+  return sites.flatMap((s) => {
+    if (typeof s !== 'object' || s === null) return [];
+    const r = s as Record<string, unknown>;
+    if (typeof r.i !== 'number') return [];
+    return [{
+      i: r.i,
+      name: typeof r.name === 'string' ? r.name : undefined,
+      x: typeof r.x === 'number' ? r.x : undefined,
+      y: typeof r.y === 'number' ? r.y : undefined,
+    }];
+  });
+}
+
+function engineTanks(world: unknown): { i: number; site?: number; material?: string }[] {
+  if (typeof world !== 'object' || world === null) return [];
+  const tanks = (world as Record<string, unknown>).tanks;
+  if (!Array.isArray(tanks)) return [];
+  return tanks.flatMap((t) => {
+    if (typeof t !== 'object' || t === null) return [];
+    const r = t as Record<string, unknown>;
+    if (typeof r.i !== 'number') return [];
+    return [{
+      i: r.i,
+      site: typeof r.site === 'number' ? r.site : undefined,
+      material: typeof r.material === 'string' ? r.material : undefined,
+    }];
+  });
+}
+
+/**
+ * The WorldSpec to render for a session: `payload` when the engine already
+ * publishes a full world, otherwise the seeded stub geometry with the engine's
+ * site and tank facts merged in by index. Engine facts that would corrupt the
+ * render (site out of range, material outside the palette) keep the stub value.
+ */
+export function resolveWorld(payload: unknown, seed: number): WorldSpec {
+  if (isFullWorldSpec(payload)) return payload;
+  const base = stubWorld(seed);
+  for (const s of engineSites(payload)) {
+    if (s.i < 0 || s.i >= base.sites.length) continue;
+    if (s.name !== undefined) base.sites[s.i].name = s.name;
+    if (s.x !== undefined) base.sites[s.i].x = s.x;
+    if (s.y !== undefined) base.sites[s.i].y = s.y;
+  }
+  for (const t of engineTanks(payload)) {
+    if (t.i < 0 || t.i >= base.tanks.length) continue;
+    if (t.site !== undefined && t.site >= 0 && t.site < base.sites.length) base.tanks[t.i].site = t.site;
+    if (t.material !== undefined && MATERIALS.includes(t.material)) base.tanks[t.i].material = t.material;
+  }
+  return base;
+}

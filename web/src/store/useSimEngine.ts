@@ -4,6 +4,7 @@
 
 import { useEffect, useRef } from 'react';
 import { createBackend } from '../engine/api';
+import { resolveWorld } from '../engine/world';
 import { useSim } from './sim';
 
 const STEP_MS = 250;
@@ -29,7 +30,9 @@ export function useSimEngine(): void {
       try {
         const { id } = await backend.create({ seed, scenario });
         if (cancelled) return;
-        const world = await backend.world(id);
+        // The M0 stub engine's /world reply is too sparse to render (§7.3 world
+        // lands in M1); reconcile it with the client's deterministic stub world.
+        const world = resolveWorld(await backend.world(id), seed);
         if (cancelled) return;
         session.current = { id, backend };
         useSim.setState({ world, events: [], lastSeq: -1, selected: null, prevSnap: null, snap: null });
