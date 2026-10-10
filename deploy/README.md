@@ -63,20 +63,21 @@ image; only the DNS target changes.
 
 ## Custom domain — DNS records for Erwin
 
-The demo lives at **demo.petrochain.xyz** (decided 2026-10-10). The apex
-`petrochain.xyz` and `www` belong to the main website — keep them pointed
+The demo lives at **demo.petrogrid.xyz** (decided 2026-10-10; corrected from
+an earlier typo). The apex
+`petrogrid.xyz` and `www` belong to the main website — keep them pointed
 wherever the site is hosted, never at Fly. Because the demo is a subdomain,
 one CNAME record is all the DNS needs.
 
 1. Register the hostnames with Fly (provisions TLS certificates):
 
    ```sh
-   fly certs add demo.petrochain.xyz
+   fly certs add demo.petrogrid.xyz
    ```
 
    If cert validation needs TXT records, `fly certs add` prints the exact
    `_acme-challenge` records — create them at the registrar, then check with
-   `fly certs check demo.petrochain.xyz`.
+   `fly certs check demo.petrogrid.xyz`.
 
 2. Create this record at the registrar (the CNAME target is the app's
    `fly.dev` name):
@@ -85,7 +86,7 @@ one CNAME record is all the DNS needs.
    |-------|--------|---------------------------|-------|
    | CNAME | `demo` | `chain-reaction.fly.dev.` | demo subdomain → Fly app |
 
-3. Verify propagation, then `https://demo.petrochain.xyz` should serve the
+3. Verify propagation, then `https://demo.petrogrid.xyz` should serve the
    demo. Until DNS propagates, `https://<app>.fly.dev` always works — the
    demo link is a DNS record swap, never a rebuild (§14).
 
