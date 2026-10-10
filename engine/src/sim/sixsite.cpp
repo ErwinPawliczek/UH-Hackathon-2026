@@ -57,7 +57,10 @@ WorldSpec sixSiteSpec() {
         {"METHANE", TankRole::Product, 3.0, 0.7},
         {"ETHANE", TankRole::Product, 5.0, 0.7},
         {"LPG", TankRole::Product, 10.0, 0.7},
-        {"NAPHTHA", TankRole::Product, 10.0, 0.7}}});
+        // NAPHTHA drains 12 of 12.9 t/h to the cracker; the ~0.9 t/h drift
+        // needs ~90 days of headroom above the 70% start (sizing: cover ×
+        // dominant flow, headroom = 30% of that).
+        {"NAPHTHA", TankRole::Product, 22.0, 0.7}}});
 
   spec.sites.push_back(
       {"STEAM_CRACKER", "Steam cracker", 380, 170,
@@ -66,8 +69,11 @@ WorldSpec sixSiteSpec() {
         {"LPG", TankRole::Both, 5.0, 0.7},
         {"NAPHTHA", TankRole::Feed, 60.0, 0.7},
         {"ETHYLENE", TankRole::Product, 10.0, 0.7},
-        {"PROPYLENE", TankRole::Product, 120.0, 0.7},
-        {"BENZENE", TankRole::Product, 120.0, 0.7},
+        // Stranded tanks have no drain, so the design's "120 days of
+        // stranded storage" is headroom above the 70% start, not the whole
+        // tank: cover 400 d × 30% free ≈ 120 days of surplus absorption.
+        {"PROPYLENE", TankRole::Product, 400.0, 0.7},
+        {"BENZENE", TankRole::Product, 400.0, 0.7},
         {"GASOLINE", TankRole::Product, 30.0, 0.7},
         {"FUEL_OIL", TankRole::Product, 30.0, 0.7}}});
 
@@ -99,8 +105,28 @@ WorldSpec sixSiteSpec() {
       {"NAPHTHA", "GAS_PLANT/NAPHTHA", "STEAM_CRACKER/NAPHTHA", 16.0},
       {"ETHYLENE", "STEAM_CRACKER/ETHYLENE", "POLYETHYLENE/ETHYLENE", 65.0},
       {"GASOLINE", "STEAM_CRACKER/GASOLINE", "PORT_TERMINAL/GASOLINE", 8.0},
-      {"FUEL_OIL", "STEAM_CRACKER/FUEL_OIL", "PORT_TERMINAL/FUEL_OIL", 4.0},
+      // FUEL_OIL deliberately moves by TRUCK_TANK (§13 M2): the port's
+      // bunker tank is replenished through procurement, dispatch and road
+      // transport so the logistics layer has a real lane to run.
   };
+
+  // Roads (§4.3): a ring plus the direct cracker-port span. The direct
+  // route and the cracker-polyethylene-port alternative give dispatch a
+  // reroute to find when the direct road breaks (§5.7).
+  spec.roads = {
+      {"GAS_FIELD", "GAS_PLANT", 70.0},
+      {"GAS_PLANT", "STEAM_CRACKER", 70.0},
+      {"STEAM_CRACKER", "POLYETHYLENE", 70.0},
+      {"POLYETHYLENE", "PORT_TERMINAL", 70.0},
+      {"STEAM_CRACKER", "PORT_TERMINAL", 70.0},
+      {"GAS_PLANT", "GAS_GRID", 70.0},
+  };
+
+  // Two tank trucks based at the cracker serve the fuel-oil lane; one truck
+  // keeps up with the 1.8 t/h draw at design, the second covers queueing
+  // and a broken-road detour.
+  spec.fleet = {{"TRUCK_TANK", "STEAM_CRACKER"}, {"TRUCK_TANK", "STEAM_CRACKER"}};
+  spec.contracts = {{"PORT_TERMINAL/FUEL_OIL", "STEAM_CRACKER/FUEL_OIL"}};
 
   spec.stranded_materials = {"PROPYLENE", "BENZENE"};
   return spec;

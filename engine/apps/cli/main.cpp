@@ -29,6 +29,11 @@ struct Snapshot {
   std::vector<float> tank;  // 4 per tank: fill, f, u, h
   std::vector<float> proc;  // rate/design per process
   std::vector<uint8_t> procStatus;
+  std::vector<float> vehPose;   // 5 per vehicle: x, y, dirx, diry, fill
+  std::vector<uint8_t> vehB;    // 2 per vehicle: status, cargo material
+  std::vector<uint32_t> vehOrder;
+  std::vector<uint8_t> edgeOpen;
+  std::vector<float> price;  // per material
 };
 
 // Reads the self-describing snapshot: magic4 + version4 + tick8 + count4,
@@ -61,6 +66,12 @@ bool readSnapshot(const uint8_t* data, uint32_t bytes, Snapshot& out) {
   out.tank = floats(0);
   out.proc = floats(1);
   out.procStatus = bytes8(2);
+  out.vehPose = floats(6);
+  out.vehB = bytes8(7);
+  out.edgeOpen = bytes8(10);
+  out.price = floats(11);
+  out.vehOrder.resize(table[8].scalars);
+  std::memcpy(out.vehOrder.data(), data + table[8].offset, 4 * table[8].scalars);
   return true;
 }
 
@@ -80,26 +91,46 @@ void printReport(const json& world, const Snapshot& snap) {
 
   const json& sites = world.at("sites");
   const json& tanks = world.at("tanks");
-  const json& procs = world.at("processes");
-  for (const auto& site : sites) {
-    const uint32_t sid = site.at("i");
+  // Processes are site-grouped in site order (§4.3 construction), so the
+  // running position across sites is the global process id the snapshot uses.
+  uint32_t p = 0;
+  for (uint32_t sid = 0; sid < sites.size(); ++sid) {
+    const auto& site = sites[sid];
     std::printf("  %s:\n", site.at("name").get<std::string>().c_str());
-    for (const auto& proc : procs) {
-      if (proc.at("site") != sid) continue;
-      const uint32_t p = proc.at("i");
+    for (const auto& proc : site.at("processes")) {
       if (p >= snap.proc.size() || p >= snap.procStatus.size()) continue;
-      std::printf("    %-18s %6.1f%%  %s\n", proc.at("type").get<std::string>().c_str(),
-                  100.0 * snap.proc[p], statusName(snap.procStatus[p]));
+      std::printf("    %-18s %6.1f%%  %s\n",
+                  proc.at("key").get<std::string>().c_str(), 100.0 * snap.proc[p],
+                  statusName(snap.procStatus[p]));
+      ++p;
     }
-    for (const auto& tank : tanks) {
+    for (uint32_t t = 0; t < tanks.size(); ++t) {
+      const auto& tank = tanks[t];
       if (tank.at("site") != sid) continue;
-      const uint32_t t = tank.at("i");
       if (4 * t + 3 >= snap.tank.size()) continue;
       std::printf("    %-18s %6.1f%%  f=%.2f u=%.2f h=%.2f\n",
-                  tank.at("key").get<std::string>().c_str(), 100.0 * snap.tank[4 * t + 0],
-                  snap.tank[4 * t + 1], snap.tank[4 * t + 2], snap.tank[4 * t + 3]);
+                  (tank.at("material").get<std::string>() + " " +
+                   tank.at("role").get<std::string>())
+                      .c_str(),
+                  100.0 * snap.tank[4 * t + 0], snap.tank[4 * t + 1],
+                  snap.tank[4 * t + 2], snap.tank[4 * t + 3]);
     }
   }
+  // M2 fleet and route availability.
+  const uint32_t nVeh = static_cast<uint32_t>(snap.vehPose.size() / 5);
+  for (uint32_t v = 0; v < nVeh && 2 * v + 1 < snap.vehB.size(); ++v) {
+    static const char* vehStatus[] = {"Idle", "ToPickup", "QueueLoad", "Loading",
+                                      "ToDropoff", "QueueUnload", "Unloading"};
+    const uint8_t st = snap.vehB[2 * v];
+    std::printf("    vehicle %u  %-11s x=%6.1f y=%6.1f fill=%.2f%s\n", v,
+                st < 7 ? vehStatus[st] : "?", snap.vehPose[5 * v],
+                snap.vehPose[5 * v + 1], snap.vehPose[5 * v + 4],
+                snap.vehOrder[v] != UINT32_MAX ? "" : "  (no order)");
+  }
+  uint32_t open = 0;
+  for (uint8_t e : snap.edgeOpen) open += e != 0;
+  std::printf("    routes open %u/%zu, price idx[0]=%.3f\n", open,
+              snap.edgeOpen.size(), snap.price.empty() ? 0.f : snap.price[0]);
 }
 
 void printHelp() {

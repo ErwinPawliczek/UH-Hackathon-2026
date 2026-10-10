@@ -26,7 +26,15 @@ export class HttpBackend implements SimBackend {
   }
 
   async create(config: SimConfig): Promise<{ id: string }> {
-    return this.json('/api/sim', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(config) });
+    // The engine's create contract is {seed, adaptation?} (§7.1); the UI's
+    // scenario list is a stub-era demo feature until the demo maps scenarios
+    // onto queued engine events (M4+). Passing scenario through gets the
+    // config rejected — the engine refuses unknown keys on purpose.
+    return this.json('/api/sim', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ seed: config.seed }),
+    });
   }
 
   async world(id: string): Promise<WorldSpec> {

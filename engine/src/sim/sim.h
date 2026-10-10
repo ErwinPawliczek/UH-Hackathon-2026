@@ -15,10 +15,14 @@
 #define CRX_SIM_SIM_H
 
 #include "sim/control.h"
+#include "sim/adaptation.h"
+#include "sim/dispatch.h"
 #include "sim/events.h"
 #include "sim/pipelines.h"
 #include "sim/production.h"
+#include "sim/procurement.h"
 #include "sim/recorder.h"
+#include "sim/routes.h"
 #include "sim/signals.h"
 #include "sim/state.h"
 #include "sim/world.h"
@@ -73,6 +77,10 @@ class Sim {
   std::shared_ptr<const World> world_;
   State state_;
   Recorder rec_;
+  // Derived data (determinism rule 3): rebuilt from World + edge_open, so
+  // forks may copy or rebuild it — the hash excludes it.
+  PathCache paths_;
+  MarketParams market_params_;
 };
 
 }  // namespace sim

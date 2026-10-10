@@ -118,6 +118,7 @@ struct Catalog {
   int findMaterial(const std::string& key) const;
   int findProcess(const std::string& key) const;
   int findPreset(const std::string& key) const;
+  int findVehicle(const std::string& key) const;
 };
 
 // Validates cross-checks only (shapes are already checked at parse time):

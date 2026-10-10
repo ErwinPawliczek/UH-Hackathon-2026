@@ -8,6 +8,7 @@
 // the machine, except that units down stop them too.
 #include "sim/control.h"
 
+#include "sim/adaptation.h"
 #include "sim/events.h"
 #include "sim/recorder.h"
 
@@ -126,8 +127,15 @@ void stepControl(const World& world, State& state, const std::vector<TankSignals
       double stock = std::numeric_limits<double>::infinity();
       for (const TankId t : views[p].feeds)
         stock = std::min(stock, state.tank[t.v].level_t);
+      const double prev_rate = ps.rate_t_h;  // last tick's rate, for the dry edge
       ps.status = ProcStatus::Running;
       ps.rate_t_h = std::isinf(stock) ? demand : std::min(demand, stock / dt_h);
+      // §5.8: a sink whose feed ran dry learns caution too — the empty tank
+      // stopped its (boundary) process. Falling edge only, so one bump per
+      // dry episode, matching the normal machine's Shutdown path.
+      if (prev_rate > kRateEps && ps.rate_t_h <= kRateEps)
+        for (const TankId t : views[p].feeds)
+          if (signals[t.v].f <= kRateEps) onDryFeed(world, state, t.v);
       d = {ps.rate_t_h, ps.status, demand, 1.0, demand};
       continue;
     }
@@ -168,6 +176,9 @@ void stepControl(const World& world, State& state, const std::vector<TankSignals
             ps.status = ProcStatus::Shutdown;
             ps.rate_t_h = rampToward(ps.rate_t_h, 0.0, proc.design_rate_t_h,
                                      type.ramp_per_h, dt_h);
+            // §5.8: every feed tank at the floor learns caution from this.
+            for (const TankId t : views[p].feeds)
+              if (signals[t.v].f <= kRateEps) onDryFeed(world, state, t.v);
           } else {
             ps.status = ProcStatus::Running;
             ps.rate_t_h = rampToward(ps.rate_t_h, desired, proc.design_rate_t_h,

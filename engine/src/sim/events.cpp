@@ -73,6 +73,19 @@ bool queueEvent(const World& world, const std::string& body, State& state, std::
     def.type = EventDef::Type::DemandShock;
   } else if (type == "supply_shock") {
     def.type = EventDef::Type::SupplyShock;
+  } else if (type == "route_break") {
+    def.type = EventDef::Type::RouteBreak;
+    if (!j.contains("site2") ||
+        (!j["site2"].is_number_unsigned() && !j["site2"].is_string())) {
+      error = "route_break: need 'site' and 'site2' (site keys or indices)";
+      return false;
+    }
+    const int s2 = resolveSite(world, j["site2"]);
+    if (s2 < 0) {
+      error = "route_break: unresolvable site2";
+      return false;
+    }
+    def.site2 = static_cast<uint32_t>(s2);
   } else {
     error = "event: unknown type '" + type + "'";
     return false;
@@ -82,7 +95,12 @@ bool queueEvent(const World& world, const std::string& body, State& state, std::
     error = "event: missing 'site'";
     return false;
   }
-  def.site = static_cast<uint32_t>(resolveSite(world, j["site"]));
+  const int site = resolveSite(world, j["site"]);
+  if (site < 0) {
+    error = "event: unresolvable site";
+    return false;
+  }
+  def.site = static_cast<uint32_t>(site);
   if (j.contains("unit") && j["unit"].is_string())
     def.unit = resolveUnit(world, static_cast<int>(def.site), j["unit"].get<std::string>());
   if (j.contains("multiplier") && j["multiplier"].is_number())
@@ -150,6 +168,31 @@ void expireOutage(const World& world, State& state, Recorder& rec, const EventDe
     }
 }
 
+// Toggles every edge between two sites' nodes (all modes) and bumps the
+// graph version so path caches rebuild (§5.9 route_break).
+void setSpanEdges(const World& world, State& state, const EventDef& def, bool open) {
+  if (def.site2 >= world.sites.size()) return;
+  for (uint32_t e = 0; e < world.edges.size(); ++e) {
+    const RouteEdge& edge = world.edges[e];
+    const uint32_t na = world.sites[def.site].node[modeIndex(edge.mode)];
+    const uint32_t nb = world.sites[def.site2].node[modeIndex(edge.mode)];
+    const bool spans = (edge.a == na && edge.b == nb) || (edge.a == nb && edge.b == na);
+    if (spans && state.edge_open[e] != (open ? 1 : 0)) {
+      state.edge_open[e] = open ? 1 : 0;
+      state.graph_version += 1;
+    }
+  }
+}
+
+// Another active route_break on the same span forbids reopening it yet.
+bool spanStillHeld(const State& state, const EventDef& def) {
+  for (const EventDef& d : state.active) {
+    if (d.type != EventDef::Type::RouteBreak || &d == &def) continue;
+    if (d.site == def.site && d.site2 == def.site2 && d.end_tick > state.tick) return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 void stepEvents(const World& world, State& state, Recorder& rec) {
@@ -163,10 +206,18 @@ void stepEvents(const World& world, State& state, Recorder& rec) {
   // Apply outage effects once (the applied flag makes this idempotent).
   for (EventDef& def : state.active) {
     if (def.applied) continue;
-    if (def.type != EventDef::Type::UnitOutage && def.type != EventDef::Type::SiteShutdown)
+    if (def.type != EventDef::Type::UnitOutage && def.type != EventDef::Type::SiteShutdown &&
+        def.type != EventDef::Type::RouteBreak)
       continue;
     def.applied = true;
-    applyOutage(world, state, rec, def);
+    if (def.type == EventDef::Type::RouteBreak) {
+      setSpanEdges(world, state, def, false);
+      logEvent(rec, state.tick, "route_break", world.sites[def.site].key, "",
+               world.sites[def.site].key + " - " + world.sites[def.site2].key +
+                   ": route closed for repairs");
+    } else {
+      applyOutage(world, state, rec, def);
+    }
   }
 
   // Expire finished events, restoring trains. The tick guard matters: the
@@ -176,6 +227,12 @@ void stepEvents(const World& world, State& state, Recorder& rec) {
     if ((def.type == EventDef::Type::UnitOutage || def.type == EventDef::Type::SiteShutdown) &&
         def.end_tick <= state.tick)
       expireOutage(world, state, rec, def);
+  // Route breaks reopen their span on expiry, unless a second break on the
+  // same span is still active.
+  for (const EventDef& def : state.active)
+    if (def.type == EventDef::Type::RouteBreak && def.end_tick <= state.tick &&
+        !spanStillHeld(state, def))
+      setSpanEdges(world, state, def, true);
   state.active.erase(std::remove_if(state.active.begin(), state.active.end(),
                                     [&](const EventDef& d) { return d.end_tick <= state.tick; }),
                      state.active.end());

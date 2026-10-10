@@ -7,6 +7,7 @@
 #include "sim/world.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace crx {
 namespace sim {
@@ -215,6 +216,70 @@ bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, Wo
     pl.to = TankId{static_cast<uint32_t>(to)};
     pl.material = static_cast<uint16_t>(mid);
     pl.cap_t_h = ps.cap_t_h;
+  }
+
+  // Pass 4 — route graph (§4.3/§5.7): one road node per site, straight
+  // polylines for the declared roads, bays per site per mode, and the
+  // resolved fleet and contracts. Generated worlds (M3) add river/sea nodes
+  // and wiggled polylines through the same fields.
+  out.nodes.reserve(out.sites.size());
+  for (size_t i = 0; i < out.sites.size(); ++i) {
+    Site& s = out.sites[i];
+    RouteNode n;
+    n.x_km = s.x_km;
+    n.y_km = s.y_km;
+    n.site = static_cast<int>(i);
+    s.node[modeIndex(crx::Mode::Road)] = static_cast<uint32_t>(out.nodes.size());
+    out.nodes.push_back(n);
+  }
+  for (Site& s : out.sites) {
+    s.bays[modeIndex(crx::Mode::Road)] = static_cast<uint8_t>(spec.road_bays);
+    s.bays[modeIndex(crx::Mode::River)] = static_cast<uint8_t>(spec.river_bays);
+    s.bays[modeIndex(crx::Mode::Sea)] = static_cast<uint8_t>(spec.sea_bays);
+  }
+  for (const RoadSpec& rs : spec.roads) {
+    const int a = out.findSite(rs.from), b = out.findSite(rs.to);
+    if (a < 0 || b < 0 || a == b)
+      return fail("road " + std::string(rs.from) + "→" + rs.to + ": unknown or same site");
+    if (rs.speed_kmh <= 0)
+      return fail("road " + std::string(rs.from) + "→" + rs.to + " needs speed_kmh > 0");
+    const uint32_t na = out.sites[static_cast<size_t>(a)].node[modeIndex(crx::Mode::Road)];
+    const uint32_t nb = out.sites[static_cast<size_t>(b)].node[modeIndex(crx::Mode::Road)];
+    RouteEdge e;
+    e.a = na;
+    e.b = nb;
+    e.mode = crx::Mode::Road;
+    e.length_km = std::hypot(out.sites[static_cast<size_t>(a)].x_km -
+                                 out.sites[static_cast<size_t>(b)].x_km,
+                             out.sites[static_cast<size_t>(a)].y_km -
+                                 out.sites[static_cast<size_t>(b)].y_km);
+    e.speed_kmh = rs.speed_kmh;
+    e.polyline = Range<uint32_t>{
+        static_cast<uint32_t>(out.polyline_xy.size() / 2), 2};
+    out.polyline_xy.push_back(out.nodes[na].x_km);
+    out.polyline_xy.push_back(out.nodes[na].y_km);
+    out.polyline_xy.push_back(out.nodes[nb].x_km);
+    out.polyline_xy.push_back(out.nodes[nb].y_km);
+    out.edges.push_back(e);
+  }
+  for (const FleetSpec& fs : spec.fleet) {
+    const int cls = catalog.findVehicle(fs.vehicle_class);
+    const int home = out.findSite(fs.home_site);
+    if (cls < 0) return fail("fleet: unknown vehicle class " + std::string(fs.vehicle_class));
+    if (home < 0) return fail("fleet: unknown home site " + std::string(fs.home_site));
+    World::FleetEntry f;
+    f.cls = static_cast<uint16_t>(cls);
+    f.home = SiteId{static_cast<uint32_t>(home)};
+    out.fleet.push_back(f);
+  }
+  for (const ContractSpec& cs : spec.contracts) {
+    const int buyer = out.findTank(cs.buyer), seller = out.findTank(cs.seller);
+    if (buyer < 0 || seller < 0)
+      return fail("contract " + std::string(cs.buyer) + "←" + cs.seller + ": unknown tank");
+    World::Contract c;
+    c.buyer = TankId{static_cast<uint32_t>(buyer)};
+    c.seller = TankId{static_cast<uint32_t>(seller)};
+    out.contracts.push_back(c);
   }
 
   return true;

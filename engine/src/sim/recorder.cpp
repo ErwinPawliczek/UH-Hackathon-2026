@@ -126,6 +126,43 @@ uint64_t hashState(const World& world, const State& state) {
   h.mixF64(state.last_production_index);
   h.mix(&state.random_failures, sizeof state.random_failures);
   for (const double r : state.rate_override) h.mixF64(r);
+  // M2 logistics: edge availability, market indices, vehicles and orders
+  // are all mutable state that must fork exactly (determinism rules 4 and 6).
+  h.mix(state.edge_open.data(), state.edge_open.size());
+  for (const double p : state.price_index) h.mixF64(p);
+  h.mix(&state.adaptation, sizeof state.adaptation);
+  for (const VehicleState& v : state.vehicle) {
+    h.mix(&v.status, sizeof v.status);
+    h.mixU32(v.order);
+    h.mixU32(v.cargo_material);
+    h.mixF64(v.cargo_t);
+    h.mixU32(v.at_node);
+    h.mixU32(v.leg);
+    h.mixU32(v.edge);
+    h.mixF64(v.edge_pos_km);
+    h.mixF64(v.x_km);
+    h.mixF64(v.y_km);
+    h.mixF64(v.dir_x);
+    h.mixF64(v.dir_y);
+    h.mixU64(v.queue_since_tick);
+    h.mixF64(v.moved_t);
+    h.mixU32(v.route_nodes.size());
+    for (const uint32_t n : v.route_nodes) h.mixU32(n);
+  }
+  for (const Order& o : state.order) {
+    h.mixU32(o.from);
+    h.mixU32(o.to);
+    h.mixU32(o.material);
+    h.mixF64(o.qty_t);
+    h.mixF64(o.price);
+    h.mixF64(o.freight_usd);
+    h.mixF64(o.urgency);
+    h.mixU32(o.cls);
+    h.mixU32(o.vehicle);
+    h.mixU64(o.created_tick);
+    h.mixU64(o.eta_tick);
+    h.mix(&o.status, sizeof o.status);
+  }
   return finish(h);
 }
 

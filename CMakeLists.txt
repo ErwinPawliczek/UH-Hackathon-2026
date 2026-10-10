@@ -16,11 +16,15 @@ FetchContent_MakeAvailable(json doctest)
 add_library(crx_engine STATIC
   engine/src/api.cpp
   engine/src/catalog/catalog.cpp
+  engine/src/sim/adaptation.cpp
   engine/src/sim/control.cpp
+  engine/src/sim/dispatch.cpp
   engine/src/sim/events.cpp
   engine/src/sim/pipelines.cpp
   engine/src/sim/production.cpp
+  engine/src/sim/procurement.cpp
   engine/src/sim/recorder.cpp
+  engine/src/sim/routes.cpp
   engine/src/sim/signals.cpp
   engine/src/sim/sim.cpp
   engine/src/sim/sixsite.cpp
@@ -44,6 +48,10 @@ add_test(NAME core COMMAND crx_tests)
 add_executable(crx_sim_tests engine/tests/test_sim.cpp)
 target_link_libraries(crx_sim_tests PRIVATE crx_engine doctest::doctest)
 add_test(NAME sim COMMAND crx_sim_tests)
+
+add_executable(crx_logistics_tests engine/tests/test_logistics.cpp)
+target_link_libraries(crx_logistics_tests PRIVATE crx_engine doctest::doctest)
+add_test(NAME logistics COMMAND crx_logistics_tests)
 
 # ---- crx-server: HTTP host over the C ABI (§7.4) ----
 FetchContent_Declare(httplib
