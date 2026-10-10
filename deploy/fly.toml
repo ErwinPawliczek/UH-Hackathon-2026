@@ -1,0 +1,30 @@
+# Fly.io deployment for the crx-server (§11, §15.3).
+#
+# Internal port: 8080 — the binary listens on $CRX_PORT (set below); Fly's
+# edge terminates TLS on 443/80 and forwards to internal_port.
+#
+# Deploy from the repo root so the Docker build context sees engine/, apps/
+# and web/ (paths are relative to this file for the Dockerfile):
+#   fly deploy . --config deploy/fly.toml
+# See README.md for the full steps and the custom-domain DNS records.
+
+app = "chain-reaction"          # change to the real app name after `fly apps create`
+primary_region = "ams"          # Amsterdam; change to a region near the demo
+
+[build]
+  dockerfile = "deploy/Dockerfile"
+
+[env]
+  CRX_PORT = "8080"
+  CRX_WEB_DIR = "/app/web/dist"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "suspend"   # suspend keeps demo cold starts fast
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"                   # headroom for 16 in-memory sessions

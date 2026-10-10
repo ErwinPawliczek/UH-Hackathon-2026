@@ -1,0 +1,5 @@
+# Keep the Docker build context small: local artifacts never belong in the image.
+.git
+build/
+web/node_modules/
+web/dist/

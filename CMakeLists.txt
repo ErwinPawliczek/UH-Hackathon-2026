@@ -27,3 +27,22 @@ enable_testing()
 add_executable(crx_tests engine/tests/test_core.cpp)
 target_link_libraries(crx_tests PRIVATE crx_engine doctest::doctest)
 add_test(NAME core COMMAND crx_tests)
+
+# ---- crx-server: HTTP host over the C ABI (§7.4) ----
+FetchContent_Declare(httplib
+  URL https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.18.7.tar.gz)
+FetchContent_MakeAvailable(httplib)
+
+add_library(crx_server_core STATIC
+  apps/server/crx_server.cpp)
+target_include_directories(crx_server_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/apps/server)
+target_link_libraries(crx_server_core PUBLIC crx_engine httplib::httplib)
+target_compile_options(crx_server_core PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
+
+add_executable(crx-server apps/server/main.cpp)
+target_link_libraries(crx-server PRIVATE crx_server_core)
+
+add_executable(crx_server_tests apps/server/tests/test_server.cpp)
+target_link_libraries(crx_server_tests PRIVATE crx_server_core doctest::doctest)
+add_test(NAME server COMMAND crx_server_tests)
