@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: #020617;
+  color: #e2e8f0;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  overflow: hidden;
+}
+
+.panel {
+  @apply rounded-lg border border-slate-700/80 bg-slate-900/80 backdrop-blur-sm shadow-lg;
+}
+
+.btn {
+  @apply px-2 py-1 rounded border border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed;
+}
+
+.btn-active {
+  @apply bg-cyan-700 border-cyan-500 text-white;
+}
+
+.field {
+  @apply bg-slate-800 border border-slate-600 rounded px-1.5 py-1 text-xs text-slate-100;
+}

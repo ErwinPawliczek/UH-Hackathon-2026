@@ -24,12 +24,6 @@ export class StubBackend implements SimBackend {
     return `stub:${s.seed}:${s.scenario}`;
   }
 
-  private static parse(id: string): StubSession | undefined {
-    const [kind, seed, ...scenario] = id.split(':');
-    if (kind !== 'stub') return undefined;
-    return { seed: Number(seed), scenario: scenario.join(':'), tick: 0 };
-  }
-
   private session(id: string): StubSession {
     const s = this.sessions.get(id);
     if (s === undefined) throw new Error(`no such stub session: ${id}`);

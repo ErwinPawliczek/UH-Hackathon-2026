@@ -199,6 +199,41 @@ export function sampleHeight(grid: TerrainGrid, xKm: number, yKm: number): numbe
   return top * (1 - ty) + bottom * ty;
 }
 
+/** Flattened snapshot index ranges for one site (site-major layout, §7.3). */
+export interface SiteRanges {
+  procStart: number;
+  procCount: number;
+  unitStart: number;
+  unitCount: number;
+  tankStart: number;
+  tankCount: number;
+}
+
+/**
+ * Per-site index ranges into the flattened snapshot arrays. The stub encoder
+ * flattens sites in order (processes site-major, then units, then tanks), and
+ * so does the engine — inspectors slice arrays with these ranges.
+ */
+export function siteRanges(world: WorldSpec): SiteRanges[] {
+  const tankBySite: number[] = [];
+  for (const t of world.tanks) tankBySite[t.site] = (tankBySite[t.site] ?? 0) + 1;
+  const out: SiteRanges[] = [];
+  let proc = 0;
+  let unit = 0;
+  let tank = 0;
+  for (let i = 0; i < world.sites.length; i++) {
+    const site = world.sites[i];
+    const procCount = site.processes.length;
+    const unitCount = site.processes.reduce((n, p) => n + p.units.length, 0);
+    const tankCount = tankBySite[i] ?? 0;
+    out.push({ procStart: proc, procCount, unitStart: unit, unitCount, tankStart: tank, tankCount });
+    proc += procCount;
+    unit += unitCount;
+    tank += tankCount;
+  }
+  return out;
+}
+
 function mulberry32(seed: number) {
   let a = seed >>> 0;
   return () => {
@@ -265,8 +300,8 @@ function makeTerrain(seed: number): TerrainGrid {
       return top * (1 - ty) + bottom * ty;
     };
   };
-  const base = octave(90, 1);
-  const detail = octave(30, 1);
+  const base = octave(90);
+  const detail = octave(30);
 
   const height = new Float32Array(cols * rows);
   for (let r = 0; r < rows; r++) {
