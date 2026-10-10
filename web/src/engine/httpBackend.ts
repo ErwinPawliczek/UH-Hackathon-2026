@@ -60,7 +60,11 @@ export class HttpBackend implements SimBackend {
   }
 
   async events(id: string, sinceSeq: number): Promise<SimEvent[]> {
-    return this.json(`/api/sim/${encodeURIComponent(id)}/events?since=${sinceSeq}`);
+    // §7.4 `since` is an unsigned seq. The store's "nothing fetched yet"
+    // sentinel (-1, which lets the 0-based stub log include seq 0) must not
+    // reach the wire — floor it at 0.
+    const since = Math.max(0, Math.floor(sinceSeq));
+    return this.json(`/api/sim/${encodeURIComponent(id)}/events?since=${since}`);
   }
 
   async kpis(id: string): Promise<number[]> {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { routeLength, routePointAt, sampleHeight, stubWorld, VEHICLE_CLASSES, MATERIALS } from './world';
+import { resolveWorld, routeLength, routePointAt, sampleHeight, siteRanges, stubWorld, VEHICLE_CLASSES, MATERIALS } from './world';
 import { stubVehicleState } from './stub';
 
 describe('stubWorld', () => {
@@ -118,5 +118,107 @@ describe('materials palette', () => {
     const w = stubWorld(1);
     for (const t of w.tanks) expect(MATERIALS).toContain(t.material);
     for (const v of w.vehicles) expect(MATERIALS).toContain(v.cargo);
+  });
+});
+
+describe('siteRanges', () => {
+  it('collects tanks per site even in round-robin (non site-major) order', () => {
+    // The engine stub orders tanks site = i % 4; snapshot slots join by index.
+    const w = stubWorld(42);
+    const roundRobin = {
+      ...w,
+      tanks: w.tanks.map((t, i) => ({ ...t, site: i % w.sites.length })),
+    };
+    const ranges = siteRanges(roundRobin);
+    expect(ranges).toHaveLength(w.sites.length);
+    ranges.forEach((r, site) => {
+      expect(r.tankIndices.length).toBeGreaterThan(0);
+      for (const idx of r.tankIndices) expect(roundRobin.tanks[idx].site).toBe(site);
+    });
+    // every tank is owned by exactly one site
+    const all = ranges.flatMap((r) => r.tankIndices).sort((a, b) => a - b);
+    expect(all).toEqual([...Array(roundRobin.tanks.length).keys()]);
+  });
+
+  it('keeps contiguous site-major worlds (the stub world) slice-compatible', () => {
+    const ranges = siteRanges(stubWorld(42));
+    expect(ranges[0].tankIndices).toEqual([0]);
+    expect(ranges[1].tankIndices).toEqual([1, 2]);
+    expect(ranges[2].tankIndices).toEqual([3, 4, 5]);
+    expect(ranges[3].tankIndices).toEqual([6, 7]);
+  });
+});
+
+describe('resolveWorld', () => {
+  // The M0 stub engine's actual /world reply shape (apps/server over engine/src/api.cpp).
+  const engineStubWorld = (overrides: Record<string, unknown> = {}): unknown => ({
+    world: 'stub',
+    dt_h: 0.25,
+    materials: [...MATERIALS],
+    sites: [
+      { i: 0, name: 'Oil Field', x: 120.0, y: 260.0 },
+      { i: 1, name: 'Refinery', x: 260.0, y: 210.0 },
+      { i: 2, name: 'Steam Cracker', x: 340.0, y: 150.0 },
+      { i: 3, name: 'Port Terminal', x: 480.0, y: 90.0 },
+    ],
+    tanks: [
+      { i: 0, site: 0, material: 'CRUDE' },
+      { i: 1, site: 1, material: 'METHANE' },
+      { i: 2, site: 2, material: 'NAPHTHA' },
+      { i: 3, site: 3, material: 'DIESEL' },
+      { i: 4, site: 0, material: 'BENZENE' },
+      { i: 5, site: 1, material: 'CHLORINE' },
+      { i: 6, site: 2, material: 'PE' },
+      { i: 7, site: 3, material: 'PS' },
+    ],
+    ...overrides,
+  });
+
+  it('passes a full WorldSpec through untouched', () => {
+    const full = stubWorld(7);
+    expect(resolveWorld(full, 7)).toBe(full);
+  });
+
+  it('keeps stub geometry and applies engine facts by index', () => {
+    const w = resolveWorld(engineStubWorld(), 42);
+    const base = stubWorld(42);
+    // engine site facts win
+    expect(w.sites.map((s) => s.name)).toEqual(base.sites.map((s) => s.name));
+    expect(w.sites[3].x).toBe(480.0);
+    // engine tank assignments win...
+    expect(w.tanks[1].material).toBe('METHANE');
+    expect(w.tanks[4].site).toBe(0);
+    // ...while stub tank fields the engine does not publish survive
+    expect(w.tanks[0].capacityT).toBe(base.tanks[0].capacityT);
+    expect(w.tanks[0].role).toBe(base.tanks[0].role);
+    // static geometry is the seeded stub world
+    expect(Array.from(w.terrain.height)).toEqual(Array.from(base.terrain.height));
+    expect(w.routes).toHaveLength(base.routes.length);
+    expect(w.vehicles).toHaveLength(base.vehicles.length);
+    expect(w.pipelines).toHaveLength(base.pipelines.length);
+  });
+
+  it('falls back to the stub world on unusable payloads', () => {
+    const base = stubWorld(42);
+    for (const junk of [null, undefined, 'garbage', 3, { sites: 'nope' }]) {
+      const w = resolveWorld(junk, 42);
+      expect(Array.from(w.terrain.height)).toEqual(Array.from(base.terrain.height));
+      expect(w.sites).toHaveLength(base.sites.length);
+    }
+  });
+
+  it('ignores engine facts that would corrupt the render', () => {
+    const w = resolveWorld(
+      engineStubWorld({
+        sites: [{ i: 9, name: 'Ghost', x: 9999, y: 9999 }, { i: 0, name: 'Renamed' }],
+        tanks: [{ i: 99, site: 0, material: 'CRUDE' }, { i: 0, site: 99, material: 'UNOBTAINIUM' }],
+      }),
+      42,
+    );
+    expect(w.sites).toHaveLength(4);
+    expect(w.sites.map((s) => s.name)).toContain('Renamed'); // applied, no phantom site added
+    expect(w.sites.map((s) => s.name)).not.toContain('Ghost');
+    expect(w.tanks[0].site).toBe(0); // out-of-range site keeps the stub value
+    expect(w.tanks[0].material).not.toBe('UNOBTAINIUM'); // off-palette material keeps the stub value
   });
 });
