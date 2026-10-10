@@ -1,0 +1,23 @@
+# Presentation site at petrogrid.xyz. The simulation app is a separate Fly app (see deploy/).
+# Deploy from this folder:  fly deploy
+
+app = "petrogrid-site"
+primary_region = "dfw"
+
+[http_service]
+  internal_port = 80
+  force_https = true
+  auto_stop_machines = "off"     # stays up through judging; no cold start
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/healthz"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
