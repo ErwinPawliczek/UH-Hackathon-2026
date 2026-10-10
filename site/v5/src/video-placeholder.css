@@ -1,0 +1,8 @@
+:root { --video-surface: oklch(0.19 0 0); --video-outline: oklch(0.35 0 0); --video-ink: oklch(0.94 0 0); }
+.identity-video { min-height: max(100svh, 960px); }
+.hex-video-fill { fill: var(--video-surface); stroke: var(--video-surface); stroke-width: 1; }
+.hex-video-edge { fill: none; stroke: var(--video-outline); stroke-width: 1.5; }
+.hex-video-symbol { fill: none; stroke: var(--video-outline); stroke-width: 1.5; }
+.hex-video-play { fill: var(--video-ink); }
+.hex-video-label { fill: var(--video-ink); font-family: "Instrument Sans", sans-serif; font-size: 15px; letter-spacing: 0; }
+@media (max-width: 600px) { .identity-video { min-height: max(100svh, 720px); } }
