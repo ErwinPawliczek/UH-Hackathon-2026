@@ -22,6 +22,6 @@ To publish a new version, add a folder (`v3/`), point the `COPY` line in `Docker
 
 ## Editing
 
-Colours, type and spacing come from `/design/v1/design-system.md`. The demo link is the `DEMO_URL`
+Colours, type and spacing come from `/design/v2/design-system.md`. The demo link is the `DEMO_URL`
 constant near the top of the script in `index.html`. Every figure on the page is tied to a numbered
 entry in the Sources section; keep them together.
