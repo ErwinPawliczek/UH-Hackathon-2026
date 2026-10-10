@@ -1,20 +1,115 @@
-// crx-cli — native driver for the engine: run, dump, bench, oracle (§11).
+// crx-cli — native driver for the engine: run, dump (§11).
+//
+// `run` steps the sim and prints a report every --report ticks: per site,
+// process rate as a share of design with the operating status, and tank
+// levels with their f/u/h signals — the M1 acceptance surface (§13): run
+// it during a cracker outage and watch downstream starve while upstream
+// backs up.
 
 #include "crx/api.h"
 
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
+
+using json = nlohmann::json;
 
 namespace {
+
+struct Snapshot {
+  uint64_t tick = 0;
+  std::vector<float> tank;  // 4 per tank: fill, f, u, h
+  std::vector<float> proc;  // rate/design per process
+  std::vector<uint8_t> procStatus;
+};
+
+// Reads the self-describing snapshot: magic4 + version4 + tick8 + count4,
+// then count × {scalars4, offset4} entries.
+bool readSnapshot(const uint8_t* data, uint32_t bytes, Snapshot& out) {
+  if (bytes < 20 || std::memcmp(data, "CRXS", 4) != 0) return false;
+  uint32_t version = 0, nArrays = 0;
+  std::memcpy(&version, data + 4, 4);
+  std::memcpy(&out.tick, data + 8, 8);
+  std::memcpy(&nArrays, data + 16, 4);
+  if (version != 1 || nArrays != 12) return false;
+
+  struct Entry {
+    uint32_t scalars, offset;
+  };
+  std::vector<Entry> table(nArrays);
+  for (uint32_t a = 0; a < nArrays; ++a) {
+    std::memcpy(&table[a].scalars, data + 20 + 8 * a, 4);
+    std::memcpy(&table[a].offset, data + 20 + 8 * a + 4, 4);
+  }
+  auto floats = [&](uint32_t a) {
+    std::vector<float> v(table[a].scalars);
+    std::memcpy(v.data(), data + table[a].offset, 4 * table[a].scalars);
+    return v;
+  };
+  auto bytes8 = [&](uint32_t a) {
+    return std::vector<uint8_t>(data + table[a].offset,
+                                data + table[a].offset + table[a].scalars);
+  };
+  out.tank = floats(0);
+  out.proc = floats(1);
+  out.procStatus = bytes8(2);
+  return true;
+}
+
+const char* statusName(uint8_t status) {
+  switch (status) {
+    case 0: return "Running";
+    case 1: return "HoldMin";
+    case 2: return "Shutdown";
+    case 3: return "Restarting";
+    default: return "?";
+  }
+}
+
+void printReport(const json& world, const Snapshot& snap) {
+  const double hours = static_cast<double>(snap.tick) * 0.25;
+  std::printf("== tick %llu  (%.1f h) ==\n", static_cast<unsigned long long>(snap.tick), hours);
+
+  const json& sites = world.at("sites");
+  const json& tanks = world.at("tanks");
+  const json& procs = world.at("processes");
+  for (const auto& site : sites) {
+    const uint32_t sid = site.at("i");
+    std::printf("  %s:\n", site.at("name").get<std::string>().c_str());
+    for (const auto& proc : procs) {
+      if (proc.at("site") != sid) continue;
+      const uint32_t p = proc.at("i");
+      if (p >= snap.proc.size() || p >= snap.procStatus.size()) continue;
+      std::printf("    %-18s %6.1f%%  %s\n", proc.at("type").get<std::string>().c_str(),
+                  100.0 * snap.proc[p], statusName(snap.procStatus[p]));
+    }
+    for (const auto& tank : tanks) {
+      if (tank.at("site") != sid) continue;
+      const uint32_t t = tank.at("i");
+      if (4 * t + 3 >= snap.tank.size()) continue;
+      std::printf("    %-18s %6.1f%%  f=%.2f u=%.2f h=%.2f\n",
+                  tank.at("key").get<std::string>().c_str(), 100.0 * snap.tank[4 * t + 0],
+                  snap.tank[4 * t + 1], snap.tank[4 * t + 2], snap.tank[4 * t + 3]);
+    }
+  }
+}
 
 void printHelp() {
   std::printf(
       "crx-cli — Chain Reaction engine driver\n"
       "  version                     print engine version\n"
-      "  run   [--seed N --ticks N]  step the sim, print tick, hash and KPIs\n"
-      "  dump  [--seed N --ticks N --out F]  write the binary snapshot to F\n");
+      "  run   [--seed N --ticks N --report N] [--event '<json>' ...]\n"
+      "                              step the sim, report sites, tanks and rates\n"
+      "                              every N ticks (default 96); inject §5.9 events\n"
+      "                              via --event (repeatable, applied before tick 0)\n"
+      "  dump  [--seed N --ticks N --out F] [--event '<json>' ...]\n"
+      "                              write the binary snapshot to F\n");
 }
 
 }  // namespace
@@ -32,36 +127,64 @@ int main(int argc, char** argv) {
 
   uint64_t seed = 42;
   uint32_t ticks = 96 * 10;
+  uint32_t report = 96;
   const char* out = "snapshot.bin";
+  std::vector<std::string> events;  // --event JSON, repeatable, applied in order
   for (int i = 2; i + 1 < argc; i += 2) {
     if (std::strcmp(argv[i], "--seed") == 0) {
       seed = std::strtoull(argv[i + 1], nullptr, 10);
     } else if (std::strcmp(argv[i], "--ticks") == 0) {
       ticks = std::strtoul(argv[i + 1], nullptr, 10);
+    } else if (std::strcmp(argv[i], "--report") == 0) {
+      report = std::strtoul(argv[i + 1], nullptr, 10);
     } else if (std::strcmp(argv[i], "--out") == 0) {
       out = argv[i + 1];
+    } else if (std::strcmp(argv[i], "--event") == 0) {
+      events.push_back(argv[i + 1]);
     }
   }
+  if (report == 0) report = ticks;  // single report at the end
 
-  char cfg[64];
-  std::snprintf(cfg, sizeof cfg, "{\"seed\":%llu}",
-                static_cast<unsigned long long>(seed));
-  crx_sim* sim = crx_create(cfg);
+  const std::string cfg = "{\"seed\":" + std::to_string(seed) + "}";
+  crx_sim* sim = crx_create(cfg.c_str());
   if (sim == nullptr) {
     std::fprintf(stderr, "crx_create failed\n");
     return 1;
   }
+  for (const std::string& ev : events) {
+    const char* reply = crx_command(sim, ev.c_str());
+    if (std::strstr(reply, "\"ok\":true") == nullptr) {
+      std::fprintf(stderr, "event rejected: %s\n", reply);
+      return 1;
+    }
+    std::printf("event: %s\n", ev.c_str());
+  }
 
+  const json world = json::parse(crx_world_json(sim));
   int rc = 0;
   if (cmd == "run") {
-    crx_step(sim, ticks);
-    uint32_t n = 0;
-    const double* k = crx_kpis(sim, &n);
-    std::printf("tick %llu hash %016llx kpis",
-                static_cast<unsigned long long>(crx_tick(sim)),
+    uint32_t done = 0;
+    while (done < ticks) {
+      const uint32_t chunk = std::min(report, ticks - done);
+      crx_step(sim, chunk);
+      done += chunk;
+      uint32_t bytes = 0;
+      Snapshot snap;
+      const uint8_t* raw = crx_snapshot(sim, &bytes);  // sequenced: bytes out first
+      if (!readSnapshot(raw, bytes, snap)) {
+        std::fprintf(stderr, "snapshot read failed\n");
+        rc = 1;
+        break;
+      }
+      printReport(world, snap);
+      uint32_t nk = 0;
+      const double* k = crx_kpis(sim, &nk);
+      std::printf("    KPIs: service=%.4f unmet=%.1ft unmet$=%.0f prod_idx=%.4f "
+                  "shutdown_h=%.1f stockouts=%.0f freight$=%.0f energy$=%.0f\n\n",
+                  k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7]);
+    }
+    std::printf("final: tick %llu hash %016llx\n", static_cast<unsigned long long>(crx_tick(sim)),
                 static_cast<unsigned long long>(crx_state_hash(sim)));
-    for (uint32_t i = 0; i < n; ++i) std::printf(" %.6f", k[i]);
-    std::printf("\n");
   } else if (cmd == "dump") {
     crx_step(sim, ticks);
     uint32_t bytes = 0;
