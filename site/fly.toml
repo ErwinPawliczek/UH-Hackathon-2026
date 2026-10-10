@@ -5,7 +5,7 @@ app = "petrogrid-site"
 primary_region = "dfw"
 
 [http_service]
-  internal_port = 80
+  internal_port = 8080
   force_https = true
   auto_stop_machines = "off"     # stays up through judging; no cold start
   auto_start_machines = true
@@ -13,7 +13,7 @@ primary_region = "dfw"
 
   [[http_service.checks]]
     method = "GET"
-    path = "/healthz"
+    path = "/"
     interval = "30s"
     timeout = "5s"
     grace_period = "5s"
