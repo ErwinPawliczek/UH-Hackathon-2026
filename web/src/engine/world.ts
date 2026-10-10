@@ -205,32 +205,37 @@ export interface SiteRanges {
   procCount: number;
   unitStart: number;
   unitCount: number;
-  tankStart: number;
-  tankCount: number;
+  /**
+   * Indexes into world.tanks — and therefore the snapshot tank slots, which
+   * join by the same index — owned by this site, in array order. Not assumed
+   * contiguous: the engine's stub world orders tanks round-robin by site
+   * (site = i % nSites), so a per-site slice of the array would attach the
+   * wrong tanks and fills.
+   */
+  tankIndices: number[];
 }
 
 /**
  * Per-site index ranges into the flattened snapshot arrays. The stub encoder
- * flattens sites in order (processes site-major, then units, then tanks), and
- * so does the engine — inspectors slice arrays with these ranges.
+ * flattens sites in order (processes site-major, then units), and so does the
+ * engine — inspectors slice arrays with these ranges. Tanks are collected per
+ * site by their actual site assignment.
  */
 export function siteRanges(world: WorldSpec): SiteRanges[] {
-  const tankBySite: number[] = [];
-  for (const t of world.tanks) tankBySite[t.site] = (tankBySite[t.site] ?? 0) + 1;
   const out: SiteRanges[] = [];
   let proc = 0;
   let unit = 0;
-  let tank = 0;
   for (let i = 0; i < world.sites.length; i++) {
     const site = world.sites[i];
     const procCount = site.processes.length;
     const unitCount = site.processes.reduce((n, p) => n + p.units.length, 0);
-    const tankCount = tankBySite[i] ?? 0;
-    out.push({ procStart: proc, procCount, unitStart: unit, unitCount, tankStart: tank, tankCount });
+    out.push({ procStart: proc, procCount, unitStart: unit, unitCount, tankIndices: [] });
     proc += procCount;
     unit += unitCount;
-    tank += tankCount;
   }
+  world.tanks.forEach((t, idx) => {
+    if (t.site >= 0 && t.site < out.length) out[t.site].tankIndices.push(idx);
+  });
   return out;
 }
 

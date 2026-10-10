@@ -87,8 +87,8 @@ export function SiteInspector({ siteIdx }: { siteIdx: number }) {
 
       <h3 className="mb-1 font-semibold text-slate-300">Tanks</h3>
       <ul className="space-y-1.5">
-        {world.tanks.slice(ranges.tankStart, ranges.tankStart + ranges.tankCount).map((tank, k) => {
-          const tIdx = ranges.tankStart + k;
+        {ranges.tankIndices.map((tIdx, k) => {
+          const tank = world.tanks[tIdx];
           const fill = snap.tanks[4 * tIdx] ?? 0;
           const hours = hoursOfCover(fill, tank.capacityT, tank.drawTph, rateFactor);
           return (

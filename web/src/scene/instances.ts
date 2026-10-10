@@ -97,8 +97,8 @@ export function buildSiteLayer(world: WorldSpec): SiteLayer {
   const ranges = siteRanges(world);
   world.tanks.forEach((tank, t) => {
     const site = world.sites[tank.site];
-    const k = t - ranges[tank.site].tankStart;
-    const count = Math.max(1, ranges[tank.site].tankCount);
+    const k = ranges[tank.site].tankIndices.indexOf(t);
+    const count = Math.max(1, ranges[tank.site].tankIndices.length);
     const angle = -Math.PI / 2 + (k / count - 0.5) * (Math.PI * 2 / 3);
     const x = site.x + Math.cos(angle) * 2.0;
     const y = site.y + Math.sin(angle) * 2.0;

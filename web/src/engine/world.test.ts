@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveWorld, routeLength, routePointAt, sampleHeight, stubWorld, VEHICLE_CLASSES, MATERIALS } from './world';
+import { resolveWorld, routeLength, routePointAt, sampleHeight, siteRanges, stubWorld, VEHICLE_CLASSES, MATERIALS } from './world';
 import { stubVehicleState } from './stub';
 
 describe('stubWorld', () => {
@@ -118,6 +118,34 @@ describe('materials palette', () => {
     const w = stubWorld(1);
     for (const t of w.tanks) expect(MATERIALS).toContain(t.material);
     for (const v of w.vehicles) expect(MATERIALS).toContain(v.cargo);
+  });
+});
+
+describe('siteRanges', () => {
+  it('collects tanks per site even in round-robin (non site-major) order', () => {
+    // The engine stub orders tanks site = i % 4; snapshot slots join by index.
+    const w = stubWorld(42);
+    const roundRobin = {
+      ...w,
+      tanks: w.tanks.map((t, i) => ({ ...t, site: i % w.sites.length })),
+    };
+    const ranges = siteRanges(roundRobin);
+    expect(ranges).toHaveLength(w.sites.length);
+    ranges.forEach((r, site) => {
+      expect(r.tankIndices.length).toBeGreaterThan(0);
+      for (const idx of r.tankIndices) expect(roundRobin.tanks[idx].site).toBe(site);
+    });
+    // every tank is owned by exactly one site
+    const all = ranges.flatMap((r) => r.tankIndices).sort((a, b) => a - b);
+    expect(all).toEqual([...Array(roundRobin.tanks.length).keys()]);
+  });
+
+  it('keeps contiguous site-major worlds (the stub world) slice-compatible', () => {
+    const ranges = siteRanges(stubWorld(42));
+    expect(ranges[0].tankIndices).toEqual([0]);
+    expect(ranges[1].tankIndices).toEqual([1, 2]);
+    expect(ranges[2].tankIndices).toEqual([3, 4, 5]);
+    expect(ranges[3].tankIndices).toEqual([6, 7]);
   });
 });
 
