@@ -16,6 +16,9 @@ import {
   type SiteLayer, type VehicleLayer,
 } from './instances';
 
+/** Sites are small on a large map — accept clicks within this many px of a glyph. */
+const SITE_PICK_TOLERANCE_PX = 24;
+
 export interface PickHit {
   kind: 'site' | 'vehicle';
   index: number;
@@ -166,7 +169,23 @@ export class MapScene {
         return { kind: 'vehicle', index: this.vehicleLayer.classStart[meshIdx] + hit.instanceId };
       }
     }
-    return null;
+    // Small glyphs on a large map miss raycasts by a few pixels — fall back
+    // to the projected site centre within a click tolerance.
+    const v = new THREE.Vector3();
+    let bestSite = -1;
+    let bestDist = SITE_PICK_TOLERANCE_PX;
+    this.siteLayer.anchors.forEach((anchor, i) => {
+      v.set(anchor.x, anchor.groundY + 0.9, anchor.z).project(this.camera);
+      if (v.z > 1) return; // behind the camera
+      const px = (v.x * 0.5 + 0.5) * rect.width;
+      const py = (-v.y * 0.5 + 0.5) * rect.height;
+      const d = Math.hypot(px - (clientX - rect.left), py - (clientY - rect.top));
+      if (d < bestDist) {
+        bestDist = d;
+        bestSite = i;
+      }
+    });
+    return bestSite >= 0 ? { kind: 'site', index: bestSite } : null;
   }
 
   resize(width: number, height: number): void {

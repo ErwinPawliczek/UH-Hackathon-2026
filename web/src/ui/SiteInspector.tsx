@@ -5,7 +5,7 @@
 import { siteRanges } from '../engine/world';
 import { useSim } from '../store/sim';
 import { PROC_STATUS_LABELS } from '../scene/palette';
-import { fmtDaysOfCover, fmtPct } from './format';
+import { fmtDaysOfCover, fmtPct, hoursOfCover } from './format';
 
 const STATUS_DOT: Record<number, string> = {
   0: 'bg-emerald-400',
@@ -24,6 +24,10 @@ export function SiteInspector({ siteIdx }: { siteIdx: number }) {
 
   const ranges = siteRanges(world)[siteIdx];
   const urgency = snap.siteUrgency[siteIdx] ?? 0;
+  // Site-wide rate factor for days-of-cover: mean process rate ÷ design.
+  let procRateSum = 0;
+  for (let k = 0; k < ranges.procCount; k++) procRateSum += snap.procRate[ranges.procStart + k] ?? 0;
+  const rateFactor = ranges.procCount > 0 ? procRateSum / ranges.procCount : 0;
 
   return (
     <section className="panel pointer-events-auto max-h-[calc(100vh-9rem)] w-80 overflow-y-auto p-3 text-xs" data-testid="site-inspector">
@@ -86,7 +90,7 @@ export function SiteInspector({ siteIdx }: { siteIdx: number }) {
         {world.tanks.slice(ranges.tankStart, ranges.tankStart + ranges.tankCount).map((tank, k) => {
           const tIdx = ranges.tankStart + k;
           const fill = snap.tanks[4 * tIdx] ?? 0;
-          const toEmpty = snap.tanks[4 * tIdx + 2] ?? 0;
+          const hours = hoursOfCover(fill, tank.capacityT, tank.drawTph, rateFactor);
           return (
             <li key={`${tank.material}-${k}`} className="flex items-center gap-2">
               <span className="w-20 shrink-0 truncate text-slate-300">{tank.material}</span>
@@ -97,7 +101,7 @@ export function SiteInspector({ siteIdx }: { siteIdx: number }) {
                 />
               </div>
               <span className="w-24 text-right text-slate-400" data-testid="tank-cover">
-                {fmtPct(fill)} · {fmtDaysOfCover(toEmpty)}
+                {fmtPct(fill)} · {fmtDaysOfCover(hours)}
               </span>
             </li>
           );

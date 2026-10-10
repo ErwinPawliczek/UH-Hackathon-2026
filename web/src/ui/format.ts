@@ -27,6 +27,24 @@ export function fmtDaysOfCover(hoursToEmpty: number): string {
   return `${(hoursToEmpty / 24).toFixed(1)} d`;
 }
 
+/**
+ * Days-of-cover estimate from snapshot data: hours of stock left at the
+ * current draw rate. The §7.3 snapshot carries per-tank control signals
+ * (fill, f, u, h), not hours-to-empty, so the UI derives cover from the
+ * catalog draw. `rateFactor` is the consuming processes' current rate as a
+ * fraction of design. Returns 0 when nothing draws (cover is indefinite —
+ * fmtDaysOfCover renders "—").
+ */
+export function hoursOfCover(
+  fill: number,
+  capacityT: number,
+  drawTph: number,
+  rateFactor: number,
+): number {
+  if (drawTph <= 0 || rateFactor <= 1e-6) return 0;
+  return (fill * capacityT) / (drawTph * rateFactor);
+}
+
 export function fmtPct(x: number): string {
   return `${Math.round(x * 100)}%`;
 }
