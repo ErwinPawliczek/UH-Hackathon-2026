@@ -1,6 +1,8 @@
 // crx-cli — native driver for the engine: run, dump, bench, oracle (§11).
 
 #include "crx/api.h"
+#include "world/worldgen/WorldGen.h"
+#include "world/worldgen/WorldJson.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -14,7 +16,8 @@ void printHelp() {
       "crx-cli — Chain Reaction engine driver\n"
       "  version                     print engine version\n"
       "  run   [--seed N --ticks N]  step the sim, print tick, hash and KPIs\n"
-      "  dump  [--seed N --ticks N --out F]  write the binary snapshot to F\n");
+      "  dump  [--seed N --ticks N --out F]  write the binary snapshot to F\n"
+      "  worldgen [--seed N --out F] generate the template world, write JSON\n");
 }
 
 }  // namespace
@@ -41,6 +44,33 @@ int main(int argc, char** argv) {
     } else if (std::strcmp(argv[i], "--out") == 0) {
       out = argv[i + 1];
     }
+  }
+
+  if (cmd == "worldgen") {
+    const crx::worldgen::GenResult r =
+        crx::worldgen::generateWorld(seed, crx::worldgen::GenParams{},
+                                     crx::worldgen::referenceCatalog());
+    if (!r.ok) {
+      std::fprintf(stderr, "worldgen: feasibility gate rejected seed %llu after all attempts\n",
+                   static_cast<unsigned long long>(seed));
+      for (const auto& e : r.gate_errors) std::fprintf(stderr, "  - %s\n", e.c_str());
+      return 1;
+    }
+    const std::string json = crx::worldgen::toWorldJson(r.world).dump(2);
+    std::FILE* f = std::fopen(out, "wb");
+    if (f == nullptr) {
+      std::fprintf(stderr, "cannot open %s for writing\n", out);
+      return 1;
+    }
+    std::fwrite(json.data(), 1, json.size(), f);
+    std::fclose(f);
+    std::printf("world seed %llu: sites %zu, tanks %zu, processes %zu, units %zu, "
+                "edges %zu, pipelines %zu, vehicles %zu, contracts %zu -> %s\n",
+                static_cast<unsigned long long>(r.world.seed), r.world.nSites(),
+                r.world.nTanks(), r.world.nProcesses(), r.world.units.size(),
+                r.world.edges.size(), r.world.nPipelines(), r.world.nVehicles(),
+                r.world.contracts.size(), out);
+    return 0;
   }
 
   char cfg[64];
