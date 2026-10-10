@@ -90,6 +90,15 @@ describe('HttpBackend request mapping', () => {
     expect(calls[0].url).toBe('http://x/api/sim/sim-7/events?since=2');
   });
 
+  it('floors the events since sentinel at the wire minimum', async () => {
+    // The store's -1 ("nothing fetched yet") is not representable in §7.4,
+    // where since is unsigned — the server answers 400 to since=-1.
+    const { calls, impl } = fakeFetch({ 'GET /api/sim/sim-7/events': () => [] });
+    const b = new HttpBackend('http://x', impl);
+    await b.events('sim-7', -1);
+    expect(calls[0].url).toBe('http://x/api/sim/sim-7/events?since=0');
+  });
+
   it('queries kpis and series with kind and id parameters', async () => {
     const { calls, impl } = fakeFetch({
       'GET /api/sim/sim-7/kpis': () => [0.98, 1200],
