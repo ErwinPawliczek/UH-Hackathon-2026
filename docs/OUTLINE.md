@@ -1,8 +1,12 @@
 # Chain Reaction — technical outline
 
-Working title (rename freely). Code prefix `crx`. Outline v0.2, 2026-10-10. v0.2 changes: terrain worldgen replaced by a template-based layout
-generator whose polyline arc lengths drive travel times; determinism rules relaxed to same-platform
-reproducibility; milestones reordered demo-first for the 48-hour build.
+Working title (rename freely). Code prefix `crx`. Outline v0.3, 2026-10-10.
+
+v0.3 changes: shift to a hosted deployment — the C++ engine runs as an HTTP backend that serves the front
+end and the API from one origin; the front end keeps visuals and data storing only; WebAssembly is
+dropped; a custom domain is planned. The engine core is untouched. v0.2 changes: terrain worldgen
+replaced by a template-based layout generator whose polyline arc lengths drive travel times; determinism
+rules relaxed to same-platform reproducibility; milestones reordered demo-first for the 48-hour build.
 
 A time-stepped simulation of a petrochemical supply chain in a fictional country. Plants are built from
 real unit-level mass and energy balances, materials move in pipelines, ships, barges and trucks, and every
@@ -26,19 +30,21 @@ and what do rationing and re-sourcing buy them?
 
 | Area | Decision | Reason |
 |---|---|---|
-| Engine | C++20, one static library `crx_engine`. No I/O, no threads, no globals. | Same code runs natively and in the browser; easy to test. |
-| Targets | Native (g++ 14+) for CLI, tests and the benchmark solver; clang welcome. WebAssembly (emsdk, latest) for the browser. | One engine, two compilers. |
-| Hosting | Static site. The engine runs inside the page. No server. | Demo is a link; nothing to keep alive during judging. |
+| Engine | C++20, one static library `crx_engine`. No I/O, no threads, no globals. | Same code runs natively in the CLI, the tests and the hosted server; easy to test. |
+| Targets | Native (g++ 14+) for the CLI, tests, server and benchmark solver; clang welcome. No WebAssembly — the engine runs server-side (v0.3). | One engine, one compiler for every host. |
+| Hosting | Hosted backend (v0.3): one C++ binary serves the built front end and the HTTP API from a single origin, in a Docker container on Fly.io (Railway as fallback), under a custom domain. | A link that always works during judging; one origin, no CORS; no client-side engine. |
 | Boundary | C ABI of 14 functions (§7). JSON for rare structured data (world, commands, event log). One binary snapshot for per-frame data, read as typed-array views with no copy. | Small, stable contract between C++ and TypeScript. |
-| Threading | Engine called synchronously on the main thread, time-sliced to ≤ 4 ms per frame. No Web Worker, no SharedArrayBuffer. | GitHub Pages cannot send the headers SharedArrayBuffer needs; the engine is fast enough without it. |
-| Build | CMake ≥ 3.28, Ninja, `CMakePresets.json` with `native-debug`, `native-release`, `wasm-release`. | One command per target. |
-| C++ deps | FetchContent, pinned: nlohmann/json 3.12.0, doctest 2.5.3, HiGHS 1.15.1 (native only, §10). | Header-only except HiGHS; nothing to install. |
-| Front end | TypeScript, Vite, React, three.js, zustand, uPlot, Tailwind 4, vitest. npm; exact versions pinned in the lockfile at install. | Current stable releases; no map tiles or API keys needed. |
-| Deploy | GitHub Actions: native build and tests → wasm build → web build → GitHub Pages. | Every push to `main` updates the demo link. |
+| Concurrency | The engine stays single-threaded. The server wraps each call synchronously behind a per-session mutex; sessions are capped and expire on inactivity. | No locks inside the engine; one sim per session. |
+| Build | CMake ≥ 3.28, Ninja, `CMakePresets.json` with `native-debug` and `native-release` (engine, CLI, tests, server). | One command per target. |
+| C++ deps | FetchContent, pinned: nlohmann/json 3.12.0, doctest 2.5.3, cpp-httplib 0.18.x (server), HiGHS 1.15.1 (native only, §10). | Header-only except HiGHS; nothing to install. |
+| Front end | TypeScript, Vite, React, three.js, zustand, uPlot, Tailwind 4, vitest. npm; exact versions pinned in the lockfile at install. Responsibilities: visuals and data storing only — the engine is never in the page. | Current stable releases; no map tiles or API keys needed. |
+| Deploy | GitHub Actions: native build and tests → Docker image → Fly.io; domain DNS points at the app. | Every push to `main` redeploys the hosted demo. |
 | Quantities | `double`. Tonnes, hours, km, GJ, MWh, USD. Rates in t/h. | |
 | Time | Fixed tick of 0.25 h (96 per day). Time is an integer tick count. | |
 
-If a server is ever required, a native WebSocket host wraps the same C ABI; the engine does not change.
+The C ABI stays the engine's internal contract; the server (§7.4) and the CLI are thin hosts over it, so
+the engine does not change per surface. Hosted determinism is stronger than v0.2 assumed: every visitor
+of a deployment shares one platform and one build, so state hashes are comparable for everyone.
 
 ### Determinism rules (v0.2: same-platform reproducibility, not cross-platform bit-identity)
 
@@ -587,7 +593,7 @@ without it, so each measure is reported as a loss against the same world with no
 ## 6. Layout generator (v0.2: template-based, metric-first)
 
 Deterministic from a seed and a small parameter set (map 600 × 400 km, 8 cities, demand scale, target
-utilisation 0.88, tank cover multipliers). Runs in the browser and natively; no solver. The simulation
+utilisation 0.88, tank cover multipliers). Runs on the server and in the CLI; no solver. The simulation
 consumes only positions, polylines and arc lengths — terrain is a render-time concern, derived from the
 same seed for looks, never an input to the sim.
 
@@ -680,20 +686,47 @@ Header: magic `CRXS`, version, tick, then a count and byte offset for each array
 The static world JSON maps every index to its name, geometry and catalog entry. A golden test decodes a
 snapshot file written by the CLI in TypeScript.
 
+### 7.4 HTTP API (`crx-server`, v0.3)
+
+One C++ binary wraps the C ABI (§7.1) and serves the built front end from the same origin
+(single-header `cpp-httplib`, thread pool; engine calls stay synchronous, one sim per session):
+
+| Route | Wraps | Notes |
+|---|---|---|
+| `POST /api/sim` | `crx_create` | Body: config JSON; reply `{ "id": … }`. |
+| `POST /api/sim/{id}/step` | `crx_step` | Body `{"ticks":N}`; reply is the snapshot binary. |
+| `POST /api/sim/{id}/command` | `crx_command` | Body: a §7.2 command; reply is the engine's JSON. |
+| `POST /api/sim/{id}/fork` | `crx_fork` | Baseline twin; reply `{ "id": … }`. |
+| `GET /api/sim/{id}/world` | `crx_world_json` | Static, read once per session. |
+| `GET /api/sim/{id}/events?since=` | `crx_events` | Incremental log. |
+| `GET /api/sim/{id}/series?kind=&id=` | `crx_series` | Hourly history. |
+| `GET /api/sim/{id}/kpis` | `crx_kpis` | KPI vector. |
+| `GET /` (static) | — | `web/dist` assets; the app itself. |
+
+Sessions live in memory only: cap 16, inactivity expiry 10 min. No server-side database — a run is
+recreated by replaying the same seed and commands (determinism rule 6).
+
 ---
 
 ## 8. Front end
 
 ```
-web/src/engine/   wasm loader, typed wrapper over the C ABI, snapshot decoder
+web/src/engine/   API client (HTTP), snapshot decoder, binary payload handling
 web/src/scene/    terrain, routes, sites, vehicles, picking, camera (three.js)
 web/src/ui/       panels, charts, timeline (React)
 web/src/state/    zustand stores: clock, selection, scenario, measures
+web/src/store/    local persistence: settings in localStorage, saved runs in IndexedDB
 ```
 
-**Frame loop.** Each frame advances the engine by `speed × elapsed` ticks within a 4 ms budget, reads the
-snapshot, and renders. Speeds: 1 hour, 6 hours, 1 day and 1 week of simulated time per second. Vehicles are
-interpolated between the last two snapshots.
+**Frame loop.** The client owns the clock: every 250 ms it sends a step request for `speed × 0.25 s` of
+simulated ticks, receives the snapshot bytes, decodes and renders. Speeds: 1 hour, 6 hours, 1 day and
+1 week of simulated time per second. Vehicles are interpolated between the last two snapshots. The
+engine never runs in the page; the front end is visuals and data storing only.
+
+**Data storing (client side).** Settings, the last scenario and the current seed live in `localStorage`.
+Saved runs — config, event script, and the snapshots or series the user chooses to keep — live in
+`IndexedDB`. No server-side persistence for the hackathon; determinism (rule 6) makes a saved run
+reproducible by replay alone.
 
 **Scene.**
 
@@ -756,22 +789,23 @@ engine/
                       procurement, dispatch, transport, accounting, recorder
   src/oracle/         linear program (native only)
   apps/cli/           crx-cli: gen, run, dump, bench, oracle
-  apps/wasm/          Emscripten exports
+  apps/server/        crx-server: HTTP host over the C ABI (§7.4), static file serving
   data/catalog/       materials.json, processes/*.json, presets.json, vehicles.json
   data/scenarios/     *.json
   tests/
-web/                  Vite project (§8); public/ receives crx.js and crx.wasm
+web/                  Vite project (§8); built to web/dist, served by crx-server
+deploy/Dockerfile     multi-stage: native toolchain build → slim runtime (crx-server + web/dist)
 docs/                 OUTLINE.md, model notes
 .github/workflows/    ci.yml
 ```
 
 ```
 cmake --preset native-release && cmake --build --preset native-release && ctest --preset native-release
-cmake --preset wasm-release   && cmake --build --preset wasm-release
-cd web && npm ci && npm run dev
+cd web && npm ci && npm run build
+docker build -f deploy/Dockerfile -t crx-server . && fly deploy   # or any Docker host
 ```
 
-The catalog JSON is embedded in the engine at build time, so the WebAssembly file is self-contained.
+The catalog JSON is embedded in the engine at build time, so the server binary is self-contained.
 
 ---
 
@@ -782,11 +816,11 @@ The catalog JSON is embedded in the engine at build time, so the WebAssembly fil
 | 1 | Catalog validation | Every unit balances in every mode to 1e-9; every internal stream nets to zero; every traded material has a producer and a consumer. |
 | 2 | Mass conservation | Tanks + vehicle cargo + cumulative consumption and loss − cumulative supply is constant to 1e-9 relative, every tick. |
 | 3 | Bounds | `0 ≤ level ≤ capacity`; rate is 0 or within `[turndown, R_max]`; no negative reservations. |
-| 4 | Determinism | Same seed and commands give the same state hash natively (CI gate). Wasm hash checked once per release, not per commit. |
+| 4 | Determinism | Same seed and commands give the same state hash natively (CI gate). The server runs the same binary CI tested, so every client of a deployment sees the gated behaviour. |
 | 5 | Fork | A fork stepped with the same commands matches its parent. |
 | 6 | Steady state | For seeds 1–20 with no events: after warm-up, service level ≥ 97%, every process within ±5% of its design rate, no stock-outs, for 60 days. |
 | 7 | Cascade | Cracker outage: downstream processes drop after roughly their days of cover, upstream processes slow as tanks fill, and all recover after repair. |
-| 8 | Speed | 90 days of the reference world in under 1 s in WebAssembly. |
+| 8 | Speed | 90 days of the reference world in under 1 s natively; a one-day step request served in well under 50 ms. |
 | 9 | Snapshot | TypeScript decodes a CLI-written snapshot and matches the CLI's text dump. |
 | 10 | Reachability and travel times | For 20 generated seeds: every site reaches every other in each available mode; spot-checked origin–destination travel times are plausible (truck day-distance, barge pace, port leg ≈ 18 days). |
 
@@ -802,7 +836,7 @@ Tests 2, 3 and 6 are the gate for merging any change to the simulation systems.
 | **M1 Plant core** | Signals, control, production, pipelines, events, recorder, CLI. A hand-written six-site world. | Tests 1–5 pass; a cracker outage in the six-site world starves downstream and backs up upstream in the CLI output. |
 | **M2 Logistics** | Route graph, path cache, procurement, market, dispatch, vehicle state machine, bays, adaptation. | Test 2 passes with vehicles; the six-site world holds steady state. |
 | **M3 Layout generator** | Template-based generator (§6) with the feasibility gate; full catalog (8 plant presets, sources, sinks, port). | Tests 6 and 10 pass on 20 generated seeds. |
-| **M4 Front end** | Map, sites, vehicles, inspectors, timeline, scenario controls, baseline twin. | Three scenarios play end to end from the hosted link. |
+| **M4 Hosted demo** | crx-server (HTTP API + static), Dockerfile, Fly.io deploy under the domain; front end switches from stub data to the hosted engine. | Three scenarios play end to end from the hosted link on the domain. |
 | **M5 Depth** | 3D unit glyphs, block diagrams with per-unit balances, live S-curves, shortage map, feed switching, random failures. | |
 | **M6 Stretch** | Benchmark, automated manager, extension presets, real-data loader. | |
 
@@ -824,11 +858,11 @@ Everything else can run in parallel once M0 has fixed the contracts:
 
 | Hours | Work |
 |---|---|
-| 0–4 | M0 contracts, presets, CI, toolchain (ninja, emsdk) |
+| 0–4 | M0 contracts, presets, CI, toolchain (ninja) |
 | 4–16 | M1 core engine on the tiny world; tests 1–3 green |
 | 16–28 | M2 logistics; six-site steady state |
 | 28–38 | M3 layout generator + feasibility gate; reference world |
-| 38–46 | M4 wasm + thin web scene + one scenario; Pages deploy live |
+| 38–46 | M4 crx-server + Docker + deploy; front end on the hosted engine, one scenario live on the domain |
 | 46–48 | Polish, README, demo script, buffer |
 
 The web scene reads the same `world.json` and snapshots as the CLI, so M4 work starts as soon as M0's
@@ -845,7 +879,8 @@ contracts exist and runs in parallel whenever hands allow.
 | The cascade is dull | Utilisation and days of cover are the two knobs; M1 exists to find this out early. |
 | Numbers are challenged | All yields live in one reviewed data folder; the demo states the model's limits. |
 | New major versions in the web stack | Exact versions pinned in the lockfile. |
-| Debugging in WebAssembly | All logic is tested natively; the wasm target adds one thin export file. |
+| Debugging the server | All logic is tested natively; the server is one thin file over the same C ABI the CLI exercises. |
+| Host or domain not ready at demo time | Docker image runs on any host; the domain is a DNS record swap, not a rebuild. |
 
 **Cut order if time runs short:** automated manager → benchmark → shortage map → random failures →
 3D unit glyphs (use extruded blocks) → adaptation → feed switching (fix the cracker on ethane) →
@@ -857,5 +892,7 @@ barges (river freight moves by truck). M0–M4 with the first three scenarios is
 
 1. **Erwin to review** the yields, turndowns, restart times and energy duties in §3.
 2. **Tracks.** Once known, the framing (resilience, sustainability, AI) may reorder M5 and M6. The core does not change.
-3. **No server** is assumed. Say so now if a track or sponsor requires a hosted back end.
+3. **Hosting decided (v0.3).** Hosted C++ backend; front end for visuals and local data storing. Erwin
+   buys the domain at any registrar; the DNS records (A/AAAA or CNAME to the Fly app) and the deploy
+   config come from the repo. A deploy token (`FLY_API_TOKEN` or equivalent) is the only secret CI needs.
 4. **Name.** "Chain Reaction" and the `crx` prefix are placeholders.
