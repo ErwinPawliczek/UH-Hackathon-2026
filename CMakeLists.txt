@@ -15,8 +15,20 @@ FetchContent_MakeAvailable(json doctest)
 
 add_library(crx_engine STATIC
   engine/src/api.cpp
-  engine/src/catalog/catalog.cpp)
-target_include_directories(crx_engine PUBLIC engine/include)
+  engine/src/catalog/catalog.cpp
+  engine/src/sim/control.cpp
+  engine/src/sim/events.cpp
+  engine/src/sim/pipelines.cpp
+  engine/src/sim/production.cpp
+  engine/src/sim/recorder.cpp
+  engine/src/sim/signals.cpp
+  engine/src/sim/sim.cpp
+  engine/src/sim/sixsite.cpp
+  engine/src/sim/validate.cpp
+  engine/src/sim/world.cpp)
+target_include_directories(crx_engine PUBLIC engine/include engine/src)
+target_compile_definitions(crx_engine PRIVATE
+  CRX_DATA_DIR="${CMAKE_SOURCE_DIR}/engine/data/catalog")
 target_link_libraries(crx_engine PUBLIC nlohmann_json::nlohmann_json)
 target_compile_options(crx_engine PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-ffp-contract=off -Wall -Wextra -Wpedantic>)
@@ -28,6 +40,10 @@ enable_testing()
 add_executable(crx_tests engine/tests/test_core.cpp)
 target_link_libraries(crx_tests PRIVATE crx_engine doctest::doctest)
 add_test(NAME core COMMAND crx_tests)
+
+add_executable(crx_sim_tests engine/tests/test_sim.cpp)
+target_link_libraries(crx_sim_tests PRIVATE crx_engine doctest::doctest)
+add_test(NAME sim COMMAND crx_sim_tests)
 
 # ---- crx-server: HTTP host over the C ABI (§7.4) ----
 FetchContent_Declare(httplib
