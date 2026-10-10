@@ -3,17 +3,20 @@
 // run and its forks.
 //
 // M1 scope: sites, tanks, processes, units and pipelines — the plant core.
-// The route graph (nodes, edges, vehicles, orders) arrives with M2
-// logistics; world generation (M3) will populate the same shapes.
+// M2 adds the route graph (nodes, edges with polyline arc lengths), per-site
+// mode access and bays, the vehicle fleet and contracts; world generation
+// (M3) populates the same shapes for generated worlds.
 //
-// The catalog layer (§4.2, engine/src/catalog) supplies process types; a
-// World site instantiates them with explicit design rates and tanks.
+// The catalog layer (§4.2, engine/src/catalog) supplies process types and
+// vehicle classes; a World site instantiates them with explicit design rates
+// and tanks.
 #ifndef CRX_SIM_WORLD_H
 #define CRX_SIM_WORLD_H
 
 #include "crx/catalog.h"
 #include "crx/ids.h"
 
+#include <array>
 #include <memory>
 #include <string>
 #include <vector>
@@ -31,12 +34,39 @@ uint32_t rangeEnd(const R& r) {
   return r.begin + r.count;
 }
 
+// Transport-mode index into per-site node/bay arrays (road, river, sea —
+// pipeline has no vehicles). UINT32_MAX node = the site has no access.
+inline int modeIndex(crx::Mode mode) { return static_cast<int>(mode); }
+constexpr uint32_t kNoNode = UINT32_MAX;
+constexpr int kModeCount = 3;  // road, river, sea
+
+// Route-graph node (§4.3): a position with an optional site binding (-1 for
+// pure infrastructure nodes, e.g. the OVERSEAS sea node).
+struct RouteNode {
+  double x_km = 0, y_km = 0;
+  int site = -1;
+};
+
+// Route-graph edge. length_km is the polyline arc length — never the
+// Euclidean gap between endpoints (§6.4). polyline indexes the world's flat
+// x,y point list so renderers can draw the true shape.
+struct RouteEdge {
+  uint32_t a = kNoNode, b = kNoNode;
+  crx::Mode mode = crx::Mode::Road;
+  double length_km = 0, speed_kmh = 0;
+  Range<uint32_t> polyline;
+};
+
 struct Site {
   std::string key, name;
   int preset = -1;  // catalog site preset this instance derives from, or -1
   double x_km = 0, y_km = 0;
   Range<TankId> tanks;
   Range<ProcessId> processes;
+  // §4.3: the node serving the site in each transport mode, and its
+  // load/unload bays per mode (§5.7). node = kNoNode → no access.
+  std::array<uint32_t, kModeCount> node{kNoNode, kNoNode, kNoNode};
+  std::array<uint8_t, kModeCount> bays{0, 0, 0};
 };
 
 struct Tank {
@@ -50,6 +80,13 @@ struct Tank {
   // this tank / design make of all on-site processes filling it (§5.2).
   double design_in_t_h = 0, design_out_t_h = 0;
   bool piped_in = false, piped_out = false;
+  // §5.8 adaptation clamps are relative to the tank's initial values, which
+  // are world data (immutable) — the state copies start there.
+  double init_lead_time_h = 24, init_pickup_gap_h = 4;
+  // §5.6 port export tanks: low-urgency buyers that only match sellers above
+  // 70% full, so exports never rob the domestic chain. Set by the world
+  // builder (M3 sizing for port import/export tanks).
+  bool export_buy = false;
 };
 
 struct Process {
@@ -92,6 +129,24 @@ struct World {
   // M1 uses one flat schedule per process; shocks scale it further.
   std::vector<std::vector<double>> schedules;
 
+  // M2 route graph (§4.3): polyline nodes and edges with arc lengths, one
+  // flat x,y point list shared by edge polylines. Runtime fleet (resolved
+  // catalog class + home site) and contracts (resolved tank pairs) feed
+  // procurement and dispatch (§5.6–5.7). Worldgen populates the same shapes
+  // for generated worlds, including river and sea modes.
+  std::vector<RouteNode> nodes;
+  std::vector<RouteEdge> edges;
+  std::vector<double> polyline_xy;
+  struct FleetEntry {
+    uint16_t cls = 0;
+    SiteId home{};
+  };
+  std::vector<FleetEntry> fleet;
+  struct Contract {
+    TankId buyer{}, seller{};
+  };
+  std::vector<Contract> contracts;
+
   int findSite(const std::string& key) const;
   int findTank(const std::string& key) const;
 };
@@ -127,9 +182,35 @@ struct PipeSpec {
   double cap_t_h;
 };
 
+// M2 logistics specs. Roads connect two sites' road nodes with a straight
+// polyline (arc length = segment length; worldgen wiggles its own). Fleet
+// entries place one vehicle of a catalog class at a site. Contracts bind a
+// buyer tank to its preferred seller tank (§5.6 switch-cost rule).
+struct RoadSpec {
+  const char* from;  // site key
+  const char* to;
+  double speed_kmh;
+};
+
+struct FleetSpec {
+  const char* vehicle_class;  // catalog vehicle class key
+  const char* home_site;
+};
+
+struct ContractSpec {
+  const char* buyer;   // tank key
+  const char* seller;  // tank key
+};
+
 struct WorldSpec {
   std::vector<SiteSpec> sites;
   std::vector<PipeSpec> pipes;
+  std::vector<RoadSpec> roads;
+  std::vector<FleetSpec> fleet;
+  std::vector<ContractSpec> contracts;
+  unsigned road_bays = 2;    // §5.7 bays per site per mode; roads only in M1
+  unsigned river_bays = 0;   // (generated worlds set their own per mode)
+  unsigned sea_bays = 0;
   // Traded materials deliberately produced but unconsumed in M1 (they
   // accumulate in long-cover tanks) — exempt from the closure check.
   std::vector<const char*> stranded_materials;

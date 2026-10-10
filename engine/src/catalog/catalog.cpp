@@ -443,6 +443,12 @@ int Catalog::findPreset(const std::string& key) const {
   return -1;
 }
 
+int Catalog::findVehicle(const std::string& key) const {
+  for (size_t i = 0; i < vehicle_classes.size(); ++i)
+    if (vehicle_classes[i].key == key) return int(i);
+  return -1;
+}
+
 const char* toString(Phase phase) {
   switch (phase) {
     case Phase::Liquid: return "liquid";

@@ -42,6 +42,22 @@ std::unique_ptr<Sim> Sim::create(uint64_t seed, std::string& error) {
   sim->state_.ledger.resize(w.sites.size());
   sim->state_.sink_starved.assign(w.processes.size(), 0);
   sim->state_.rate_override.assign(w.processes.size(), -1.0);
+  // M2 logistics (§4.4): all edges open, market index at par, the fleet at
+  // its home sites, no orders.
+  sim->state_.edge_open.assign(w.edges.size(), 1);
+  sim->state_.price_index.assign(w.catalog.materials.size(), 1.0);
+  sim->state_.adaptation = true;
+  sim->state_.vehicle.resize(w.fleet.size());
+  for (size_t v = 0; v < w.fleet.size(); ++v) {
+    VehicleState& vs = sim->state_.vehicle[v];
+    const VehicleClass& vc = w.catalog.vehicle_classes[w.fleet[v].cls];
+    const Site& home = w.sites[w.fleet[v].home.v];
+    vs.at_node = home.node[modeIndex(vc.mode)];
+    if (vs.at_node != kNoNode) {
+      vs.x_km = w.nodes[vs.at_node].x_km;
+      vs.y_km = w.nodes[vs.at_node].y_km;
+    }
+  }
   sim->signals.assign(w.tanks.size(), TankSignals{});
   sim->rec_.tank_fill.resize(w.tanks.size());
   sim->rec_.proc_rate.resize(w.processes.size());
@@ -50,6 +66,7 @@ std::unique_ptr<Sim> Sim::create(uint64_t seed, std::string& error) {
 
 std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string& error) {
   uint64_t seed = 42;  // §7.1: NULL or missing seed = defaults
+  bool adaptation_override = true;
   if (config_json != nullptr && config_json[0] != '\0') {
     try {
       const json cfg = json::parse(config_json);
@@ -62,9 +79,20 @@ std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string&
       }
       for (auto it = cfg.begin(); it != cfg.end(); ++it) {
         if (it.key() == "seed") continue;
-        // §7.1 names "gen" (M3 worldgen) and "world" (custom); neither is
-        // an M1 surface — reject instead of silently ignoring.
-        error = "config key \"" + it.key() + "\" is not supported in M1 (only \"seed\")";
+        if (it.key() == "adaptation") {
+          // §5.8 global switch: false gives comparison runs with all three
+          // learned parameters frozen at their world initials.
+          if (!it.value().is_boolean()) {
+            error = "config adaptation must be a boolean";
+            return nullptr;
+          }
+          adaptation_override = it.value().get<bool>();
+          continue;
+        }
+        // §7.1 names "gen" (M3 worldgen) and "world" (custom); neither is a
+        // surface yet — reject instead of silently ignoring.
+        error = "config key \"" + it.key() + "\" is not supported (only \"seed\" and "
+                "\"adaptation\")";
         return nullptr;
       }
     } catch (const json::exception& e) {
@@ -72,7 +100,9 @@ std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string&
       return nullptr;
     }
   }
-  return create(seed, error);
+  auto sim = create(seed, error);
+  if (sim) sim->state().adaptation = adaptation_override;
+  return sim;
 }
 
 void Sim::step(uint32_t ticks) {
@@ -86,6 +116,15 @@ void Sim::step(uint32_t ticks) {
     stepControl(w, state_, signals, rec_, control);
     stepPipelines(w, state_);
     stepProduction(w, state_, control, production, rec_);
+    // M2 logistics (§5.1 ordering): procurement and dispatch run hourly,
+    // transport and adaptation every tick.
+    if (state_.tick % 4 == 0) {
+      ProcurementStats pstats;
+      stepProcurement(w, state_, paths_, signals, market_params_, pstats, rec_);
+      stepDispatch(w, state_, paths_, rec_);
+    }
+    stepTransport(w, state_, paths_, rec_);
+    stepAdaptation(w, state_);
     if (state_.tick % 4 == 0) recordHourly(w, state_, rec_);
   }
 }
@@ -103,7 +142,7 @@ std::string Sim::command(const std::string& json_cmd) {
     const std::string type = cmd.at("type").get<std::string>();
 
     if (type == "unit_outage" || type == "site_shutdown" || type == "demand_shock" ||
-        type == "supply_shock") {
+        type == "supply_shock" || type == "route_break") {
       std::string error;
       if (!queueEvent(*world_, cmd.dump(), state_, error)) {
         return json{{"ok", false}, {"error", error}}.dump();
