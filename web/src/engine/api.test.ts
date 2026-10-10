@@ -41,7 +41,9 @@ describe('HttpBackend request mapping', () => {
     const { id } = await b.create({ seed: 42, scenario: 'compressor_trip' });
     expect(id).toBe('sim-7');
     expect(calls[0].url).toBe('http://x/api/sim');
-    expect(JSON.parse(calls[0].body)).toEqual({ seed: 42, scenario: 'compressor_trip' });
+    // The hosted engine's create contract is {seed, adaptation?}: the UI's
+    // scenario concept stops at the stub boundary and must not reach the wire.
+    expect(JSON.parse(calls[0].body)).toEqual({ seed: 42 });
   });
 
   it('steps by posting {"ticks":N} and decodes the binary snapshot reply', async () => {
