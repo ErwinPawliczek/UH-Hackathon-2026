@@ -1,4 +1,5 @@
 // Chain Reaction — §5.7 dispatch and transport implementation.
+
 #include "sim/dispatch.h"
 
 #include "sim/adaptation.h"
@@ -6,9 +7,19 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace crx {
 namespace sim {
+namespace {
+
+std::string fmtQty(double v) {
+  char buf[32];
+  std::snprintf(buf, sizeof buf, "%.1f", v);
+  return buf;
+}
+
+}  // namespace
 
 namespace {
 
@@ -137,7 +148,7 @@ void stepDispatch(const World& world, State& state, PathCache& paths, Recorder& 
     vs.edge_pos_km = 0;
     logEvent(rec, state.tick, "dispatch", world.sites[world.fleet[best].home.v].key, vc.key,
              "vehicle " + std::to_string(best) + " → order " + std::to_string(oi) + " (" +
-                 world.catalog.materials[o.material].key + " " + std::to_string(o.qty_t) + " t)");
+                 world.catalog.materials[o.material].key + " " + fmtQty(o.qty_t) + " t)");
   }
 }
 
@@ -249,7 +260,7 @@ void stepTransport(const World& world, State& state, PathCache& paths, Recorder&
       vs.cargo_t = 0;
       logEvent(rec, state.tick, "delivered", world.tanks[o.to].key,
                world.catalog.materials[o.material].key,
-               std::to_string(o.qty_t) + " t in " + std::to_string(lead_h) + " h");
+               fmtQty(o.qty_t) + " t in " + fmtQty(lead_h) + " h");
     }
   }
 }
