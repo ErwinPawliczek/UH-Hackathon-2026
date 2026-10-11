@@ -134,10 +134,11 @@ export function EconomyMarket({ open }: { open: boolean }) {
                 const losing = p.marginUsdPerT !== null && p.marginUsdPerT < 0;
                 return (
                   <li key={p.site}>
-                    <button type="button" className="grid w-full cursor-pointer grid-cols-[11rem_1fr_5.5rem_3rem] items-center gap-3 py-1.5 text-left text-sm hover:bg-panel-2" onClick={() => pick(p.site)} title={`Show ${p.name} on the map`} data-testid="market-plant-row">
+                    <button type="button" className="grid w-full cursor-pointer grid-cols-[13rem_1fr_5.5rem_3rem] items-center gap-3 py-1.5 text-left text-sm hover:bg-panel-2" onClick={() => pick(p.site)} title={`Show ${p.name} on the map`} data-testid="market-plant-row">
                       <span className="min-w-0">
                         <span className="block truncate text-ink">{p.name}</span>
-                        {words !== null && <span className={`block truncate text-xs ${losing ? 'text-alarm' : 'text-muted'}`}>{words}</span>}
+                        {/* the phrase is the point of the row: it wraps, it is never cut */}
+                        {words !== null && <span className={`block text-xs leading-tight ${losing ? 'text-alarm' : 'text-muted'}`}>{words}</span>}
                       </span>
                       <span className="min-w-0" title={`Per tonne sold: revenue ${perTonne(p.revenueUsdPerT)}, feed ${perTonne(p.feedCostUsdPerT)}, energy ${perTonne(p.energyUsdPerT)}`}>
                         {split === null ? <span className="text-xs text-muted">nothing sold yet</span> : (
