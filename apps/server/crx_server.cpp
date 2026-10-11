@@ -115,17 +115,8 @@ std::string SessionRegistry::nextIdLocked() {
   return buf;
 }
 
-// Destroys a session removed from the map only after waiting out any
-// in-flight engine call on it. Never called with the registry lock held: the
-// engine work happens under the session mutex, which never takes the
-// registry lock back.
-static void destroyWhenIdle(std::unique_ptr<Session> doomed) {
-  std::lock_guard<std::mutex> sessionLock(doomed->mutex);
-  doomed.reset();
-}
-
 SessionRegistry::CreateResult SessionRegistry::insertNew(crx_sim* sim) {
-  std::unique_ptr<Session> victim;
+  std::shared_ptr<Session> victim;
   std::string id;
   {
     std::lock_guard<std::mutex> lock(globalMutex_);
@@ -133,16 +124,19 @@ SessionRegistry::CreateResult SessionRegistry::insertNew(crx_sim* sim) {
       // The table is full: make room by dropping the least-recently-used
       // session. A new visitor is never refused — the 503 path is gone.
       const auto lru = std::min_element(
-          sessions_.begin(), sessions_.end(),
-          [](const auto& a, const auto& b) { return a.second->lastUsed < b.second->lastUsed; });
+          sessions_.begin(), sessions_.end(), [](const auto& a, const auto& b) {
+            return a.second->lastUsed.load() < b.second->lastUsed.load();
+          });
       victim = std::move(lru->second);
       sessions_.erase(lru);
     }
-    Session* session = new Session(sim, nowFn_());
     id = nextIdLocked();
-    sessions_.emplace(id, std::unique_ptr<Session>(session));
+    sessions_.emplace(id, std::make_shared<Session>(sim, nowFn_()));
   }
-  if (victim != nullptr) destroyWhenIdle(std::move(victim));
+  // Eviction takes the registry's reference away with no lock held: the
+  // engine handle is freed at once unless a request still holds a reference,
+  // in which case the session dies when that request finishes.
+  victim.reset();
   return {CreateStatus::kCreated, id};
 }
 
@@ -155,20 +149,24 @@ SessionRegistry::CreateResult SessionRegistry::create(const std::string& configJ
 
 SessionRegistry::CreateResult SessionRegistry::forkFrom(const std::string& parentId) {
   reapExpired();
-  crx_sim* child = nullptr;
+  std::shared_ptr<Session> parent;
   {
     std::lock_guard<std::mutex> lock(globalMutex_);
     const auto it = sessions_.find(parentId);
     if (it == sessions_.end()) return {CreateStatus::kNotFound, {}};
-    std::lock_guard<std::mutex> sessionLock(it->second->mutex);
-    child = crx_fork(it->second->sim);
+    parent = it->second;  // keep the parent alive even if evicted next
+  }
+  crx_sim* child = nullptr;
+  {
+    std::lock_guard<std::mutex> sessionLock(parent->mutex);
+    child = crx_fork(parent->sim);
   }
   if (child == nullptr) return {CreateStatus::kBadConfig, {}};
   return insertNew(child);
 }
 
 bool SessionRegistry::release(const std::string& id) {
-  std::unique_ptr<Session> doomed;
+  std::shared_ptr<Session> doomed;
   {
     std::lock_guard<std::mutex> lock(globalMutex_);
     const auto it = sessions_.find(id);
@@ -176,17 +174,20 @@ bool SessionRegistry::release(const std::string& id) {
     doomed = std::move(it->second);
     sessions_.erase(it);
   }
-  destroyWhenIdle(std::move(doomed));  // the engine handle dies after the wait
+  // Dropping the last reference frees the engine handle outside every lock;
+  // a request that already copied the reference keeps the session alive
+  // until its engine call finishes.
+  doomed.reset();
   return true;
 }
 
 void SessionRegistry::reapExpired() {
-  std::vector<std::unique_ptr<Session>> expired;
+  std::vector<std::shared_ptr<Session>> expired;
   {
     std::lock_guard<std::mutex> lock(globalMutex_);
-    const auto now = nowFn_();
+    const auto now = nowFn_().time_since_epoch().count();
     for (auto it = sessions_.begin(); it != sessions_.end();) {
-      if (now - it->second->lastUsed > ttl_) {
+      if (now - it->second->lastUsed.load() > ttl_.count()) {
         expired.push_back(std::move(it->second));
         it = sessions_.erase(it);
       } else {
@@ -194,8 +195,9 @@ void SessionRegistry::reapExpired() {
       }
     }
   }
-  // Destroy only after waiting out any in-flight engine call on the session.
-  for (auto& session : expired) destroyWhenIdle(std::move(session));
+  // Free outside the registry lock; requests holding references keep their
+  // session alive until they finish with it.
+  for (auto& session : expired) session.reset();
 }
 
 void registerRoutes(httplib::Server& svr, SessionRegistry& sessions, const std::string& webDir) {

@@ -12,11 +12,22 @@
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/native-release",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "native-tsan",
+      "inherits": "native-release",
+      "binaryDir": "${sourceDir}/build/native-tsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "",
+        "CMAKE_CXX_FLAGS": "-O1 -g -fsanitize=thread -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread"
+      }
     }
   ],
   "buildPresets": [
     { "name": "native-debug", "configurePreset": "native-debug" },
-    { "name": "native-release", "configurePreset": "native-release" }
+    { "name": "native-release", "configurePreset": "native-release" },
+    { "name": "native-tsan", "configurePreset": "native-tsan" }
   ],
   "testPresets": [
     {
@@ -27,6 +38,11 @@
     {
       "name": "native-release",
       "configurePreset": "native-release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "native-tsan",
+      "configurePreset": "native-tsan",
       "output": { "outputOnFailure": true }
     }
   ]

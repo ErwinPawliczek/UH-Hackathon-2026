@@ -9,6 +9,7 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <fstream>
@@ -320,6 +321,65 @@ TEST_CASE("production defaults: capacity 200, two-minute idle expiry") {
   fake += std::chrono::minutes(2) + std::chrono::seconds(1);
   registry.reapExpired();
   CHECK(registry.size() == 0);  // 2-minute default TTL
+}
+
+TEST_CASE("hammer: concurrent step, DELETE, fork and eviction on one session stay safe") {
+  crx::server::SessionRegistry registry(4, std::chrono::minutes(2));
+  const auto first = registry.create(R"({"seed":1})");
+  REQUIRE(first.status == crx::server::SessionRegistry::CreateStatus::kCreated);
+
+  // The id the client is currently using: every thread races around it, and
+  // the stepper recreates on a miss exactly like the web client's 404
+  // recovery, so both the alive and the just-erased paths are hammered.
+  std::mutex idMutex;
+  std::string currentId = first.id;
+
+  constexpr int kIters = 120;
+  std::atomic<int> stepOk{0}, stepGone{0}, createOk{0};
+
+  std::thread stepper([&] {
+    for (int i = 0; i < kIters; ++i) {
+      std::string id;
+      {
+        const std::lock_guard<std::mutex> lock(idMutex);
+        id = currentId;
+      }
+      if (registry.withSession(id, [&](crx::server::Session& s) { crx_step(s.sim, 1); })) {
+        ++stepOk;
+        continue;
+      }
+      ++stepGone;  // released or evicted mid-use
+      const auto fresh = registry.create(R"({"seed":1})");
+      if (fresh.status == crx::server::SessionRegistry::CreateStatus::kCreated) {
+        const std::lock_guard<std::mutex> lock(idMutex);
+        currentId = fresh.id;
+      }
+    }
+  });
+
+  std::thread churn([&] {
+    for (int i = 0; i < kIters; ++i) {
+      std::string id;
+      {
+        const std::lock_guard<std::mutex> lock(idMutex);
+        id = currentId;
+      }
+      registry.release(id);  // wins or loses the race — both must be safe
+      if (i % 2 == 0) registry.forkFrom(id);  // parent may be evicted mid-fork
+      if (registry.create(R"({"seed":1})").status ==
+          crx::server::SessionRegistry::CreateStatus::kCreated) {
+        ++createOk;  // never refused — no 503 path under churn
+      }
+      registry.reapExpired();  // expiry sweep under the same pressure
+    }
+  });
+
+  stepper.join();
+  churn.join();
+
+  CHECK(stepOk + stepGone == kIters);  // every attempt returned: no deadlock
+  CHECK(createOk == kIters);           // every create succeeded: no 503
+  CHECK(registry.size() <= 4);         // the cap held under concurrent churn
 }
 
 TEST_CASE("the placeholder page is served when no web build exists") {

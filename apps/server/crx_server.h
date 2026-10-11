@@ -10,10 +10,12 @@
 #ifndef CRX_SERVER_H
 #define CRX_SERVER_H
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -27,23 +29,29 @@ namespace server {
 
 // One hosted simulation: the engine handle, its own mutex (one sim per
 // session, calls serialised) and a last-use stamp for inactivity expiry.
+// The stamp is atomic: it is written under the session mutex while LRU
+// eviction and the TTL sweep read it under the registry lock, and the two
+// locks are never held together.
 struct Session {
   Session(crx_sim* handle, std::chrono::steady_clock::time_point now)
-      : sim(handle), lastUsed(now) {}
+      : sim(handle), lastUsed(now.time_since_epoch().count()) {}
   ~Session();
   Session(const Session&) = delete;
   Session& operator=(const Session&) = delete;
 
   crx_sim* sim;
   std::mutex mutex;
-  std::chrono::steady_clock::time_point lastUsed;
+  std::atomic<std::chrono::steady_clock::rep> lastUsed;  // steady_clock ticks
 };
 
 // In-memory session table (§7.4): capped at `capacity` (least-recently-used
 // eviction when full — a new visitor is never refused), entries expire after
-// `ttl` of inactivity. Thread-safe. Lock order is always registry → session,
-// so a reaped or released session is never destroyed under a concurrent
-// engine call.
+// `ttl` of inactivity. Thread-safe. Sessions are held by shared_ptr: lookups
+// copy the pointer out under the registry lock, then take the session's own
+// mutex with no registry lock held. Erasing an entry only drops the
+// registry's reference, so release, eviction and the TTL sweep can never free
+// a session an in-flight request is using — destruction happens when the
+// last reference drops, outside every lock.
 class SessionRegistry {
  public:
   using Clock = std::chrono::steady_clock;
@@ -66,19 +74,20 @@ class SessionRegistry {
   bool release(const std::string& id);
 
   // Runs fn(session) with the session locked and its last-use stamp touched.
-  // Returns false when the id is unknown.
+  // Returns false when the id is unknown. The shared_ptr is copied out under
+  // the registry lock, so the session stays alive even if release, eviction
+  // or the TTL sweep erases the entry while fn runs.
   template <class F>
   bool withSession(const std::string& id, F&& fn) {
-    Session* s = nullptr;
+    std::shared_ptr<Session> s;
     {
       std::lock_guard<std::mutex> lock(globalMutex_);
       const auto it = sessions_.find(id);
       if (it == sessions_.end()) return false;
-      s = it->second.get();
-      s->mutex.lock();  // acquired while the registry lock is held: excludes reap
-      s->lastUsed = nowFn_();
+      s = it->second;
     }
-    std::unique_lock<std::mutex> sessionLock(s->mutex, std::adopt_lock);
+    std::lock_guard<std::mutex> sessionLock(s->mutex);
+    s->lastUsed = nowFn_().time_since_epoch().count();
     fn(*s);
     return true;
   }
@@ -100,7 +109,7 @@ class SessionRegistry {
   size_t capacity_;
   std::chrono::steady_clock::duration ttl_;
   mutable std::mutex globalMutex_;
-  std::unordered_map<std::string, std::unique_ptr<Session>> sessions_;
+  std::unordered_map<std::string, std::shared_ptr<Session>> sessions_;
   uint64_t idCounter_ = 0;
   uint64_t idEntropy_;  // seeded once, from std::random_device
   std::function<Clock::time_point()> nowFn_ = [] { return Clock::now(); };
