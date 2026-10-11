@@ -135,6 +135,65 @@ TEST_CASE("command posts through to the engine and fork copies the run") {
   CHECK(tickOf(forkSnapshot->body) == 10);
 }
 
+TEST_CASE("rewind rebuilds an earlier tick exactly and forgets what came after") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const auto post = [&cli](const std::string& path, const std::string& body) {
+    auto res = cli.Post(path, body, "application/json");
+    REQUIRE(res);
+    return *res;
+  };
+  const auto snapshotAt = [&post](const std::string& id) {
+    return post("/api/sim/" + id + "/step", R"({"ticks":0})").body;
+  };
+  const std::string outage =
+      R"({"type":"unit_outage","site":"STEAM_CRACKER","unit":"SC-CGC","trains":1,"duration_h":48})";
+
+  // Run A: 40 ticks, an outage, 60 more ticks.
+  const std::string a = createSession(cli, R"({"seed":7})");
+  post("/api/sim/" + a + "/step", R"({"ticks":40})");
+  CHECK(json::parse(post("/api/sim/" + a + "/command", outage).body).at("ok") == true);
+  post("/api/sim/" + a + "/step", R"({"ticks":60})");
+
+  // Back to tick 70, after the outage was issued: identical to a run that
+  // did the same things and stopped at 70.
+  const auto back = post("/api/sim/" + a + "/rewind", R"({"tick":70})");
+  CHECK(back.status == 200);
+  CHECK(json::parse(back.body).at("tick") == 70);
+  const std::string b = createSession(cli, R"({"seed":7})");
+  post("/api/sim/" + b + "/step", R"({"ticks":40})");
+  post("/api/sim/" + b + "/command", outage);
+  post("/api/sim/" + b + "/step", R"({"ticks":30})");
+  CHECK(tickOf(snapshotAt(a)) == 70);
+  CHECK(snapshotAt(a) == snapshotAt(b));
+
+  // Back to tick 40, the moment the outage was issued: the outage is
+  // forgotten, so running on matches a run that never had it.
+  CHECK(post("/api/sim/" + a + "/rewind", R"({"tick":40})").status == 200);
+  post("/api/sim/" + a + "/step", R"({"ticks":60})");
+  const std::string c = createSession(cli, R"({"seed":7})");
+  post("/api/sim/" + c + "/step", R"({"ticks":100})");
+  CHECK(snapshotAt(a) == snapshotAt(c));
+  CHECK(snapshotAt(a) != post("/api/sim/" + b + "/step", R"({"ticks":30})").body);
+
+  // A fork can go back into its parent's past.
+  const std::string f = json::parse(post("/api/sim/" + b + "/fork", "").body).at("id");
+  CHECK(post("/api/sim/" + f + "/rewind", R"({"tick":70})").status == 200);
+  const std::string d = createSession(cli, R"({"seed":7})");
+  post("/api/sim/" + d + "/step", R"({"ticks":40})");
+  post("/api/sim/" + d + "/command", outage);
+  post("/api/sim/" + d + "/step", R"({"ticks":30})");
+  CHECK(snapshotAt(f) == snapshotAt(d));
+
+  // Refusals: the future, malformed bodies, unknown sessions.
+  CHECK(post("/api/sim/" + a + "/rewind", R"({"tick":101})").status == 400);
+  CHECK(post("/api/sim/" + a + "/rewind", R"({"tick":-1})").status == 400);
+  CHECK(post("/api/sim/" + a + "/rewind", R"({"ticks":5})").status == 400);
+  CHECK(post("/api/sim/" + a + "/rewind", "not json").status == 400);
+  CHECK(post("/api/sim/nope/rewind", R"({"tick":0})").status == 404);
+  CHECK(tickOf(snapshotAt(a)) == 100);
+}
+
 TEST_CASE("world json: fleet manifest without a fabricated shuttle schedule") {
   TestServer srv;
   auto cli = client(srv.port);
