@@ -489,3 +489,12 @@ h2 {
 :root[data-players-only='1'] .pipeline-labels {
   display: none !important;
 }
+
+/* The damage view of a room summary: only the sites that broke keep their label, ringed in red. */
+:root[data-damage-view='1'] .site-label-box:not([data-broken='1']),
+:root[data-damage-view='1'] .pipeline-labels {
+  display: none !important;
+}
+:root[data-damage-view='1'] .site-label-box[data-broken='1'] {
+  box-shadow: 0 0 0 3px var(--alarm) !important;
+}

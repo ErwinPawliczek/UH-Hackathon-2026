@@ -119,6 +119,8 @@ export interface SimState {
   room: RoomInfo | null;
   /** the site this player owns in the room: ringed and badged "yours" on the map; null for the host or a watcher */
   mySite: number | null;
+  /** the damage view of a room's summary: only these sites and pipelines stand out on the map; null normally */
+  damageView: { sites: number[]; pipelines: number[] } | null;
   setMySite: (site: number | null) => void;
   /**
    * Live backend command dispatcher, wired by the engine session; null
@@ -210,6 +212,7 @@ export const useSim = create<SimState>()(
       customMap: false,
       room: null,
       mySite: null,
+      damageView: null,
       setMySite: (mySite) => set({ mySite }),
       sendCommand: null,
       fetchVehicle: null,

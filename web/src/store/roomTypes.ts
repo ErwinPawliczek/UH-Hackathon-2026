@@ -111,3 +111,25 @@ export function siteOwnerColors(room: Pick<RoomInfo, 'sites' | 'players'> | null
   for (const p of room.players) if (p.site !== null && p.site >= 0 && p.site < nSites && out[p.site] === null) out[p.site] = playerColor(room, p.id);
   return out;
 }
+
+/** One run's totals in a room summary: the room itself, or the same run with nobody's changes. */
+export interface SummaryTotals { lostSalesUsd: number; deliveredT: number; plantsStoppedNow: number }
+export interface SummarySite {
+  site: number; name: string; owner: string | null; ownerName: string | null;
+  status: number; baselineStatus: number;
+  stoppedHours: number; baselineStoppedHours: number;
+  outputT: number; baselineOutputT: number;
+  lostSalesUsd: number; baselineLostSalesUsd: number;
+  /** clearly worse than in the run with no changes */
+  broken: boolean;
+}
+export interface SummaryPipeline { index: number; name: string; movedT: number; baselineMovedT: number; broken: boolean }
+export interface SummaryPlayer { id: string; name: string; site: number | null; damageUsd: number; tookDown: number[]; moves: number }
+/** GET /api/room/{code}/summary: the room against the same run with no changes at all. */
+export interface RoomSummary {
+  tick: number;
+  economy: { actual: SummaryTotals; baseline: SummaryTotals; damageUsd: number };
+  sites: SummarySite[];
+  pipelines: SummaryPipeline[];
+  players: SummaryPlayer[];
+}

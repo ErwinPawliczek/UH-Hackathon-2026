@@ -6,7 +6,10 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import type { Selection } from '../store/sim';
+import { useSim, type Selection } from '../store/sim';
+
+/** Lines that are not part of the damage view. */
+const FADED = 0xd9dce0;
 import type { Snapshot } from '../engine/snapshot';
 import { VEHICLE_CLASSES, routePointAt, sampleHeight, type WorldSpec } from '../engine/world';
 import { buildHexBoard, deckYAt, surfaceYAt, mapToWorld, SCALE } from './terrainMesh';
@@ -480,10 +483,16 @@ export class MapScene {
   ): void {
     const selectedSite = selection !== null && selection.kind === 'site' ? selection.index : null;
     updateInstances(this.siteLayer, cur, prev, f, selectedSite);
+    const damage = useSim.getState().damageView;
     // closed routes (array 10) turn alarm red until they reopen
     for (let i = 0; i < this.routeLineCount && i < cur.edgeOpen.length; i++) {
       const line = this.flowLines[i];
-      setFlowLineColor(line, cur.edgeOpen[i] === 0 ? V3.alarm : line.color);
+      setFlowLineColor(line, cur.edgeOpen[i] === 0 ? V3.alarm : damage !== null ? FADED : line.color);
+    }
+    // the damage view: the pipelines that stopped carrying stand out in red, the rest fade
+    for (let i = this.routeLineCount; i < this.flowLines.length; i++) {
+      const line = this.flowLines[i];
+      setFlowLineColor(line, damage === null ? line.color : damage.pipelines.includes(i - this.routeLineCount) ? V3.alarm : FADED);
     }
     let instantPlaced = false;
     if (cur !== this.motionSnap) {

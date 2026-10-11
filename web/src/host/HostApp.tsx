@@ -15,6 +15,8 @@ import { createRoom, roomSource, type RoomSource } from '../store/room';
 import { ownedName, playerColor, type HostAction, type RoomInfo, type RoomScore } from '../store/roomTypes';
 import { useSim } from '../store/sim';
 import { useRoom } from '../store/useRoom';
+import { useSummary } from '../store/useSummary';
+import { DamageSummary } from '../ui/DamageSummary';
 import { DropdownMenu } from '../ui/DropdownMenu';
 import { SiteBadge } from '../ui/SiteIcon';
 import { SpeedControl } from '../ui/SpeedControl';
@@ -149,24 +151,17 @@ function Leaderboard({ source, room }: { source: RoomSource; room: RoomInfo }) {
     const t = setInterval(load, 2000);
     return () => { stop = true; clearInterval(t); };
   }, [source]);
-  const [board, setBoard] = useState<'profit' | 'damage'>('profit');
   const ownerOf = new Map(room.sites.map((s) => [s.index, s.owner]));
   const names = new Map(room.players.map((p) => [p.id, p.name]));
-  const all = scores !== null
-    ? scores.map((r) => ({ site: r.site, name: r.name, owner: ownerOf.get(r.site) ?? r.owner, ownerName: r.ownerName, value: board === 'profit' ? r.profitUsd : r.damageUsd ?? 0 }))
-    // no scores yet: who has what
-    : room.sites.filter((s) => s.playable).map((s) => ({ site: s.index, name: s.name, owner: s.owner, ownerName: s.owner === null ? null : names.get(s.owner) ?? null, value: NaN }));
-  // players first on the profit board; the damage board lists players only
-  const rows = (board === 'damage' ? all.filter((r) => r.owner !== null) : all)
-    .sort((a, b) => (scores !== null ? b.value - a.value : Number(b.owner !== null) - Number(a.owner !== null) || a.site - b.site));
+  // players only, the most damage first
+  const rows = (scores ?? [])
+    .map((r) => ({ site: r.site, name: r.name, owner: ownerOf.get(r.site) ?? r.owner, ownerName: r.ownerName, value: r.damageUsd ?? 0 }))
+    .filter((r) => r.owner !== null)
+    .sort((a, b) => b.value - a.value);
   return (
     <section className="chamfer pointer-events-auto absolute right-4 top-16 z-30 w-[360px] p-3" style={CARD} data-testid="host-leaderboard">
-      <div className="mb-2 flex items-center gap-2">
-        {([['profit', 'Profit'], ['damage', 'Damage to economy']] as const).map(([key, label]) => (
-          <button key={key} className={`btn ${board === key ? 'btn-active' : ''}`} onClick={() => setBoard(key)} data-testid={`host-board-${key}`}>{label}</button>
-        ))}
-      </div>
-      {board === 'damage' && <p className="mb-1 text-xs text-muted">Customer sales lost because of each player, against the same run without them.</p>}
+      <div className="label mb-1">Damage to the economy</div>
+      <p className="mb-1 text-xs text-muted">Customer sales lost because of each player, against the same run without them.</p>
       {rows.length === 0 && <p className="text-sm text-muted">Nobody has taken a plant yet.</p>}
       <ol className="max-h-[60vh] overflow-auto">
         {rows.map((r, i) => {
@@ -174,18 +169,40 @@ function Leaderboard({ source, room }: { source: RoomSource; room: RoomInfo }) {
           return (
             <li key={r.site} className="border-t border-line first:border-t-0">
               <button className="flex w-full cursor-pointer items-center gap-2 py-1 text-left hover:bg-panel-2" onClick={() => select({ kind: 'site', index: r.site })}>
-                <span className="data w-5 shrink-0 text-right text-muted">{scores !== null ? i + 1 : ''}</span>
+                <span className="data w-5 shrink-0 text-right text-muted">{i + 1}</span>
                 <SiteBadge preset={world?.sites[r.site]?.preset ?? ''} />
-                <span className="min-w-0 flex-1 truncate text-sm font-semibold" style={{ color: color ?? undefined }}>
-                  {r.owner !== null ? ownedName(r.ownerName ?? names.get(r.owner) ?? 'Player', r.name) : <span className="font-normal text-muted">{r.name}</span>}
-                </span>
-                <span className={`data shrink-0 text-sm ${board === 'damage' ? 'text-alarm' : 'text-ink'}`}>{Number.isFinite(r.value) ? fmtMoney(r.value) : '—'}</span>
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold" style={{ color: color ?? undefined }}>{ownedName(r.ownerName ?? names.get(r.owner ?? '') ?? 'Player', r.name)}</span>
+                <span className={`data shrink-0 text-sm ${r.value > 0 ? 'text-alarm' : 'text-ink'}`}>{fmtMoney(r.value)}</span>
               </button>
             </li>
           );
         })}
       </ol>
     </section>
+  );
+}
+
+/** The end of a session, or a look at it so far: before and after, what broke, who broke it. */
+function SummaryOverlay({ source, room, onClose, onNew }: { source: RoomSource; room: RoomInfo; onClose: () => void; onNew: () => void }) {
+  const summary = useSummary(source, room.phase === 'ended' ? 5000 : 2000);
+  const viewMap = () => {
+    if (summary === null) return;
+    useSim.setState({ damageView: { sites: summary.sites.filter((s) => s.broken).map((s) => s.site), pipelines: summary.pipelines.filter((p) => p.broken).map((p) => p.index) } });
+    onClose();
+  };
+  return (
+    <div className="absolute inset-0 z-[70] flex items-start justify-center overflow-auto bg-white/80 p-6 pt-16" data-testid="host-summary">
+      <section className="chamfer w-full max-w-[760px] p-6" style={CARD}>
+        {summary === null
+          ? <p className="text-sm text-muted">Working out the damage…</p>
+          : <DamageSummary summary={summary} room={room} />}
+        <div className="mt-6 flex flex-wrap gap-2">
+          <button className="btn btn-primary" onClick={viewMap} disabled={summary === null} data-testid="host-summary-map">View on the map</button>
+          <button className="btn" onClick={onClose}>{room.phase === 'ended' ? 'Close' : 'Back to the session'}</button>
+          {room.phase === 'ended' && <button className="btn" onClick={onNew}>Host a new session</button>}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -223,7 +240,7 @@ function Moves({ room }: { room: RoomInfo }) {
   );
 }
 
-function HostBar({ room, send, busy }: { room: RoomInfo; send: (a: HostAction) => void; busy: boolean }) {
+function HostBar({ room, send, busy, onSummary }: { room: RoomInfo; send: (a: HostAction) => void; busy: boolean; onSummary: () => void }) {
   const world = useSim((s) => s.world);
   const tick = useSim((s) => s.snap?.tick);
   const scenarios = useMemo(() => scenariosFor(world), [world]);
@@ -253,7 +270,8 @@ function HostBar({ room, send, busy }: { room: RoomInfo; send: (a: HostAction) =
       {room.phase !== 'ended' && <button className="btn" onClick={() => { send({ action: 'scenario', command: { type: 'end_events' } }); setFired([]); }} disabled={busy} title="End every running scenario now" data-testid="host-end-events">End events</button>}
       <button className={`btn ${playersOnly ? 'btn-active' : ''}`} aria-pressed={playersOnly} onClick={() => setPlayersOnly(!playersOnly)} data-testid="host-players-only">Players only: {playersOnly ? 'on' : 'off'}</button>
       <span className="ml-auto text-xs text-muted">Code <span className="data text-ink">{room.code}</span> · {room.players.length} player{room.players.length === 1 ? '' : 's'}</span>
-      {room.phase !== 'ended' && <button className="btn" onClick={() => { if (window.confirm('End the simulation for everyone?')) send({ action: 'end' }); }} data-testid="host-end">End simulation</button>}
+      <button className="btn" onClick={onSummary} data-testid="host-summary-open">Damage summary</button>
+      {room.phase !== 'ended' && <button className="btn btn-danger" onClick={() => { if (window.confirm('End the session for everyone and show the damage summary?')) { send({ action: 'end' }); onSummary(); } }} data-testid="host-end">End and show damage</button>}
     </header>
   );
 }
@@ -267,6 +285,15 @@ function Game({ hosting, onLeave }: { hosting: Hosting; onLeave: () => void }) {
   const source = useMemo(() => roomSource(hosting.code), [hosting.code]);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
+  const [showSummary, setShowSummary] = useState(false);
+  const damageView = useSim((s) => s.damageView);
+  useEffect(() => {
+    document.documentElement.dataset.damageView = damageView !== null ? '1' : '';
+    return () => { document.documentElement.dataset.damageView = ''; };
+  }, [damageView]);
+  // a session found already ended (a reload): straight to its summary
+  const ended = room?.phase === 'ended';
+  useEffect(() => { if (ended) setShowSummary(true); }, [ended]);
   const url = joinUrl(hosting.code);
   // the plant window's Fail unit button works for the host: its command goes out as a host scenario
   useEffect(() => {
@@ -288,10 +315,18 @@ function Game({ hosting, onLeave }: { hosting: Hosting; onLeave: () => void }) {
       {world !== null && <SceneCanvas />}
       {/* click a plant or a vehicle on the map: the same windows as the main app */}
       {world !== null && room !== null && room.phase !== 'lobby' && <><VehicleWindow /><SiteWindow /></>}
-      {room !== null && room.phase !== 'lobby' && <HostBar room={room} send={send} busy={busy} />}
+      {room !== null && room.phase !== 'lobby' && <HostBar room={room} send={send} busy={busy} onSummary={() => { useSim.setState({ damageView: null }); setShowSummary(true); }} />}
       {room !== null && room.phase === 'lobby' && <Lobby room={room} url={url} onSources={(allow) => send({ action: 'sources', allow })} onStart={() => { send({ action: 'start' }); window.setTimeout(() => send({ action: 'speed', speed: 8 }), 400); }} busy={busy} />}
       {room !== null && room.phase !== 'lobby' && <Leaderboard source={source} room={room} />}
       {room !== null && room.phase !== 'lobby' && <Moves room={room} />}
+      {room !== null && showSummary && <SummaryOverlay source={source} room={room} onClose={() => setShowSummary(false)} onNew={onLeave} />}
+      {damageView !== null && !showSummary && (
+        <div className="chamfer chamfer-sm absolute bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 p-2.5" style={CARD} data-testid="host-damage-view">
+          <span className="text-sm text-ink"><span className="font-semibold text-alarm">In red:</span> {damageView.sites.length} site{damageView.sites.length === 1 ? '' : 's'} and {damageView.pipelines.length} pipeline{damageView.pipelines.length === 1 ? '' : 's'} that broke because of this session</span>
+          <button className="btn" onClick={() => { useSim.setState({ damageView: null }); setShowSummary(true); }}>Back to the summary</button>
+          <button className="btn" onClick={() => useSim.setState({ damageView: null })}>Show everything</button>
+        </div>
+      )}
       {(refused !== null || (error !== null && snap !== null)) && (
         <div className="absolute inset-x-0 top-14 z-[65] flex justify-center">
           <span className="rounded-sm border border-alarm/50 bg-white px-4 py-2 text-xs font-medium text-alarm" role="alert">{refused ?? error}</span>

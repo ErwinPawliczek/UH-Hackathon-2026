@@ -152,12 +152,15 @@ export class SiteLabels {
   /** In a room: each plant's owner under its name, and the player's own plant marked in blue. */
   private syncOwners(): void {
     const st = useSim.getState();
-    if (st.room === null && this.ownerShown.every((v) => v === '')) return;
+    if (st.room === null && st.damageView === null && this.ownerShown.every((v) => v === '')) return;
     const n = st.world?.sites.length ?? 0;
     const names = siteOwners(st.room, n);
     const colors = siteOwnerColors(st.room, n);
     for (let i = 0; i < this.labels.length; i++) {
       const site = this.labelSite[i];
+      // the damage view (index.css) shows only the sites that broke
+      const broken = st.damageView !== null && st.damageView.sites.includes(site) ? '1' : '';
+      if (this.boxes[i].dataset.broken !== broken) this.boxes[i].dataset.broken = broken;
       const mine = st.room !== null && st.mySite === site;
       const who = st.room === null ? null : names[site] ?? null;
       const color = who === null ? null : colors[site] ?? '#1764d6';
