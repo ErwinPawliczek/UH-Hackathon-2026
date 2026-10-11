@@ -1938,3 +1938,59 @@ TEST_CASE("M23: the event log reads as plain sentences") {
       CHECK(t.find("\xE2\x86\x92") == std::string::npos);  // no arrows
     }
 }
+
+TEST_CASE("M24: sourcing tells the site's state from the plant's, and a short seller says both numbers") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  sim->step(960);
+  // Everything running: both states agree.
+  const json calm = json::parse(sourcingJson(*sim, "FUEL_DEPOT", "DIESEL"));
+  for (const json& o : calm.at("options")) CHECK(o.at("seller_site_state") == "running");
+  CHECK(calm.at("usual").at("site_state") == "running");
+
+  // The crude unit goes down. Diesel is still made from gasoil in stock.
+  REQUIRE(sim->command(R"({"type":"unit_outage","site":"REFINERY","unit":"RF-CDU","trains":1,)"
+                       R"("duration_h":240})")
+              .find("\"ok\":true") != std::string::npos);
+  sim->step(8);
+  const json doc = json::parse(sourcingJson(*sim, "FUEL_DEPOT", "DIESEL"));
+  bool saw_refinery = false;
+  for (const json& o : doc.at("options"))
+    if (o.at("seller") == "REFINERY") {
+      saw_refinery = true;
+      CHECK(o.at("seller_state") == "running");         // the diesel hydrotreater
+      CHECK(o.at("seller_site_state") == "shut_down");  // the site, as the map shows it
+    }
+  CHECK(saw_refinery);
+  CHECK(doc.at("usual").at("site") == "REFINERY");
+  CHECK(doc.at("usual").at("state") == "running");
+  CHECK(doc.at("usual").at("site_state") == "shut_down");
+  const json list = json::parse(buyTanksJson(*sim));
+  bool row_ok = false;
+  for (const json& t : list.at("tanks"))
+    if (t.at("site") == "FUEL_DEPOT" && t.at("material") == "DIESEL")
+      row_ok = t.at("usual_state") == "running" && t.at("usual_site_state") == "shut_down";
+  CHECK(row_ok);
+
+  // A seller without a full load: the reason gives what it can spare and
+  // what one load is, in the same units the row shows.
+  // (Empty the small solvent tank at Styrenics with hand orders first, so
+  // there is a short seller to look at.)
+  for (int i = 0; i < 12; ++i)
+    sim->command(R"({"type":"place_order","site":"PAINTS","material":"SOLVENT","seller":"STYRENICS",)"
+                 R"("cls":"TRUCK_TANK","tonnes":20})");
+  size_t short_rows = 0;
+  for (const json& t : list.at("tanks")) {
+    const json d = json::parse(sourcingJson(*sim, t.at("site").get<std::string>(),
+                                            t.at("material").get<std::string>()));
+    for (const json& o : d.at("options")) {
+      if (o.at("blocked") != "seller_short") continue;
+      ++short_rows;
+      const std::string reason = o.at("blocked_reason").get<std::string>();
+      CHECK(reason == "it can spare " + tonnesText(o.at("free_t").get<double>()) +
+                          "; one load here is " + tonnesText(o.at("lot_t").get<double>()));
+      CHECK(o.at("free_t").get<double>() < o.at("lot_t").get<double>());
+    }
+  }
+  CHECK(short_rows > 0);
+}

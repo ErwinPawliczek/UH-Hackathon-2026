@@ -5,6 +5,7 @@
 #include "sim/routes.h"
 #include "sim/signals.h"
 #include "sim/sim.h"
+#include "sim/words.h"
 
 #include <nlohmann/json.hpp>
 
@@ -217,6 +218,24 @@ const char* sellerState(const World& world, const State& state, uint32_t tank) {
          : best == 0 ? "shut_down" : "no_producer";
 }
 
+// The worst state among all of a site's processes: what the map shows for
+// the site. A site can be red while the plant behind one of its tanks still
+// runs (the refinery's crude unit down, diesel still made from stock).
+const char* siteState(const World& world, const State& state, uint32_t site) {
+  int worst = 3;  // 3 running, 2 held, 1 restarting, 0 shut down
+  bool any = false;
+  const Range<ProcessId> procs = world.sites[site].processes;
+  for (uint32_t p = procs.begin; p < rangeEnd(procs); ++p) {
+    const ProcStatus st = state.proc[p].status;
+    const int rank = st == ProcStatus::Running ? 3 : st == ProcStatus::HoldMin ? 2
+                     : st == ProcStatus::Restarting ? 1 : 0;
+    worst = std::min(worst, rank);
+    any = true;
+  }
+  if (!any) return "no_producer";
+  return worst == 3 ? "running" : worst == 2 ? "held" : worst == 1 ? "restarting" : "shut_down";
+}
+
 struct Usual {
   int seller_tank = -1;
   double delivered_t = 0;
@@ -330,10 +349,13 @@ std::string buyTanksJson(const Sim& sim) {
                 {"options", ways},
                 {"route_closed", cut},
                 {"usual", nullptr},
-                {"usual_state", nullptr}};
+                {"usual_state", nullptr},
+                {"usual_site_state", nullptr}};
     if (usual.seller_tank >= 0) {
       row["usual"] = world.sites[world.tanks[static_cast<size_t>(usual.seller_tank)].site.v].key;
       row["usual_state"] = sellerState(world, state, static_cast<uint32_t>(usual.seller_tank));
+      row["usual_site_state"] =
+          siteState(world, state, world.tanks[static_cast<size_t>(usual.seller_tank)].site.v);
     }
     tanks.push_back(std::move(row));
   }
@@ -431,7 +453,8 @@ std::string sourcingJson(const Sim& sim, const std::string& site_arg,
                    {"site_index", world.tanks[us].site.v},
                    {"name", usite.name},
                    {"delivered_t", round2(usual.delivered_t)},
-                   {"state", sellerState(world, state, us)}};
+                   {"state", sellerState(world, state, us)},
+                   {"site_state", siteState(world, state, world.tanks[us].site.v)}};
     }
 
     // Vehicles per class: how many exist and how many are idle right now.
@@ -468,6 +491,7 @@ std::string sourcingJson(const Sim& sim, const std::string& site_arg,
                   {"seller_index", seller.site.v},
                   {"seller_name", ssite.name},
                   {"seller_state", sellerState(world, state, o.seller_tank)},
+                  {"seller_site_state", siteState(world, state, seller.site.v)},
                   {"stock_t", round2(sts.level_t)},
                   {"free_t", round2(sts.level_t - sts.reserved_out_t)},
                   {"seller_fill", round4(o.q.seller_fill)},
@@ -490,8 +514,14 @@ std::string sourcingJson(const Sim& sim, const std::string& site_arg,
                   {"price_usd_t", round2((o.q.ask + o.q.bid) / 2.0)},
                   {"feasible_now", o.q.bookable()},
                   {"blocked", blocked != nullptr ? json(blocked) : json(nullptr)},
-                  {"blocked_reason", blocked != nullptr ? json(blockSentence(o.q.blocked, vc.mode))
-                                                        : json(nullptr)},
+                  // A short seller says both numbers, so "can spare 3,665 t"
+                  // beside "not enough for one load" stops reading as a clash.
+                  {"blocked_reason",
+                   blocked == nullptr ? json(nullptr)
+                   : o.q.blocked == Quote::Block::SellerShort
+                         ? json("it can spare " + tonnesText(std::max(0.0, sts.level_t - sts.reserved_out_t)) +
+                                "; one load here is " + tonnesText(o.q.lot_t))
+                         : json(blockSentence(o.q.blocked, vc.mode))},
                   {"arrives_before_dry", !cut && travel_h + handling_h < cover_h},
                   {"chosen", is_chosen},
                   {"usual", usual.seller_tank == static_cast<int>(o.seller_tank)}};
