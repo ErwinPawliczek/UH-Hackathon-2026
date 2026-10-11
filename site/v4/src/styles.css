@@ -218,3 +218,19 @@
 .hx-link { fill: var(--primary); fill-opacity: 0; animation: hx-flow 3.6s ease-in-out infinite; }
 @keyframes hx-flow { 0%, 100% { fill-opacity: 0; } 20%, 45% { fill-opacity: .55; } }
 @media (prefers-reduced-motion: reduce) { .hx-link { animation: none; fill-opacity: .3; } }
+
+/* QR page: two codes side by side on the grid */
+.identity-qr { position: relative; min-height: 100svh; }
+.identity-qr .hex-scroll { position: relative; min-height: 100svh; }
+/* Each QR code is hugged by a grid-cut hex outline; the interior is a fully
+   clean surface so the code scans reliably. The SVG hexagon occupies 86.6025%
+   of its viewBox width, so img width = cells * HEX_WIDTH / 0.8660254. */
+.hx-qr .hx-fill { fill-opacity: .9; }
+.qr-card { display: flex; align-items: center; justify-content: center; }
+.qr-card img { width: calc(6.2 * 38.784px / 0.8660254); height: auto; }
+.qr-label .qr-label-name { font-family: "Archivo", sans-serif; font-stretch: 112%; font-weight: 700; font-size: 26px; fill: var(--foreground); }
+.hx-qr:first-of-type .qr-label-name { fill: var(--primary); }
+@media (max-width: 600px) {
+  .qr-card img { width: calc(4.7 * 38.784px / 0.8660254); }
+  .qr-label .qr-label-name { font-size: 20px; }
+}

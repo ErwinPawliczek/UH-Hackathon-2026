@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PetroChainMark } from "@/components/petrochain-mark";
 import { HexContent } from "@/components/hex-content";
+import { HexQr, qrHeight } from "@/components/hex-qr";
 import { getRowOffset, getSnapRow, GRID_SCALE, HEX_POINTS, HEX_ROW_STEP, HEX_WIDTH, WORDMARK_X } from "@/lib/hex-grid";
 
 // Enough room that the hexagon's top vertex and its blue tail stay on screen
@@ -14,7 +15,7 @@ const CENTER_Y = 80;
  * the screen while the lattice moves beneath it; it only glides when it hops to
  * the next cell.
  */
-export function HexScroll() {
+export function HexScroll({ mode = "pitch" }: { mode?: "pitch" | "qr" }) {
   const selectedRow = useRef(0);
   const previousRow = useRef(0);
   const animatedBrand = useRef<SVGGElement>(null);
@@ -71,7 +72,7 @@ export function HexScroll() {
   // One pattern tile = two rows; anchored so row r's centers sit at y = CENTER_Y + r * step.
   const tileHeight = HEX_ROW_STEP * 2;
   return (
-    <div className="hex-scroll" aria-label="PetroGrid hexagonal grid">
+    <div className="hex-scroll" style={mode === "qr" ? { height: qrHeight(width, centerX) } : undefined} aria-label="PetroGrid hexagonal grid">
       <svg className="hex-scene" role="img" aria-label="PetroGrid logo snapped to a light grey hexagonal grid">
         <defs>
           <pattern id="hex-tile" patternUnits="userSpaceOnUse" width={HEX_WIDTH} height={tileHeight} x={centerX} y={CENTER_Y}>
@@ -83,7 +84,7 @@ export function HexScroll() {
           </pattern>
         </defs>
         <rect data-testid="hex-grid" width="100%" height="100%" fill="url(#hex-tile)" />
-        <HexContent x0={centerX} />
+        {mode === "qr" ? <HexQr x0={centerX} width={width} /> : <HexContent x0={centerX} />}
         <g data-testid="snapping-logo" data-row={row} data-center-x={logoX} data-center-y={logoY} transform={`translate(${logoX} ${logoY})`}>
           <g ref={animatedBrand} data-testid="animated-brand">
             <g transform={`scale(${GRID_SCALE})`}><PetroChainMark /></g>
