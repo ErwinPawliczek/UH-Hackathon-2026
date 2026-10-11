@@ -68,6 +68,93 @@ h2 {
   font-stretch: 125%;
 }
 
+/*
+ * Windows and the cards inside them have no rounded corners: each corner is
+ * cut off at 45 degrees, the same distance along x and y, small enough that
+ * the shape still reads as a rectangle — an echo of the hexagon buttons.
+ * A window cuts 10 px (.chamfer), a card inside one 6 px (.chamfer-sm).
+ *
+ * clip-path would cut the border off with the corner, so, as with the
+ * buttons, the outline is two clipped layers behind the content: ::before in
+ * the outline colour, ::after one hairline in, in the fill colour (its cut is
+ * shortened by 0.586 px so the hairline is as thick on the diagonals as on
+ * the sides). .chamfer-body clips the content to the same shape, so a child's
+ * square background can never poke out past a cut corner. Keep padding at
+ * least the cut, so text stays clear of the corners.
+ *
+ * In the components layer, so a positioning utility (fixed, absolute) on the
+ * same element still wins.
+ */
+@layer components {
+  .chamfer {
+    --cut: 10px;
+    --chamfer-line: var(--line-2);
+    --chamfer-fill: var(--panel);
+    position: relative;
+    isolation: isolate;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .chamfer::before,
+  .chamfer::after,
+  .chamfer-body {
+    clip-path: polygon(
+      var(--c) 0, calc(100% - var(--c)) 0, 100% var(--c), 100% calc(100% - var(--c)),
+      calc(100% - var(--c)) 100%, var(--c) 100%, 0 calc(100% - var(--c)), 0 var(--c)
+    );
+  }
+
+  .chamfer::before,
+  .chamfer::after {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  .chamfer::before {
+    --c: var(--cut);
+    inset: 0;
+    background: var(--chamfer-line);
+  }
+
+  .chamfer::after {
+    --c: calc(var(--cut) - 0.586px);
+    inset: 1px;
+    background: var(--chamfer-fill);
+  }
+
+  .chamfer-body {
+    --c: calc(var(--cut) - 0.586px);
+    margin: 1px;
+  }
+
+  .chamfer-sm {
+    --cut: 6px;
+  }
+
+  /* a chamfered card that is a control: hover tint, and a focus outline that follows the cut */
+  .chamfer-press {
+    cursor: pointer;
+  }
+
+  .chamfer-press:hover {
+    --chamfer-fill: var(--panel-2);
+  }
+
+  .chamfer-press:focus-visible {
+    outline: none;
+    --chamfer-line: var(--blue);
+  }
+
+  .chamfer-press:focus-visible::after {
+    --c: calc(var(--cut) - 1.172px);
+    inset: 2px;
+  }
+}
+
 /* Panels and inspectors: 8px radius, 1px hairline in line, flat. */
 .panel {
   @apply rounded-md border border-line bg-panel;

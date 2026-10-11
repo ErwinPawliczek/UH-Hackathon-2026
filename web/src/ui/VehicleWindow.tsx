@@ -132,7 +132,8 @@ function TripEnd({ label, end, world }: { label: string; end: SiteRef; world: Wo
   const select = useSim((s) => s.select);
   return (
     <button
-      className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-sm border border-line bg-white px-2 py-1.5 text-left hover:bg-panel-2"
+      className="chamfer chamfer-sm chamfer-press flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left"
+      style={{ '--chamfer-fill': 'var(--white)', '--chamfer-line': 'var(--line)' } as React.CSSProperties}
       onClick={() => site !== undefined && select({ kind: 'site', index: end.site })}
       title={site !== undefined ? `Show ${end.name}` : end.name}
     >
