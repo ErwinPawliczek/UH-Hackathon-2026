@@ -31,6 +31,9 @@ export const COL_GAP_MAX = 150;
 export const LABEL_CHAR_PX = 6.1;
 const LABEL_PAD_PX = 44;
 const ROW_GAP = 16;
+/** A lane is the slot a long stream takes through a column it passes: its height, and the room between two lanes. */
+const LANE_H = 2;
+const LANE_GAP = 9;
 const PAD = 14;
 /** Vertical room one stream port needs on a unit's side. */
 const PORT_PITCH = 16;
@@ -111,6 +114,12 @@ export interface FlowEdge {
    * bend, so the label sits on a level stretch of its own line.
    */
   run: number;
+  /**
+   * The columns it passes on the way, each as a level stretch from x0 to x1
+   * at height y — a lane between the blocks of that column, so a long stream
+   * goes past them in the open rather than behind them.
+   */
+  via: { x0: number; x1: number; y: number }[];
 }
 
 export interface Flowsheet {
@@ -279,9 +288,42 @@ export function buildFlowsheet(world: WorldSpec, siteIdx: number): Flowsheet | n
   }
   const nLayers = Math.max(...nodes.map((nd) => nd.layer)) + 1;
 
+  // ---- lanes: a stream that skips columns gets a lane through each column
+  // it passes, a slot of its own between the blocks there, so it runs past
+  // them in the open instead of behind them ----
+  interface Lane extends Box { kind: 'lane'; id: string; link: number }
+  type Slot = FlowNode | Lane;
+  const lanes: Lane[] = [];
+  const lanesOf = new Map<number, Lane[]>();
+  links.forEach((l, i) => {
+    if (recycle.has(i)) return;
+    const a = byId.get(l.from) as FlowNode;
+    const b = byId.get(l.to) as FlowNode;
+    const mine: Lane[] = [];
+    for (let layer = a.layer + 1; layer < b.layer; layer++) {
+      mine.push({ kind: 'lane', id: `v${i}_${layer}`, link: i, layer, x: 0, y: 0, w: 0, h: LANE_H });
+    }
+    if (mine.length > 0) {
+      lanes.push(...mine);
+      lanesOf.set(i, mine);
+    }
+  });
+  // neighbours for ordering: each stream as a chain through its lanes
+  const before = new Map<string, string[]>();
+  const after = new Map<string, string[]>();
+  links.forEach((l, i) => {
+    if (recycle.has(i)) return;
+    const chain = [l.from, ...(lanesOf.get(i) ?? []).map((v) => v.id), l.to];
+    for (let k = 1; k < chain.length; k++) {
+      before.set(chain[k], [...(before.get(chain[k]) ?? []), chain[k - 1]]);
+      after.set(chain[k - 1], [...(after.get(chain[k - 1]) ?? []), chain[k]]);
+    }
+  });
+
   // ---- order within columns: a few barycentre sweeps keep streams short ----
-  const columns: FlowNode[][] = Array.from({ length: nLayers }, () => []);
+  const columns: Slot[][] = Array.from({ length: nLayers }, () => []);
   for (const nd of nodes) columns[nd.layer].push(nd);
+  for (const v of lanes) columns[v.layer].push(v);
   const rank = new Map<string, number>();
   const rerank = () => columns.forEach((col) => col.forEach((nd, i) => rank.set(nd.id, i / Math.max(1, col.length - 1) || 0)));
   rerank();
@@ -289,8 +331,8 @@ export function buildFlowsheet(world: WorldSpec, siteIdx: number): Flowsheet | n
     const others = around.get(id) ?? [];
     return others.length === 0 ? null : sum(others.map((o) => rank.get(o) ?? 0)) / others.length;
   };
-  for (let sweep = 0; sweep < 6; sweep++) {
-    const around = sweep % 2 === 0 ? preds : succs;
+  for (let sweep = 0; sweep < 8; sweep++) {
+    const around = sweep % 2 === 0 ? before : after;
     const order = sweep % 2 === 0 ? columns : [...columns].reverse();
     for (const col of order) {
       const key = new Map(col.map((nd, i) => [nd.id, centre(nd.id, around) ?? rank.get(nd.id) ?? i]));
@@ -303,54 +345,69 @@ export function buildFlowsheet(world: WorldSpec, siteIdx: number): Flowsheet | n
   for (const u of units) {
     u.h = unitHeight(u.notes.length, links.filter((l) => l.to === u.id).length, links.filter((l) => l.from === u.id).length);
   }
-  const colHeight = (col: FlowNode[]) => sum(col.map((nd) => nd.h)) + ROW_GAP * Math.max(0, col.length - 1);
+  // two lanes side by side need less room between them than two blocks
+  const gapAfter = (a: Slot, b: Slot) => (a.kind === 'lane' && b.kind === 'lane' ? LANE_GAP : ROW_GAP);
+  const colHeight = (col: Slot[]) => sum(col.map((nd, k) => nd.h + (k > 0 ? gapAfter(col[k - 1], nd) : 0)));
   const tallest = Math.max(...columns.map(colHeight));
   // each gap is as wide as the longest label written in it: a stream's label
   // sits beside its unit, to the right of the unit it leaves or to the left
   // of the unit it enters
   const gaps = new Array<number>(Math.max(0, nLayers - 1)).fill(COL_GAP_MIN);
-  for (const l of links) {
+  links.forEach((l, i) => {
     const a = byId.get(l.from) as FlowNode;
     const b = byId.get(l.to) as FlowNode;
     const gap = a.kind === 'unit' ? a.layer : b.layer - 1;
-    if (gap < 0 || gap >= gaps.length) continue; // a recycle's label hangs off the last column
-    const chars = `${streamLabel(l.key)} ${fmtTph(l.tph)}`.length + (recycle.has(links.indexOf(l)) ? 2 : 0);
+    if (gap < 0 || gap >= gaps.length) return; // a recycle's label hangs off the last column
+    const chars = `${streamLabel(l.key)} ${fmtTph(l.tph)}`.length + (recycle.has(i) ? 2 : 0);
     gaps[gap] = Math.min(COL_GAP_MAX, Math.max(gaps[gap], chars * LABEL_CHAR_PX + LABEL_PAD_PX));
-  }
+  });
   let x = PAD;
   columns.forEach((col, c) => {
     const w = Math.max(...col.map((nd) => nd.w));
     let y = PAD + (tallest - colHeight(col)) / 2;
-    for (const nd of col) {
-      nd.x = x + (w - nd.w) / 2;
+    col.forEach((nd, k) => {
+      if (k > 0) y += gapAfter(col[k - 1], nd);
+      if (nd.kind === 'lane') {
+        nd.x = x; // a lane spans its column
+        nd.w = w;
+      } else {
+        nd.x = x + (w - nd.w) / 2;
+      }
       nd.y = y;
-      y += nd.h + ROW_GAP;
-    }
+      y += nd.h;
+    });
     x += w + (gaps[c] ?? 0);
   });
   const width = x + PAD;
   const height = tallest + 2 * PAD + (recycle.size > 0 ? 26 : 0);
 
   // ---- stream geometry: ports spread down a unit's sides, one port per tank side ----
-  const midY = (nd: FlowNode) => nd.y + nd.h / 2;
-  const portY = (nd: FlowNode, side: 'in' | 'out', other: string): number => {
+  const midY = (nd: Slot) => nd.y + nd.h / 2;
+  // where a stream goes next from a block: its first lane if it has one, else the block at its other end
+  const towards = (i: number, side: 'in' | 'out'): number => {
+    const mine = lanesOf.get(i);
+    if (mine !== undefined) return midY(side === 'out' ? mine[0] : mine[mine.length - 1]);
+    return midY(byId.get(side === 'out' ? links[i].to : links[i].from) as FlowNode);
+  };
+  const portY = (nd: FlowNode, side: 'in' | 'out', link: number): number => {
     if (nd.kind === 'tank') return midY(nd);
     const mine = links
-      .filter((l) => (side === 'in' ? l.to === nd.id : l.from === nd.id))
-      .map((l) => ({ other: side === 'in' ? l.from : l.to, l }))
-      .sort((a, b) => midY(byId.get(a.other) as FlowNode) - midY(byId.get(b.other) as FlowNode) || a.l.key.localeCompare(b.l.key));
-    const i = mine.findIndex((m) => m.other === other);
-    return nd.y + (nd.h * (i + 1)) / (mine.length + 1);
+      .map((l, i) => ({ l, i }))
+      .filter(({ l }) => (side === 'in' ? l.to === nd.id : l.from === nd.id))
+      .sort((a, b) => towards(a.i, side) - towards(b.i, side) || a.l.key.localeCompare(b.l.key));
+    const at = mine.findIndex((m) => m.i === link);
+    return nd.y + (nd.h * (at + 1)) / (mine.length + 1);
   };
   const edges: FlowEdge[] = links.map((l, i) => {
     const a = byId.get(l.from) as FlowNode;
     const b = byId.get(l.to) as FlowNode;
     return {
       id: `e${i}`, from: l.from, to: l.to, key: l.key, tph: l.tph, procIndex: l.proc,
-      x1: a.x + a.w, y1: portY(a, 'out', l.to), x2: b.x, y2: portY(b, 'in', l.from),
+      x1: a.x + a.w, y1: portY(a, 'out', i), x2: b.x, y2: portY(b, 'in', i),
       labelAt: a.kind === 'unit' ? 'from' : 'to',
       recycle: recycle.has(i),
       run: labelWidth(l.key, l.tph) + 10,
+      via: (lanesOf.get(i) ?? []).map((v) => ({ x0: v.x, x1: v.x + v.w, y: midY(v) })),
     };
   });
 
@@ -364,27 +421,47 @@ export function labelWidth(key: string, tph: number): number {
 
 /**
  * A smooth connector between two ports, as SVG path data: left to right for
- * an ordinary stream, level for `run` px beside its label (at the end the
- * label sits at) and curving the rest of the way; a recycle leaves to the
- * right, swings under the blocks (to `under`, a y below them) and comes back
- * into its target from the left.
+ * an ordinary stream — level for `run` px beside its label (at the end the
+ * label sits at), level again through each column it passes (`via`), and
+ * curving in the gaps between; a recycle leaves to the right, swings under
+ * the blocks (to `under`, a y below them) and comes back into its target
+ * from the left.
  */
 export function edgePath(
-  e: Pick<FlowEdge, 'x1' | 'y1' | 'x2' | 'y2'> & { recycle?: boolean; run?: number; labelAt?: 'from' | 'to' },
+  e: Pick<FlowEdge, 'x1' | 'y1' | 'x2' | 'y2'> & Partial<Pick<FlowEdge, 'recycle' | 'run' | 'labelAt' | 'via'>>,
   under = 0,
 ): string {
   if (e.recycle === true) {
     const y = Math.max(under, e.y1, e.y2) + 18;
     return `M${e.x1} ${e.y1}C${e.x1 + 46} ${e.y1} ${e.x1 + 46} ${y} ${e.x1 - 10} ${y}L${e.x2 + 10} ${y}C${e.x2 - 46} ${y} ${e.x2 - 46} ${e.y2} ${e.x2} ${e.y2}`;
   }
-  // keep at least 24 px for the bend itself, however long the label
-  const run = Math.max(0, Math.min(e.run ?? 0, e.x2 - e.x1 - 24));
-  const a = e.labelAt === 'from' ? e.x1 + run : e.x1;
-  const b = e.labelAt === 'to' ? e.x2 - run : e.x2;
-  const dx = Math.max(12, (b - a) / 2);
-  const lead = a > e.x1 ? `L${a} ${e.y1}` : '';
-  const tail = b < e.x2 ? `L${e.x2} ${e.y2}` : '';
-  return `M${e.x1} ${e.y1}${lead}C${a + dx} ${e.y1} ${b - dx} ${e.y2} ${b} ${e.y2}${tail}`;
+  const via = e.via ?? [];
+  const run = e.run ?? 0;
+  const bend = (ax: number, ay: number, bx: number, by: number) => {
+    const dx = Math.max(12, (bx - ax) / 2);
+    return `C${ax + dx} ${ay} ${bx - dx} ${by} ${bx} ${by}`;
+  };
+  let d = `M${e.x1} ${e.y1}`;
+  let cx = e.x1;
+  let cy = e.y1;
+  // level beside a label at the source, keeping at least 24 px for the bend that follows
+  if (e.labelAt === 'from' && run > 0) {
+    const a = Math.max(e.x1, Math.min(e.x1 + run, (via[0]?.x0 ?? e.x2) - 24));
+    if (a > e.x1) {
+      d += `L${a} ${e.y1}`;
+      cx = a;
+    }
+  }
+  for (const v of via) {
+    d += `${bend(cx, cy, v.x0, v.y)}L${v.x1} ${v.y}`;
+    cx = v.x1;
+    cy = v.y;
+  }
+  // level beside a label at the target, again leaving room for the bend
+  const b = e.labelAt === 'to' && run > 0 ? Math.min(e.x2, Math.max(cx + 24, e.x2 - run)) : e.x2;
+  d += bend(cx, cy, b, e.y2);
+  if (b < e.x2) d += `L${e.x2} ${e.y2}`;
+  return d;
 }
 
 // ---------------------------------------------------------------- live values

@@ -170,11 +170,39 @@ describe('buildFlowsheet', () => {
     expect(edgePath({ x1: 0, y1: 0, x2: 60, y2: 30, run: 500, labelAt: 'from' })).toBe('M0 0L36 0C48 0 48 30 60 30');
   });
 
+  it('routes a stream that skips columns through a lane of its own, clear of every block', () => {
+    const s = sheetOf('REFINERY');
+    const layer = new Map(s.nodes.map((n) => [n.id, n.layer]));
+    let long = 0;
+    for (const e of s.edges) {
+      const span = (layer.get(e.to) as number) - (layer.get(e.from) as number);
+      expect(e.via).toHaveLength(Math.max(0, span - 1)); // one lane per column passed
+      for (const v of e.via) {
+        long += 1;
+        expect(v.x1).toBeGreaterThan(v.x0);
+        // no block of that column sits at the lane's height
+        for (const n of s.nodes) {
+          const sameColumn = n.x < v.x1 && n.x + n.w > v.x0;
+          if (sameColumn) expect(v.y < n.y || v.y > n.y + n.h).toBe(true);
+        }
+      }
+      // and the lanes read left to right between the two ends
+      const xs = [e.x1, ...e.via.flatMap((v) => [v.x0, v.x1]), e.x2];
+      expect([...xs].sort((p, q) => p - q)).toEqual(xs);
+    }
+    expect(long).toBeGreaterThan(5); // LPG, fuel oil, diesel… all cross several columns
+    // a path through a lane is level across the column and curved in the gaps
+    expect(edgePath({ x1: 0, y1: 10, x2: 300, y2: 50, via: [{ x0: 100, x1: 200, y: 80 }] }))
+      .toBe('M0 10C50 10 50 80 100 80L200 80C250 80 250 50 300 50');
+  });
+
   it('leaves room in every gap for the labels written there', () => {
     const s = sheetOf('REFINERY');
     for (const e of s.edges) {
       if (e.recycle) continue;
-      expect(e.x2 - e.x1).toBeGreaterThanOrEqual(Math.min(150, labelWidth(e.key, e.tph) + 44) - 1e-6);
+      // the gap the label sits in: from its unit to the next thing on the line
+      const room = e.labelAt === 'from' ? (e.via[0]?.x0 ?? e.x2) - e.x1 : e.x2 - (e.via[e.via.length - 1]?.x1 ?? e.x1);
+      expect(room).toBeGreaterThanOrEqual(Math.min(150, labelWidth(e.key, e.tph) + 44) - 1e-6);
     }
   });
 });
