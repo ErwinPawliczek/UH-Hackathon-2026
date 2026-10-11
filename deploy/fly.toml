@@ -4,7 +4,9 @@
 # edge terminates TLS on 443/80 and forwards to internal_port.
 #
 # Deploy from the repo root so the Docker build context sees engine/, apps/
-# and web/ (paths are relative to this file for the Dockerfile):
+# and web/. The [build] dockerfile path resolves relative to THIS file's
+# folder (deploy/), not the repo root — "deploy/Dockerfile" here makes Fly
+# look for deploy/deploy/Dockerfile:
 #   fly deploy . --config deploy/fly.toml
 # See README.md for the full steps and the custom-domain DNS records.
 
@@ -12,7 +14,7 @@ app = "petrogrid"
 primary_region = "dfw"          # Dallas–Fort Worth; demo audience is US-centric
 
 [build]
-  dockerfile = "deploy/Dockerfile"
+  dockerfile = "Dockerfile"          # relative to this file's folder → deploy/Dockerfile
 
 [env]
   CRX_PORT = "8080"

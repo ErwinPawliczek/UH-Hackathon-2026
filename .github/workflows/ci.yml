@@ -35,3 +35,10 @@ jobs:
       - name: Web unit tests
         working-directory: web
         run: npm test
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build deploy image
+        run: docker build -f deploy/Dockerfile .
