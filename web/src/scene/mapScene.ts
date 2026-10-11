@@ -105,6 +105,7 @@ export class MapScene {
   readonly camera: THREE.PerspectiveCamera;
   readonly renderer: THREE.WebGLRenderer;
   readonly controls: OrbitControls;
+  private turnTimer = 0;
 
   private readonly world: WorldSpec;
   private readonly siteLayer: SiteLayer;
@@ -292,8 +293,20 @@ export class MapScene {
     this.controls.minPolarAngle = Math.PI * 0.12;
     this.controls.minDistance = 6;
     this.controls.maxDistance = 160;
+    // The map turns slowly by itself to show the model off; any touch, drag or
+    // zoom stops it, and it starts again ten seconds after the last one.
+    const still = new URLSearchParams(window.location.search).has('still')
+      || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+    this.controls.autoRotate = !still;
+    this.controls.autoRotateSpeed = 0.5; // about two minutes a turn
     this.controls.addEventListener('start', () => {
       this.userMoved = true;
+      this.controls.autoRotate = false;
+      window.clearTimeout(this.turnTimer);
+    });
+    this.controls.addEventListener('end', () => {
+      window.clearTimeout(this.turnTimer);
+      if (!still) this.turnTimer = window.setTimeout(() => { this.controls.autoRotate = true; }, 10_000);
     });
     if (initialView !== null) {
       // An explicit view wins over the whole-map framing.
@@ -891,6 +904,7 @@ export class MapScene {
     this.labels.dispose();
     this.pipelineLabels.dispose();
     this.trip.dispose();
+    window.clearTimeout(this.turnTimer);
     this.controls.dispose();
     this.scene.traverse((obj) => {
       // (Line2 is a Mesh, so the fat route lines are covered too.)

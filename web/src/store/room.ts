@@ -72,8 +72,10 @@ export function roomFromLocation(): string | null {
 }
 
 /** POST /api/room: a new room on the default world, paused at tick 0. */
-export function createRoom(hostName?: string): Promise<{ code: string; hostToken: string }> {
-  return json('/api/room', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(hostName ? { hostName } : {}) });
+export async function createRoom(password?: string): Promise<{ code: string; hostToken: string }> {
+  const r = await json<{ code?: string; hostToken?: string; error?: string }>('/api/room', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(password ? { password } : {}) });
+  if (typeof r.code !== 'string' || typeof r.hostToken !== 'string') throw new Error(r.error ?? 'The room could not be opened.');
+  return { code: r.code, hostToken: r.hostToken };
 }
 
 /** The room's HTTP calls. Its read-only views live under /api/room/{code}/… in the shapes of /api/sim/{id}/…. */

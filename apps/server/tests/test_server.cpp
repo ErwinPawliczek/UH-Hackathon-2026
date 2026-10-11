@@ -1247,7 +1247,7 @@ TEST_CASE("R5 room: a player acts on their own plant only, and only once the gam
   REQUIRE(postJson(cli, base + "/claim", {{"token", bob.at("token")}, {"site", siteB}}).at("ok") == true);
 
   // Before the start nothing can be done.
-  CHECK(play(ann, {{"action", "price"}, {"markup", 0.1}}).at("error") == "The game has not started yet");
+  CHECK(play(ann, {{"action", "price"}, {"markup", 0.1}}).at("error") == "The simulation has not started yet");
   postJson(cli, base + "/host", {{"hostToken", made.at("hostToken")}, {"action", "start"}});
   room->beat(24.0);
 
@@ -1315,7 +1315,7 @@ TEST_CASE("R5 room: a player acts on their own plant only, and only once the gam
 
   // After the end nothing more is taken.
   postJson(cli, base + "/host", {{"hostToken", made.at("hostToken")}, {"action", "end"}});
-  CHECK(play(ann, {{"action", "price"}, {"markup", 0.0}}).at("error") == "This game has ended");
+  CHECK(play(ann, {{"action", "price"}, {"markup", 0.0}}).at("error") == "This simulation has ended");
 }
 
 TEST_CASE("R6 room: the forecast leaves out disruptions but keeps the players' prices and rates") {

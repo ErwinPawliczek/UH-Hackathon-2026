@@ -6,6 +6,9 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
+#include <thread>
 #include <cmath>
 #include <random>
 #include <set>
@@ -235,7 +238,19 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
   };
   const auto room404 = [](Res& res) { sendJson(res, 404, no("There is no room with that code")); };
 
-  svr.Post("/api/room", [&rooms](const Req&, Res& res) {
+  // Opening a room is the one costly call, so a deployment can lock it behind
+  // a password (CRX_HOST_PASSWORD). It is checked here and never sent to a page.
+  svr.Post("/api/room", [&rooms, body, str](const Req& req, Res& res) {
+    if (const char* want = std::getenv("CRX_HOST_PASSWORD"); want && *want) {
+      const std::string got = str(body(req), "password");
+      const std::string need = want;
+      unsigned char diff = got.size() == need.size() ? 0 : 1;
+      for (std::size_t i = 0; i < need.size(); ++i) diff |= static_cast<unsigned char>(need[i] ^ (i < got.size() ? got[i] : 0));
+      if (diff != 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(700));  // slow guessing down
+        return sendJson(res, 200, no(got.empty() ? "Enter the host password" : "That host password is not right"));
+      }
+    }
     const std::shared_ptr<Room> room = rooms.create();
     if (!room) return sendJson(res, 500, no("The world could not be built"));
     if (rooms.runClocks()) room->startClock();
@@ -283,7 +298,7 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
     if (name.empty() || name.size() > 20)
       return sendJson(res, 200, no("Give a name of 1 to 20 characters"));
     std::lock_guard<std::mutex> lock(room->mutex);
-    if (room->phase == Room::Phase::Ended) return sendJson(res, 200, no("This game has ended"));
+    if (room->phase == Room::Phase::Ended) return sendJson(res, 200, no("This simulation has ended"));
     if (room->players.size() >= kMaxPlayers) return sendJson(res, 200, no("This room is full"));
     // Two Sams become Sam and Sam 2.
     std::string unique = name;
@@ -312,7 +327,7 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
     me->seen = rooms.now();
     if (!b.contains("site") || b["site"].is_null()) {
       if (room->phase != Room::Phase::Lobby)
-        return sendJson(res, 200, no("Plants cannot be given up once the game has started"));
+        return sendJson(res, 200, no("Plants cannot be given up once the simulation has started"));
       me->site = -1;
       return sendJson(res, 200, json::json{{"ok", true}}.dump());
     }
@@ -327,7 +342,7 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
         return sendJson(res, 200, no(room->sites[static_cast<size_t>(site)].name +
                                      " is already taken by " + p.name));
     if (me->site >= 0 && me->site != site && room->phase != Room::Phase::Lobby)
-      return sendJson(res, 200, no("Plants cannot be swapped once the game has started"));
+      return sendJson(res, 200, no("Plants cannot be swapped once the simulation has started"));
     me->site = site;
     sendJson(res, 200, json::json{{"ok", true}}.dump());
   });
@@ -341,20 +356,20 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
       return sendJson(res, 200, no("Only the host can do that"));
     const std::string action = str(b, "action");
     const auto ok = [&res] { sendJson(res, 200, json::json{{"ok", true}}.dump()); };
-    if (room->phase == Room::Phase::Ended) return sendJson(res, 200, no("This game has ended"));
+    if (room->phase == Room::Phase::Ended) return sendJson(res, 200, no("This simulation has ended"));
     if (action == "start") {
-      if (room->phase != Room::Phase::Lobby) return sendJson(res, 200, no("The game has already started"));
+      if (room->phase != Room::Phase::Lobby) return sendJson(res, 200, no("The simulation has already started"));
       room->phase = Room::Phase::Running;
       room->tickDebt = 0;
       return ok();
     }
     if (action == "pause") {
-      if (room->phase != Room::Phase::Running) return sendJson(res, 200, no("The game is not running"));
+      if (room->phase != Room::Phase::Running) return sendJson(res, 200, no("The simulation is not running"));
       room->phase = Room::Phase::Paused;
       return ok();
     }
     if (action == "resume") {
-      if (room->phase != Room::Phase::Paused) return sendJson(res, 200, no("The game is not paused"));
+      if (room->phase != Room::Phase::Paused) return sendJson(res, 200, no("The simulation is not paused"));
       room->phase = Room::Phase::Running;
       room->tickDebt = 0;
       return ok();
@@ -371,7 +386,7 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
     }
     if (action == "scenario") {
       if (room->phase == Room::Phase::Lobby)
-        return sendJson(res, 200, no("Start the game before triggering a scenario"));
+        return sendJson(res, 200, no("Start the simulation before triggering a scenario"));
       if (!b.contains("command") || !b["command"].is_object())
         return sendJson(res, 200, no("A scenario needs a command"));
       return sendJson(res, 200, issue(*room, b["command"]));
@@ -388,8 +403,8 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
     if (me == nullptr) return sendJson(res, 200, no("Join the room first"));
     me->seen = rooms.now();
     if (me->site < 0) return sendJson(res, 200, no("Pick a plant first"));
-    if (room->phase == Room::Phase::Lobby) return sendJson(res, 200, no("The game has not started yet"));
-    if (room->phase == Room::Phase::Ended) return sendJson(res, 200, no("This game has ended"));
+    if (room->phase == Room::Phase::Lobby) return sendJson(res, 200, no("The simulation has not started yet"));
+    if (room->phase == Room::Phase::Ended) return sendJson(res, 200, no("This simulation has ended"));
     const RoomSite& site = room->sites[static_cast<size_t>(me->site)];
     const std::string action = str(b, "action");
     json::json command;
