@@ -33,6 +33,11 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=native /src/build/native-release/crx-server /app/crx-server
+# The binary loads its catalog from the build-time path baked in via
+# CRX_DATA_DIR (CMakeLists.txt): ${CMAKE_SOURCE_DIR}/engine/data/catalog,
+# i.e. /src/engine/data/catalog inside the native stage. Ship the data dir
+# at the same absolute path or crx-server fails to load the catalog.
+COPY --from=native /src/engine/data /src/engine/data
 COPY --from=web /src/web/dist /app/web/dist
 
 ENV CRX_PORT=8080 \
