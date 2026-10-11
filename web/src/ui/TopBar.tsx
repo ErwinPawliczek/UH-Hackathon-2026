@@ -1,5 +1,5 @@
-// Top bar: brand, sim clock, playback controls, and the seed/scenario
-// pickers. Engine choice has no UI — visitors run the hosted engine; the
+// Top bar: brand, sim clock, playback and speed controls, and the
+// seed/scenario pickers. Engine choice has no UI — visitors run the hosted engine; the
 // in-page stub is selected only via ?engine= for tests and local development.
 //
 // The scenario control is one button named "Scenario" that opens a list. On
@@ -9,10 +9,11 @@
 // it is the stub-era scripted-scenario setting (a session restart).
 
 import { useId } from 'react';
-import { useSim, SPEEDS } from '../store/sim';
+import { useSim } from '../store/sim';
 import { SCENARIOS } from '../engine/events';
 import { scenariosFor, type EngineScenario } from '../engine/scenarios';
 import { DropdownMenu } from './DropdownMenu';
+import { SpeedControl } from './SpeedControl';
 import { fmtClock } from './format';
 import { LOG_WINDOW_AT, LOG_WINDOW_ID } from './EventLog';
 import { REWIND_WINDOW_AT, REWIND_WINDOW_ID } from './RewindWindow';
@@ -68,7 +69,6 @@ function ChainEdge() {
 export function TopBar() {
   const playing = useSim((s) => s.playing);
   const started = useSim((s) => s.started);
-  const speed = useSim((s) => s.speed);
   const seed = useSim((s) => s.seed);
   const scenario = useSim((s) => s.scenario);
   const tick = useSim((s) => s.snap?.tick);
@@ -81,7 +81,7 @@ export function TopBar() {
   const rewindOpen = useWindows((s) => s.windows[REWIND_WINDOW_ID]?.open === true);
   const canRewind = useSim((s) => s.rewindTo !== null) && Number(tick ?? 0) > 0;
 
-  const { togglePlay, setSpeed, setSeed, setScenario, triggerScenario } = useSim.getState();
+  const { togglePlay, setSeed, setScenario, triggerScenario } = useSim.getState();
   const engineScenarios = backendKind === 'http' ? scenariosFor(world) : [];
 
   return (
@@ -103,13 +103,7 @@ export function TopBar() {
         {!started ? '▶ Start simulation' : playing ? '⏸ Pause' : '▶ Resume'}
       </button>
 
-      <div className="flex items-center gap-1" role="group" aria-label="Simulation speed">
-        {SPEEDS.map((s) => (
-          <button key={s} className={`btn ${speed === s ? 'btn-active' : ''}`} onClick={() => setSpeed(s)}>
-            {s}×
-          </button>
-        ))}
-      </div>
+      <SpeedControl />
 
       <label className="ml-2 flex items-center gap-2">
         <span className="label">Seed</span>

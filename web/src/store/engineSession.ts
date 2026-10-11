@@ -17,10 +17,10 @@ import { createBackend } from '../engine/api';
 import type { BackendKind, SimBackend } from '../engine/api';
 import { HttpError } from '../engine/httpBackend';
 import { resolveWorld } from '../engine/world';
-import { BASE_STEP_MS, ticksPerStep, useSim } from './sim';
+import { nextStep, useSim } from './sim';
 
-/** A step may start this many ms early: the timer that paces it is not exact. */
-const STEP_SLACK_MS = 40;
+/** How often the loop checks whether a step is due — the pacing error of any one step. */
+const POLL_MS = 25;
 
 /** The live backend session; null between sessions and while one is opening. */
 let session: { id: string; backend: SimBackend } | null = null;
@@ -234,26 +234,39 @@ export async function recoverFromGoneSession(ticks: number): Promise<void> {
 
 /**
  * The step loop, created once and kept for the app's lifetime: settings
- * changes replace the session, not the loop. A 250 ms timer paces it; a step
- * starts when the store's step interval has passed since the last one
- * started (every firing at 1× and above, every second firing at 0.5×), and
- * advances `ticksPerStep(speed)` ticks. Speed and playing state are read at
- * firing time, so a speed change mid-run takes effect on the next step
- * without skipping or doubling one; a step still in flight (HTTP latency) is
- * never overlapped. Returns a cleanup that stops the timer.
+ * changes replace the session, not the loop. It checks every 25 ms whether a
+ * step is due — the store's step interval after the previous one was due —
+ * and then advances `nextStep(speed, carry)` ticks: one tick on a stretched
+ * interval below speed 1, the speed's worth of ticks every 250 ms from 1 up,
+ * fractions carried so 1.5 really averages 1.5.
+ *
+ * Speed and playing state are read when a step is due, so a change mid-run
+ * takes effect on the next step: nothing is skipped or doubled, and a pause,
+ * a slow reply or a jump from a long interval to a short one never causes a
+ * burst of catch-up steps (the schedule restarts from now instead). A step
+ * still in flight is never overlapped. Returns a cleanup that stops it.
  */
 export function startStepLoop(): () => void {
   let inFlight = false;
-  let lastStepAt = -Infinity;
+  let lastAt = -Infinity; // when the previous step was due (performance.now clock)
+  let carry = 0; // fraction of a tick owed to the next step
   const timer = setInterval(() => {
     const s = useSim.getState();
     if (!s.playing || inFlight) return;
     const current = session;
     if (current === null) return;
     const now = performance.now();
-    if (now - lastStepAt < s.stepIntervalMs - STEP_SLACK_MS) return; // not due yet (0.5×)
-    lastStepAt = now;
-    const ticks = ticksPerStep(s.speed);
+    // Due one interval after the previous step was due, at the speed set
+    // NOW: a shorter interval applies at once, a longer one waits it out.
+    const late = now - (lastAt + s.stepIntervalMs);
+    if (late < 0) return; // not due yet
+    // On schedule: count from when this step was due, so the cadence does
+    // not drift by the polling error. Behind schedule (paused, slow reply,
+    // or the interval just got shorter): restart from now — no catch-up.
+    lastAt = late < s.stepIntervalMs ? lastAt + s.stepIntervalMs : now;
+    const step = nextStep(s.speed, carry);
+    carry = step.carry;
+    const ticks = step.ticks;
     inFlight = true;
     void (async () => {
       try {
@@ -273,6 +286,6 @@ export function startStepLoop(): () => void {
         inFlight = false;
       }
     })();
-  }, BASE_STEP_MS);
+  }, POLL_MS);
   return () => clearInterval(timer);
 }

@@ -17,27 +17,47 @@ import { DEFAULT_WORLD, STORAGE_KEY, dropLegacyPersistedState, backendOverride, 
 export type Selection = { kind: 'site' | 'vehicle'; index: number } | null;
 
 /**
- * Speeds a visitor can pick. One tick is 15 simulated minutes. At 1× and
- * above the engine is stepped every 250 ms by that many ticks: 1× runs one
- * simulated hour per real second, 4× four hours, 16× sixteen hours and 64×
- * 2⅔ days. Below 1× a step stays one tick and the interval stretches
- * instead: 0.5× is one tick every 500 ms, two real seconds per simulated
- * hour — slow enough to watch a single truck drive.
+ * Speed is a number the visitor types: simulated hours per real second.
+ * One tick is 15 simulated minutes, so 1 is four ticks a second. At 1 and
+ * above the engine is stepped every 250 ms and the ticks per step follow the
+ * speed, fractions carried from step to step (1.5 alternates one tick and
+ * two). Below 1 a step stays one tick and the interval stretches instead
+ * (0.5 is one tick every 500 ms, 0.1 one every 2.5 s).
  */
-export const SPEEDS = [0.5, 1, 4, 16, 64] as const;
-/** Real milliseconds between steps at 1× and above. */
+export const MIN_SPEED = 0.1;
+export const MAX_SPEED = 64;
+/** Real milliseconds between steps at speed 1 and above. */
 export const BASE_STEP_MS = 250;
 
-/** Ticks one step advances at this speed: the speed itself, never less than one. */
-export function ticksPerStep(speed: number): number {
-  return Math.max(1, Math.round(speed));
+/**
+ * A speed the loop can run: within MIN_SPEED..MAX_SPEED, to one decimal
+ * place. Null when the value is not a number at all.
+ */
+export function clampSpeed(value: number): number | null {
+  if (!Number.isFinite(value)) return null;
+  return Math.round(Math.min(MAX_SPEED, Math.max(MIN_SPEED, value)) * 10) / 10;
 }
 
-/** Real milliseconds from one step to the next at this speed: 250, stretched below 1×. */
+/** Real milliseconds from one step to the next at this speed: 250, stretched below 1. */
 export function stepIntervalFor(speed: number): number {
   return speed > 0 && speed < 1 ? Math.round(BASE_STEP_MS / speed) : BASE_STEP_MS;
 }
-/** The speed a visitor starts at: slow enough to follow one truck. */
+
+/**
+ * Ticks the next step advances, and the fraction to carry into the step
+ * after it. Below 1 every step is exactly one tick (the interval does the
+ * slowing). From 1 up the speed is added to the carry and the whole part is
+ * taken, so over many steps the average is the speed itself, a step is never
+ * empty, and no step ever takes more than one tick above the speed.
+ */
+export function nextStep(speed: number, carry: number): { ticks: number; carry: number } {
+  if (speed < 1) return { ticks: 1, carry: 0 };
+  const total = Math.min(1, Math.max(0, carry)) + speed;
+  const ticks = Math.floor(total + 1e-9);
+  return { ticks, carry: Math.max(0, total - ticks) };
+}
+
+/** The speed a visitor starts at: one simulated hour per second. */
 export const DEFAULT_SPEED = 1;
 /** Persisted-settings schema version; bump when a saved value must be reset. */
 const SETTINGS_VERSION = 1;
@@ -68,9 +88,10 @@ export interface SimState {
   snapAt: number;
   /**
    * Real milliseconds between the snapshot now shown and the next one
-   * expected while the run is playing: 500 at 0.5×, 250 at every other
-   * speed. Follows the speed setting at once, so it is right mid-run too.
-   * Frame interpolation spreads one snapshot-to-snapshot move over this long.
+   * expected while the run is playing: 250 at speed 1 and above, 250 / speed
+   * below it (500 at 0.5, 2500 at 0.1). Follows the speed setting at once,
+   * so it is right mid-run too. Frame interpolation spreads one
+   * snapshot-to-snapshot move over this long.
    */
   stepIntervalMs: number;
   /**
@@ -99,6 +120,7 @@ export interface SimState {
 
   setSeed: (seed: number) => void;
   setScenario: (scenario: string) => void;
+  /** Set the speed; clamped to MIN_SPEED..MAX_SPEED, ignored when not a number. */
   setSpeed: (speed: number) => void;
   togglePlay: () => void;
   select: (sel: Selection) => void;
@@ -153,7 +175,10 @@ export const useSim = create<SimState>()(
 
       setSeed: (seed) => set({ seed: Math.max(0, Math.floor(seed)) }),
       setScenario: (scenario) => set({ scenario }),
-      setSpeed: (speed) => set({ speed, stepIntervalMs: stepIntervalFor(speed) }),
+      setSpeed: (value) => {
+        const speed = clampSpeed(value);
+        if (speed !== null) set({ speed, stepIntervalMs: stepIntervalFor(speed) });
+      },
       togglePlay: () => set((s) => ({ playing: !s.playing, started: true })),
       select: (selected) => set({ selected }),
       setWorld: (world) => set({ world }),
@@ -215,9 +240,12 @@ export const useSim = create<SimState>()(
       },
       // The step interval is derived from the speed, so a saved speed brings
       // its interval with it.
+      // A saved speed outside the range (or not a number) resets to the default.
       merge: (persisted, current) => {
         const merged = { ...current, ...(persisted as Partial<SimState>) };
-        return { ...merged, stepIntervalMs: stepIntervalFor(merged.speed) };
+        const saved = typeof merged.speed === 'number' ? merged.speed : NaN;
+        const speed = saved >= MIN_SPEED && saved <= MAX_SPEED ? clampSpeed(saved) ?? DEFAULT_SPEED : DEFAULT_SPEED;
+        return { ...merged, speed, stepIntervalMs: stepIntervalFor(speed) };
       },
       partialize: (s) => ({
         seed: s.seed,
