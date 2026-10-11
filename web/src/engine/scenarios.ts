@@ -118,6 +118,29 @@ export function scenariosFor(world: WorldSpec | null): EngineScenario[] {
   });
 }
 
+/** Ticks a scenario lasts once triggered (its command's duration; forever when it has none). */
+export function scenarioTicks(scenario: EngineScenario): number {
+  const h = scenario.command.duration_h;
+  return typeof h === 'number' && h > 0 ? h * 4 : Infinity;
+}
+
+/**
+ * The triggered scenarios still running at `tick`, in the order triggered.
+ * One whose duration has passed is over: its entry can be picked again and
+ * it no longer names the Scenario button.
+ */
+export function activeScenarios(
+  scenarios: readonly EngineScenario[],
+  triggered: string[],
+  triggeredAt: Record<string, number>,
+  tick: number,
+): string[] {
+  return triggered.filter((key) => {
+    const s = scenarios.find((x) => x.key === key);
+    return s !== undefined && tick < (triggeredAt[key] ?? 0) + scenarioTicks(s);
+  });
+}
+
 /** Site index a scenario targets in this world, or undefined when absent. */
 export function scenarioSite(world: WorldSpec, scenario: EngineScenario): number | undefined {
   if (scenario.site === null) return undefined; // a route closure belongs to no one site

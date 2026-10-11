@@ -16,7 +16,8 @@ describe('EngineErrorOverlay markup', () => {
     expect(html).toContain('Engine unavailable');
     expect(html).toContain('Cannot reach the hosted engine (Failed to fetch)');
     expect(html).toContain('data-testid="retry-engine"');
-    expect(html).toContain('Retry');
+    expect(html).toContain('Try again');
+    expect(html).not.toMatch(/stub|fallback/);
   });
 
   it('stays flat in the v3 style: hairline cut-corner panel, no shadows or gradients', () => {
