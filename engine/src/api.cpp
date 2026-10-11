@@ -523,12 +523,23 @@ void buildSnapshot(const Sim& sim, const std::vector<uint32_t>& edge_route,
     const int online = static_cast<int>(slot.trains) - st.unit[u].trains_down;
     unitArr[u] = static_cast<uint8_t>(std::max(0, online));
   }
-  // 4/5 sites: running flag and the worst starvation/overflow pressure among
-  // the site's tanks (1 − min(min f, min h), clamped to [0,1]).
+  // 4/5 sites: the worst state among the site's processes, in the client's
+  // site-state order (0 running, 1 holding at minimum, 3 shut down,
+  // 4 restarting — a shutdown outranks a restart outranks a hold), and the
+  // worst starvation/overflow pressure among the site's tanks
+  // (1 − min(min f, min h), clamped to [0,1]).
   auto* siteStatus = snap.data() + offsets[4];
   auto* siteUrg = reinterpret_cast<float*>(snap.data() + offsets[5]);
   for (uint32_t s = 0; s < nSites; ++s) {
-    siteStatus[s] = 0;
+    using crx::sim::ProcStatus;
+    bool down = false, restarting = false, holding = false;
+    for (uint32_t p = 0; p < nProc; ++p) {
+      if (w.processes[p].site.v != s) continue;
+      down = down || st.proc[p].status == ProcStatus::Shutdown;
+      restarting = restarting || st.proc[p].status == ProcStatus::Restarting;
+      holding = holding || st.proc[p].status == ProcStatus::HoldMin;
+    }
+    siteStatus[s] = down ? 3 : restarting ? 4 : holding ? 1 : 0;
     double worst = 1.0;
     for (uint32_t t = 0; t < nTanks; ++t) {
       if (w.tanks[t].site.v != s) continue;

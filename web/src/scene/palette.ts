@@ -28,8 +28,11 @@ export const V3 = {
   waterTile: 0xdde9f8,
 } as const;
 
-/** Process status labels, index = §4.3 ProcStatus enum — used by the inspector. */
-export const PROC_STATUS_LABELS = ['Running', 'Hold min', 'Hold max', 'Shutdown', 'Restarting'] as const;
+/**
+ * Process status labels, index = the engine's ProcStatus enum (state.h):
+ * Running, HoldMin, Shutdown, Restarting — used by the inspector.
+ */
+export const PROC_STATUS_LABELS = ['Running', 'Hold min', 'Shutdown', 'Restarting'] as const;
 
 /**
  * Board fill per terrain class — land #f1f3f5, water a light tint of the
