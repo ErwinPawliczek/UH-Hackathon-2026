@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EconomyReply, ForecastReply } from '../engine/api';
 import {
-  SLOT_COUNT, bucketTicks, classSeries, costParts, countdownSentence, cumulative, defaultSlots, fmtAxisMoney,
+  SLOT_COUNT, bucketDays, bucketTicks, elapsedDaysWords, classSeries, costParts, countdownSentence, cumulative, defaultSlots, fmtAxisMoney,
   fmtAxisTonnes, fmtDuration, fmtMoney, fmtTonnes, fullBuckets, materialRows, nothingBroken, plantCharts,
   procurementSeries, toggleSlot,
 } from './economyData';
@@ -151,6 +151,13 @@ describe('procurement', () => {
 
   it('places buckets on their days, knows the last one may be unfinished, and formats axis values', () => {
     expect(bucketTicks(reply)).toEqual([0, 96, 192]);
+    // a daily bucket is labelled by the day it covers, never the midnight it began at
+    expect(bucketDays(reply)).toEqual([1, 2, 3]);
+    // elapsed time comes from the tick: day 4, 02:15 is 3.1 days in, not "4 days"
+    expect(elapsedDaysWords(3 * 96 + 9)).toBe('3.1 days');
+    expect(elapsedDaysWords(288)).toBe('3 days');
+    expect(elapsedDaysWords(96)).toBe('1 day');
+    expect(elapsedDaysWords(40)).toBe('10 hours');
     expect(fullBuckets(reply)).toBe(3); // tick 288 is exactly the end of day 3
     expect(fullBuckets({ ...reply, tick: 250 })).toBe(2);
     expect(fullBuckets({ tick: 10, bucketH: 24, buckets: 1 })).toBe(1);

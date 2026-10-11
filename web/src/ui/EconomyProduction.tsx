@@ -11,7 +11,7 @@ import { useMemo } from 'react';
 import type { EconomyReply } from '../engine/api';
 import { useSim } from '../store/sim';
 import { LineChart } from './charts/LineChart';
-import { bucketTicks, fmtAxisMoney, plantCharts, type PlantChart } from './economyData';
+import { bucketDays, fmtAxisMoney, plantCharts, type PlantChart } from './economyData';
 import { niceCeil } from './charts/scale';
 
 const SMALL = { width: 222, height: 104 };
@@ -27,7 +27,7 @@ function PlantSmall({ plant, x }: { plant: PlantChart; x: number[] }) {
   const troubled = plant.stoppedDays + plant.belowMinDays > 0;
   return (
     <div className="min-w-0" data-testid="economy-plant">
-      <LineChart
+      <LineChart xUnit="days"
         title={plant.title}
         unit="% of design"
         x={x}
@@ -68,7 +68,7 @@ function PlantSmall({ plant, x }: { plant: PlantChart; x: number[] }) {
 }
 
 export function ProductionView({ reply }: { reply: EconomyReply }) {
-  const x = useMemo(() => bucketTicks(reply), [reply]);
+  const x = useMemo(() => bucketDays(reply), [reply]);
   const plants = useMemo(() => plantCharts(reply), [reply]);
   if (reply.buckets === 0) {
     return <p className="px-4 py-6 text-sm text-muted" data-testid="economy-production-empty">No history yet. Start the simulation and the first day fills in.</p>;
@@ -79,10 +79,10 @@ export function ProductionView({ reply }: { reply: EconomyReply }) {
       <div>
         <div className="label mb-1">The whole network, per day</div>
         <div className="grid grid-cols-3 gap-x-2">
-          <LineChart title="Customers served" unit="% of demand" x={x} series={[{ label: 'Served', values: t.service.map((s) => s * 100) }]} {...SMALL} yMax={100} format={whole} testId="economy-network-service" />
+          <LineChart xUnit="days" title="Customers served" unit="% of demand" x={x} series={[{ label: 'Served', values: t.service.map((s) => s * 100) }]} {...SMALL} yMax={100} format={whole} testId="economy-network-service" />
           {/* a quiet run still gets a real axis: $0 to $1 K, not five marks all reading $0 */}
-          <LineChart title="Sales lost" unit="per day" x={x} series={[{ label: 'Lost', values: t.unmetUsd }]} {...SMALL} yMax={niceCeil(Math.max(1000, ...t.unmetUsd))} format={fmtAxisMoney} area />
-          <LineChart title="Plant time stopped" unit="hours per day" x={x} series={[{ label: 'Stopped', values: t.shutdownH }]} {...SMALL} yMax={niceCeil(Math.max(24, ...t.shutdownH))} format={whole} area />
+          <LineChart xUnit="days" title="Sales lost" unit="per day" x={x} series={[{ label: 'Lost', values: t.unmetUsd }]} {...SMALL} yMax={niceCeil(Math.max(1000, ...t.unmetUsd))} format={fmtAxisMoney} area />
+          <LineChart xUnit="days" title="Plant time stopped" unit="hours per day" x={x} series={[{ label: 'Stopped', values: t.shutdownH }]} {...SMALL} yMax={niceCeil(Math.max(24, ...t.shutdownH))} format={whole} area />
         </div>
       </div>
       <div>

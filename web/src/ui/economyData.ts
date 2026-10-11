@@ -225,6 +225,27 @@ export function bucketTicks(reply: Pick<EconomyReply, 'buckets' | 'bucketH'>): n
 }
 
 /**
+ * The day each daily bucket covers, counted from 1: bucket 0 is everything
+ * that happened during day 1. This is the x of its value on a chart drawn in
+ * whole-day mode, so a day's total is labelled with that day and not with
+ * the midnight it began at.
+ */
+export function bucketDays(reply: Pick<EconomyReply, 'buckets'>): number[] {
+  return Array.from({ length: reply.buckets }, (_, i) => i + 1);
+}
+
+/**
+ * How long the run has gone, in words, from the tick: "3.1 days" at day 4,
+ * 02:15. Never the number of the day that has only just begun.
+ */
+export function elapsedDaysWords(tick: number): string {
+  const days = Math.max(0, tick) / TICKS_PER_DAY;
+  if (days < 1) return fmtDuration(days * 24);
+  const v = Math.round(days * 10) / 10;
+  return `${Number.isInteger(v) ? v : v.toFixed(1)} day${v === 1 ? '' : 's'}`;
+}
+
+/**
  * How many buckets are complete. The last bucket of a reply is still filling
  * unless the run stands exactly on a bucket boundary; a per-day chart leaves
  * it out so its last point is a whole day, not a dip.
