@@ -105,12 +105,8 @@ std::string issue(Room& room, const json::json& command, const std::string& acto
   return reply;
 }
 
-// Lost customer sales so far, at base prices (the forecast's unmet_usd).
-double lostSalesUsd(crx_sim* sim) {
-  uint32_t n = 0;
-  const double* kpis = crx_kpis(sim, &n);
-  return n > 2 ? kpis[2] : 0.0;
-}
+// Lost customer sales so far, at base prices: not served plus priced out.
+double lostSalesUsd(crx_sim* sim) { return crx_lost_sales_usd(sim); }
 
 RoomPlayer* playerByToken(Room& room, const std::string& token) {
   for (RoomPlayer& p : room.players)
@@ -673,6 +669,8 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
                           {"stoppedHours", a["stoppedHours"]}, {"baselineStoppedHours", b["stoppedHours"]},
                           {"outputT", a["outputT"]}, {"baselineOutputT", b["outputT"]},
                           {"lostSalesUsd", a["lostSalesUsd"]}, {"baselineLostSalesUsd", b["lostSalesUsd"]},
+                          {"notServedUsd", a["notServedUsd"]}, {"pricedOutUsd", a["pricedOutUsd"]},
+                          {"demandFactor", a["demandFactor"]},
                           {"broken", broken(a, b)}};
         for (const RoomPlayer& p : r.players)
           if (p.site == static_cast<int>(i)) {

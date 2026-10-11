@@ -80,6 +80,7 @@ std::unique_ptr<Sim> Sim::createOn(std::shared_ptr<World> world, uint64_t seed) 
   sim->state_.site_rate_share.assign(w.sites.size(), 1.0);
   sim->state_.site_trade.assign(w.sites.size(), SiteTrade{});
   sim->state_.pipe_moved_t.assign(w.pipelines.size(), 0.0);
+  sim->state_.demand_factor.assign(w.processes.size(), 1.0);
   sim->state_.mat_bought_t.assign(w.catalog.materials.size(), 0.0);
   sim->state_.mat_bought_usd.assign(w.catalog.materials.size(), 0.0);
   // M2 logistics (§4.4): all edges open, market index at par, the fleet at
@@ -114,6 +115,12 @@ std::unique_ptr<Sim> Sim::createOn(std::shared_ptr<World> world, uint64_t seed) 
   if (mk.price_dear_fill >= 0) mp.price_dear_fill = mk.price_dear_fill;
   if (mk.price_cheap_cover >= 0) mp.price_cheap_cover = mk.price_cheap_cover;
   if (mk.price_dear_cover >= 0) mp.price_dear_cover = mk.price_dear_cover;
+  if (mk.demand_elasticity >= 0) mp.demand_elasticity = mk.demand_elasticity;
+  if (mk.demand_min_frac >= 0) mp.demand_min_frac = mk.demand_min_frac;
+  if (mk.demand_max_frac >= 0) mp.demand_max_frac = mk.demand_max_frac;
+  sim->state_.demand_elasticity = mp.demand_elasticity;
+  sim->state_.demand_min = mp.demand_min_frac;
+  sim->state_.demand_max = mp.demand_max_frac;
   if (mk.max_lots_per_tank >= 1)
     mp.max_lots_per_tank = static_cast<uint32_t>(std::min(mk.max_lots_per_tank, 100000.0));
   sim->signals.assign(w.tanks.size(), TankSignals{});

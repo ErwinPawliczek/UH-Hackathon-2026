@@ -820,6 +820,12 @@ const char* crx_partners(const crx_sim* sim, uint32_t site) {
   return api->reply.empty() ? nullptr : api->reply.c_str();
 }
 
+double crx_lost_sales_usd(const crx_sim* sim) {
+  const ApiSim* api = asApi(sim);
+  if (api == nullptr) return 0.0;
+  return api->sim->state().cum_unmet_usd + api->sim->state().cum_priced_out_usd;
+}
+
 const char* crx_summary(const crx_sim* sim) {
   const ApiSim* api = asApi(sim);
   if (api == nullptr) return "{}";

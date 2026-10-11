@@ -2589,3 +2589,62 @@ TEST_CASE("M33: price-aware buyers defer when the only seller is dear and stock 
   // The customers are still served while they wait for a better price.
   CHECK(dear->state().cum_unmet_t == doctest::Approx(plain->state().cum_unmet_t).epsilon(0.02));
 }
+
+TEST_CASE("M34: customers want less of what has become dear, and the books keep the two losses apart") {
+  auto plain = makeMarketSim();
+  auto broken = makeMarketSim();
+  REQUIRE(plain->state().demand_elasticity > 0.0);
+  CHECK(makeMapSim()->state().demand_elasticity == 0.0);  // off in the default world
+  const World& w = plain->world();
+  const int depot = w.findSite("FUEL_DEPOT");
+  REQUIRE(depot >= 0);
+  plain->step(96 * 5);
+  broken->step(96 * 5);
+  REQUIRE(json::parse(broken->command(R"({"type":"site_shutdown","site":"REFINERY","duration_h":480})")).at("ok") == true);
+  plain->step(96 * 20);
+  broken->step(96 * 20);
+
+  // What the depot pays for fuel has gone up, and its customers want less.
+  double paid_plain = 0, paid_broken = 0, factor_plain = 1, factor_broken = 1;
+  int lines = 0;
+  for (size_t p = 0; p < w.processes.size(); ++p) {
+    if (w.processes[p].site.v != static_cast<uint32_t>(depot)) continue;
+    ++lines;
+    factor_plain = std::min(factor_plain, plain->state().demand_factor[p]);
+    factor_broken = std::min(factor_broken, broken->state().demand_factor[p]);
+  }
+  for (size_t t = 0; t < w.tanks.size(); ++t)
+    if (w.tanks[t].site.v == static_cast<uint32_t>(depot)) {
+      const double base = w.catalog.materials[w.tanks[t].material].base_price;
+      paid_plain = std::max(paid_plain, plain->state().tank[t].paid_avg / base);
+      paid_broken = std::max(paid_broken, broken->state().tank[t].paid_avg / base);
+    }
+  MESSAGE("fuel depot: dearest fuel at " << paid_plain << " x base normally, " << paid_broken
+                                         << " x with the refinery down; wanted share " << factor_plain << " and "
+                                         << factor_broken);
+  REQUIRE(lines > 0);
+  CHECK(paid_broken > paid_plain * 1.05);
+  CHECK(factor_broken < factor_plain - 0.01);
+  CHECK(factor_broken < 1.0);
+  CHECK(factor_broken >= plain->state().demand_min);
+
+  // The books: priced out is counted apart from not served, and the summary
+  // reports lost sales as their sum.
+  const State& st = broken->state();
+  CHECK(st.cum_priced_out_usd > plain->state().cum_priced_out_usd);
+  const json sum = json::parse(summaryJson(w, st));
+  const json& eco = sum.at("economy");
+  CHECK(eco.at("notServedUsd").get<double>() == doctest::Approx(st.cum_unmet_usd));
+  CHECK(eco.at("pricedOutUsd").get<double>() == doctest::Approx(st.cum_priced_out_usd));
+  CHECK(eco.at("lostSalesUsd").get<double>() == doctest::Approx(st.cum_unmet_usd + st.cum_priced_out_usd));
+  double sites_priced = 0, sites_unserved = 0;
+  for (const json& s : sum.at("sites")) {
+    sites_priced += s.at("pricedOutUsd").get<double>();
+    sites_unserved += s.at("notServedUsd").get<double>();
+    CHECK(s.at("lostSalesUsd").get<double>() ==
+          doctest::Approx(s.at("pricedOutUsd").get<double>() + s.at("notServedUsd").get<double>()));
+  }
+  CHECK(sites_priced == doctest::Approx(st.cum_priced_out_usd));
+  CHECK(sites_unserved == doctest::Approx(st.cum_unmet_usd));
+  CHECK(sum.at("sites").at(static_cast<size_t>(depot)).at("demandFactor").get<double>() == doctest::Approx(factor_broken));
+}
