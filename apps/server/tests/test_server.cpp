@@ -455,6 +455,50 @@ TEST_CASE("route_break by edge: the index is the route's position in the world J
   for (const json& e : json::parse(after->body)) CHECK(e.at("type") != "route_break");
 }
 
+TEST_CASE("place_order over HTTP: booked, replayed by a rewind, kept by the forecast") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const auto post = [&cli](const std::string& path, const std::string& body) {
+    auto res = cli.Post(path, body, "application/json");
+    REQUIRE(res);
+    return *res;
+  };
+  const std::string order =
+      R"({"type":"place_order","site":"STYRENICS","material":"BENZENE","seller":"REFINERY",)"
+      R"("cls":"TRUCK_TANK","tonnes":25})";
+  const std::string cfg = R"({"seed":42,"world":"erwin-world-v1"})";
+
+  const std::string a = createSession(cli, cfg);
+  post("/api/sim/" + a + "/step", R"({"ticks":100})");
+  const json reply = json::parse(post("/api/sim/" + a + "/command", order).body);
+  REQUIRE(reply.at("ok") == true);
+  CHECK(reply.at("order").at("tonnes") == 25.0);
+  post("/api/sim/" + a + "/step", R"({"ticks":20})");
+
+  // The refusal carries its reason and books nothing.
+  const json bad = json::parse(
+      post("/api/sim/" + a + "/command",
+           R"({"type":"place_order","site":"STYRENICS","material":"BENZENE","seller":"REFINERY",)"
+           R"("cls":"TRUCK_BULK","tonnes":25})")
+          .body);
+  CHECK(bad.at("ok") == false);
+  CHECK(bad.at("blocked") == "not_possible");
+
+  // A rewind to after the order replays it: same as a run that placed it and stopped there.
+  CHECK(post("/api/sim/" + a + "/rewind", R"({"tick":110})").status == 200);
+  const std::string b = createSession(cli, cfg);
+  post("/api/sim/" + b + "/step", R"({"ticks":100})");
+  post("/api/sim/" + b + "/command", order);
+  post("/api/sim/" + b + "/step", R"({"ticks":10})");
+  CHECK(post("/api/sim/" + a + "/step", R"({"ticks":0})").body ==
+        post("/api/sim/" + b + "/step", R"({"ticks":0})").body);
+
+  // It is not a disruption: with none issued, the forecast's two futures are one.
+  const json f = json::parse(post("/api/sim/" + a + "/forecast", R"({"days":2})").body);
+  CHECK(f.at("disruptions") == 0);
+  CHECK(f.at("with") == f.at("without"));
+}
+
 TEST_CASE("world json: fleet manifest without a fabricated shuttle schedule") {
   TestServer srv;
   auto cli = client(srv.port);

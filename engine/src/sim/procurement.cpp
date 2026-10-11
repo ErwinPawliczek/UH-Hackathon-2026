@@ -97,6 +97,34 @@ Quote quoteLot(const World& world, const State& state, const PathCache& paths,
   return q;
 }
 
+uint32_t bookLot(const World& world, State& state, uint32_t buyer_tank, uint32_t seller_tank,
+                 size_t cls, double lot_t, double price, double freight_usd, double eta_h,
+                 double km, double urgency) {
+  const Tank& buyer = world.tanks[buyer_tank];
+  const Material& mat = world.catalog.materials[buyer.material];
+  Order o;
+  o.from = seller_tank;
+  o.to = buyer_tank;
+  o.material = buyer.material;
+  o.qty_t = lot_t;
+  o.price = price;
+  o.freight_usd = freight_usd;
+  o.km = km;
+  o.urgency = urgency;
+  o.cls = static_cast<uint16_t>(cls);
+  o.vehicle = UINT32_MAX;  // dispatch assigns (§5.7)
+  o.created_tick = state.tick;
+  o.eta_tick = state.tick + static_cast<uint64_t>(std::ceil(eta_h / kTickHours));
+  o.status = OrdStatus::Open;
+  state.order.push_back(o);
+  state.tank[seller_tank].reserved_out_t += lot_t;
+  state.tank[buyer_tank].inbound_t += lot_t;
+  // Realized trades pull the index toward price ÷ base (§5.6 index).
+  double& idx = state.price_index[buyer.material];
+  idx = std::clamp(idx + 0.1 * (price / mat.base_price - idx), 0.25, 4.0);
+  return static_cast<uint32_t>(state.order.size() - 1);
+}
+
 void stepProcurement(const World& world, State& state, const PathCache& paths,
                      const std::vector<TankSignals>& signals, const MarketParams& params,
                      ProcurementStats& out, Recorder& rec) {
@@ -132,7 +160,6 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
 
   for (const Request& req : requests) {
     const Tank& buyer = world.tanks[req.tank];
-    const Material& mat = catalog.materials[buyer.material];
 
     // The contract partner, if any (§5.6: zero switch cost there).
     int contract_seller = -1;
@@ -191,26 +218,8 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
                      params.min_lot_target_frac * buyer.target_frac * buyer.capacity_t);
         if (lot_t < min_lot - 1e-9) break;
       }
-      Order o;
-      o.from = best.seller_tank;
-      o.to = req.tank;
-      o.material = buyer.material;
-      o.qty_t = lot_t;
-      o.price = best.price;
-      o.freight_usd = best.freight_usd;
-      o.km = best.km;
-      o.urgency = req.urgency;
-      o.cls = static_cast<uint16_t>(best.cls);
-      o.vehicle = UINT32_MAX;  // dispatch assigns (§5.7)
-      o.created_tick = state.tick;
-      o.eta_tick = state.tick + static_cast<uint64_t>(std::ceil(best.eta_h / kTickHours));
-      o.status = OrdStatus::Open;
-      state.order.push_back(o);
-      state.tank[best.seller_tank].reserved_out_t += lot_t;
-      state.tank[req.tank].inbound_t += lot_t;
-      // Realized trades pull the index toward price ÷ base (§5.6 index).
-      double& idx = state.price_index[buyer.material];
-      idx = std::clamp(idx + 0.1 * (best.price / mat.base_price - idx), 0.25, 4.0);
+      bookLot(world, state, req.tank, best.seller_tank, best.cls, lot_t, best.price,
+              best.freight_usd, best.eta_h, best.km, req.urgency);
 
       out.orders_created += 1;
       out.tons_ordered += lot_t;

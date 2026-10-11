@@ -76,6 +76,13 @@ Quote quoteLot(const World& world, const State& state, const PathCache& paths,
                uint32_t buyer_tank, uint32_t seller_tank, size_t cls, double want,
                double urgency, int contract_seller, bool explain);
 
+// Books one lot from a bookable quote exactly as the hourly pass does: the
+// order joins the dispatch queue, the seller's stock is reserved, the buyer's
+// inbound rises and the trade moves the price index. Returns the order id.
+uint32_t bookLot(const World& world, State& state, uint32_t buyer_tank, uint32_t seller_tank,
+                 size_t cls, double lot_t, double price, double freight_usd, double eta_h,
+                 double km, double urgency);
+
 struct ProcurementStats {
   uint32_t orders_created = 0;
   uint32_t lots_unmatched = 0;

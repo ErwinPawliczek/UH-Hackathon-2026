@@ -227,6 +227,128 @@ std::string Sim::command(const std::string& json_cmd) {
       return json{{"ok", false}, {"error", "no process " + proc_key + " at site"}}.dump();
     }
 
+    if (type == "place_order") {
+      // A buyer's own order: one lot from a named seller by a named vehicle
+      // class, booked exactly as the hourly pass books one (reservation,
+      // inbound, dispatch queue). The tonnes are clamped to one vehicle
+      // load, to the seller's free stock and to the room in the tank; where
+      // the pass could not book the lot it is refused, with the same word
+      // the sourcing view uses for the reason.
+      const auto refuse = [](const char* blocked, const std::string& why) {
+        return json{{"ok", false}, {"error", "place_order: " + why}, {"blocked", blocked}}.dump();
+      };
+      const auto siteOf = [&](const char* key) -> int {
+        if (!cmd.contains(key)) return -1;
+        const json& v = cmd.at(key);
+        if (v.is_number_unsigned())
+          return v.get<uint64_t>() < world_->sites.size() ? static_cast<int>(v.get<uint64_t>()) : -1;
+        return v.is_string() ? world_->findSite(v.get<std::string>()) : -1;
+      };
+      const int buyer_site = siteOf("site");
+      const int seller_site = cmd.contains("seller") ? siteOf("seller") : siteOf("from");
+      if (buyer_site < 0) return refuse("bad_request", "need 'site', the buying site (key or index)");
+      if (seller_site < 0)
+        return refuse("bad_request", "need 'seller', the selling site (key or index)");
+      if (!cmd.contains("material") || !cmd.at("material").is_string())
+        return refuse("bad_request", "need 'material' (a material key)");
+      const int mat = world_->catalog.findMaterial(cmd.at("material").get<std::string>());
+      if (mat < 0) return refuse("bad_request", "unknown material");
+      if (!cmd.contains("cls") || !cmd.at("cls").is_string())
+        return refuse("bad_request", "need 'cls' (a vehicle class key)");
+      const int cls = world_->catalog.findVehicle(cmd.at("cls").get<std::string>());
+      if (cls < 0) return refuse("bad_request", "unknown vehicle class");
+      if (!cmd.contains("tonnes") || !cmd.at("tonnes").is_number())
+        return refuse("bad_request", "need 'tonnes'");
+      const double asked = cmd.at("tonnes").get<double>();
+      if (!(asked > 0.0)) return refuse("bad_request", "tonnes must be above zero");
+      if (buyer_site == seller_site)
+        return refuse("bad_request", "buyer and seller are the same site");
+      const VehicleClass& vc = world_->catalog.vehicle_classes[static_cast<size_t>(cls)];
+
+      int buyer_tank = -1, seller_tank = -1;
+      for (uint32_t t = 0; t < world_->tanks.size(); ++t) {
+        const Tank& tk = world_->tanks[t];
+        if (tk.material != static_cast<uint16_t>(mat)) continue;
+        if (tk.site.v == static_cast<uint32_t>(buyer_site) &&
+            (tk.role == TankRole::Feed || tk.role == TankRole::Both))
+          buyer_tank = static_cast<int>(t);
+        if (tk.site.v == static_cast<uint32_t>(seller_site) &&
+            (tk.role == TankRole::Product || tk.role == TankRole::Both))
+          seller_tank = static_cast<int>(t);
+      }
+      if (buyer_tank < 0)
+        return refuse("bad_request", "the buying site has no tank that takes that material");
+      if (seller_tank < 0)
+        return refuse("bad_request", "the selling site has no tank that sells that material");
+      const Tank& buyer = world_->tanks[static_cast<size_t>(buyer_tank)];
+      const TankState& bts = state_.tank[static_cast<size_t>(buyer_tank)];
+      const TankState& sts = state_.tank[static_cast<size_t>(seller_tank)];
+
+      // Can this class carry this material between these two sites at all,
+      // and is there a vehicle to do it? (Priced for a token lot first, so
+      // the answer does not depend on stock.)
+      constexpr double kSmallestLot = 0.5;  // tonnes: below this nothing is worth a vehicle
+      refreshPaths(*world_, state_, paths_);  // a fresh run has not built them yet
+      std::vector<TankSignals> now;
+      computeSignals(*world_, state_, now);
+      const double urgency = now[static_cast<size_t>(buyer_tank)].u;
+      int contract_seller = -1;
+      for (const World::Contract& c : world_->contracts)
+        if (c.buyer.v == static_cast<uint32_t>(buyer_tank)) contract_seller = c.seller.v;
+      const std::vector<std::vector<uint32_t>> class_nodes = classNodes(*world_, state_);
+      const auto quote = [&](double want) {
+        return quoteLot(*world_, state_, paths_, market_params_, class_nodes,
+                        static_cast<uint32_t>(buyer_tank), static_cast<uint32_t>(seller_tank),
+                        static_cast<size_t>(cls), want, urgency, contract_seller, true);
+      };
+      const Quote reach = quote(0.0);
+      if (!reach.possible)
+        return refuse("not_possible",
+                      "that vehicle class cannot carry this material between these two sites");
+      if (reach.blocked == Quote::Block::NoVehicles)
+        return refuse("no_vehicles", "there are no vehicles of that class");
+      if (reach.blocked == Quote::Block::Unreachable)
+        return refuse("unreachable", "no vehicle of that class can reach the seller");
+      if (reach.blocked == Quote::Block::ExportFill)
+        return refuse("export_fill", "the seller is below its export fill line");
+
+      // One vehicle load at most, no more than the seller can spare, no more
+      // than the tank can take on top of what is already on its way.
+      const double free_t = sts.level_t - sts.reserved_out_t;
+      const double room_t = buyer.capacity_t - (bts.level_t + bts.inbound_t);
+      if (free_t < kSmallestLot)
+        return refuse("seller_short", "the seller has no free stock to sell");
+      if (room_t < kSmallestLot)
+        return refuse("no_room", "the tank has no room on top of what is inbound");
+      const double lot_t = std::min({asked, vc.capacity_t, free_t, room_t});
+      if (lot_t < kSmallestLot)
+        return refuse("bad_request", "tonnes must be at least half a tonne");
+      const Quote q = quote(lot_t);
+      if (!q.bookable())
+        return refuse("seller_short", "the seller does not have that much free stock");
+
+      const double price = (q.ask + q.bid) / 2.0;
+      const double freight_usd = q.lot_t * vc.freight * q.km;
+      const uint32_t id = bookLot(*world_, state_, static_cast<uint32_t>(buyer_tank),
+                                  static_cast<uint32_t>(seller_tank), static_cast<size_t>(cls),
+                                  q.lot_t, price, freight_usd, q.eta_h, q.km, urgency);
+      refreshEtas(*world_, state_);
+      return json{{"ok", true},
+                  {"order",
+                   {{"id", id},
+                    {"tonnes", q.lot_t},
+                    {"requestedTonnes", asked},
+                    {"material", world_->catalog.materials[static_cast<size_t>(mat)].key},
+                    {"seller", world_->sites[static_cast<size_t>(seller_site)].key},
+                    {"site", world_->sites[static_cast<size_t>(buyer_site)].key},
+                    {"cls", vc.key},
+                    {"priceUsdT", price},
+                    {"freightUsd", freight_usd},
+                    {"km", q.km},
+                    {"etaTick", state_.order[id].eta_tick}}}}
+          .dump();
+    }
+
     return json{{"ok", false}, {"error", "unknown command type: " + type}}.dump();
   } catch (const json::exception& e) {
     return json{{"ok", false}, {"error", std::string("bad json: ") + e.what()}}.dump();

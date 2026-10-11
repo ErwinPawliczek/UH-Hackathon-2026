@@ -636,6 +636,7 @@ std::string economyJson(const World& world, const State& state, const Recorder& 
                       {"index", p},
                       {"boundary", type.boundary == Boundary::Source ? "source" : "none"},
                       {"designRateTph", proc.design_rate_t_h},
+                      {"turndown", type.boundary == Boundary::Source ? 0.0 : type.turndown},
                       {"rateMin", rounded(lo, round4)},
                       {"rateMean", rounded(mean, round4)},
                       {"rateMax", rounded(hi, round4)}});

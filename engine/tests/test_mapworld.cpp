@@ -674,6 +674,13 @@ TEST_CASE("M11: the economy view adds up to the order book and the running total
   CHECK(doc.at("plants").size() == 18);
   for (const json& pl : doc.at("plants")) {
     CHECK(pl.at("designRateTph").get<double>() > 0.0);
+    // Minimum stable rate from the catalog: none for a source, 30 to 65% for a plant.
+    if (pl.at("boundary") == "source") {
+      CHECK(pl.at("turndown") == 0.0);
+    } else {
+      CHECK(pl.at("turndown").get<double>() >= 0.3);
+      CHECK(pl.at("turndown").get<double>() <= 0.65);
+    }
     for (size_t b = 0; b < n; ++b) {
       const double lo = pl.at("rateMin")[b].get<double>(), mid = pl.at("rateMean")[b].get<double>(),
                    hi = pl.at("rateMax")[b].get<double>();
@@ -996,4 +1003,130 @@ TEST_CASE("M14: a closed sea lane holds loaded ships at the berth without loadin
   CHECK(at60[1] - at45[1] == doctest::Approx(0.0).epsilon(1e-9));  // no unmet demand days 45 to 60
   for (size_t p = 0; p < w.processes.size(); ++p)
     CHECK(sim->state().proc[p].status == ProcStatus::Running);
+}
+
+TEST_CASE("M15: place_order books a buyer's own lot exactly as the hourly pass would") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  const World& w = sim->world();
+  const auto send = [&](const json& cmd) { return json::parse(sim->command(cmd.dump())); };
+  const json good = {{"type", "place_order"}, {"site", "STYRENICS"}, {"material", "BENZENE"},
+                     {"seller", "REFINERY"},  {"cls", "TRUCK_TANK"}, {"tonnes", 25}};
+
+  // It works on a fresh run too (paths are built on demand).
+  CHECK(send(good).at("ok") == true);
+
+  sim->step(960);
+  const int buyer = w.findTank("STYRENICS/BENZENE"), seller = w.findTank("REFINERY/BENZENE");
+  REQUIRE(buyer >= 0);
+  REQUIRE(seller >= 0);
+  const size_t orders_before = sim->state().order.size();
+  const double reserved = sim->state().tank[static_cast<size_t>(seller)].reserved_out_t;
+  const double inbound = sim->state().tank[static_cast<size_t>(buyer)].inbound_t;
+
+  const json reply = send(good);
+  REQUIRE(reply.at("ok") == true);
+  const uint32_t id = reply.at("order").at("id").get<uint32_t>();
+  REQUIRE(id == orders_before);
+  REQUIRE(sim->state().order.size() == orders_before + 1);
+  const Order booked = sim->state().order[id];
+  CHECK(booked.status == OrdStatus::Open);
+  CHECK(booked.from == static_cast<uint32_t>(seller));
+  CHECK(booked.to == static_cast<uint32_t>(buyer));
+  CHECK(booked.qty_t == 25.0);
+  CHECK(booked.created_tick == 960);
+  CHECK(booked.km == doctest::Approx(reply.at("order").at("km").get<double>()));
+  CHECK(booked.freight_usd == doctest::Approx(25.0 * 0.10 * booked.km));
+  CHECK(reply.at("order").at("priceUsdT").get<double>() == doctest::Approx(booked.price));
+  CHECK(reply.at("order").at("etaTick").get<uint64_t>() > 960);
+  CHECK(sim->state().tank[static_cast<size_t>(seller)].reserved_out_t ==
+        doctest::Approx(reserved + 25.0));
+  CHECK(sim->state().tank[static_cast<size_t>(buyer)].inbound_t == doctest::Approx(inbound + 25.0));
+
+  // A truck takes it within the hour and delivers it; the books stay sane.
+  sim->step(4);
+  CHECK(sim->state().order[id].status != OrdStatus::Open);
+  CHECK(sim->state().order[id].vehicle < sim->state().vehicle.size());
+  for (int hour = 0; hour < 72 && sim->state().order[id].status != OrdStatus::Delivered; ++hour)
+    sim->step(4);
+  CHECK(sim->state().order[id].status == OrdStatus::Delivered);
+  checkBooks(*sim);
+
+  // Refusals, each with a reason and the word the sourcing view uses.
+  const auto refusal = [&](json cmd) -> std::string {
+    const json r = send(cmd);
+    if (r.at("ok") != false || r.at("error").get<std::string>().rfind("place_order: ", 0) != 0)
+      return "(not refused)";
+    return r.at("blocked").get<std::string>();
+  };
+  const auto with = [&](const char* key, const json& value) {
+    json cmd = good;
+    cmd[key] = value;
+    return cmd;
+  };
+  const size_t before_refusals = sim->state().order.size();
+  CHECK(refusal(with("site", "NOPE")) == "bad_request");
+  CHECK(refusal(with("seller", "NOPE")) == "bad_request");
+  CHECK(refusal(with("material", "NOPE")) == "bad_request");
+  CHECK(refusal(with("cls", "NOPE")) == "bad_request");
+  CHECK(refusal(with("tonnes", 0)) == "bad_request");
+  CHECK(refusal(with("tonnes", -5)) == "bad_request");
+  CHECK(refusal(with("seller", "STYRENICS")) == "bad_request");  // buyer and seller the same
+  CHECK(refusal(with("seller", "PACKAGING")) == "bad_request");  // packaging sells no benzene
+  CHECK(refusal(with("cls", "TRUCK_BULK")) == "not_possible");   // a bulk truck cannot carry a liquid
+  CHECK(refusal(with("cls", "SHIP_TANK")) == "not_possible");    // styrenics has no berth
+  CHECK(refusal(with("cls", "SHIP_DRY")) == "not_possible");
+  json no_tonnes = good;
+  no_tonnes.erase("tonnes");
+  CHECK(refusal(no_tonnes) == "bad_request");
+  CHECK(sim->state().order.size() == before_refusals);  // a refusal books nothing
+
+  // Clamping: one vehicle load at most, and no more than the seller can
+  // spare. The styrenics solvent tank holds about a truckload.
+  const json big = send(with("tonnes", 400));
+  REQUIRE(big.at("ok") == true);
+  CHECK(big.at("order").at("tonnes") == 25.0);  // one tank truck
+  CHECK(big.at("order").at("requestedTonnes") == 400.0);
+  const json solvent = {{"type", "place_order"}, {"site", "PAINTS"}, {"material", "SOLVENT"},
+                        {"seller", "STYRENICS"}, {"cls", "TRUCK_TANK"}, {"tonnes", 25}};
+  const int small_tank = w.findTank("STYRENICS/SOLVENT");
+  REQUIRE(small_tank >= 0);
+  int placed = 0;
+  double last_lot = 25.0;
+  for (int i = 0; i < 10; ++i) {
+    const TankState& ts = sim->state().tank[static_cast<size_t>(small_tank)];
+    const double free_before = ts.level_t - ts.reserved_out_t;
+    const json r = send(solvent);
+    if (r.at("ok") == false) {
+      CHECK(r.at("blocked") == "seller_short");
+      CHECK(free_before < 0.5);
+      break;
+    }
+    ++placed;
+    last_lot = r.at("order").at("tonnes").get<double>();
+    CHECK(last_lot == doctest::Approx(std::min(25.0, free_before)));
+  }
+  CHECK(placed >= 1);
+  CHECK(placed < 10);       // the tank ran out and the last order was refused
+  CHECK(last_lot < 25.0);   // and the one before it was cut down to what was left
+  checkBooks(*sim);
+
+  // The older key for the seller still works.
+  json old_key = good;
+  old_key.erase("seller");
+  old_key["from"] = "CRACKER_FLEX";
+  CHECK(send(old_key).at("ok") == true);
+
+  // The same commands at the same ticks give the same run.
+  auto again = makeMapSim();
+  REQUIRE(json::parse(again->command(good.dump())).at("ok") == true);
+  again->step(960);
+  REQUIRE(json::parse(again->command(good.dump())).at("ok") == true);
+  auto third = makeMapSim();
+  REQUIRE(json::parse(third->command(good.dump())).at("ok") == true);
+  third->step(960);
+  REQUIRE(json::parse(third->command(good.dump())).at("ok") == true);
+  again->step(200);
+  third->step(200);
+  CHECK(again->stateHash() == third->stateHash());
 }
