@@ -9,7 +9,7 @@ const HORIZON_TICKS = HORIZON_DAYS * TICKS_PER_DAY;
 
 // Alarm red is reserved for bad states (stockouts, failures, shutdowns);
 // every other event is the one blue.
-const CRITICAL = new Set(['stockout', 'unit_failed', 'process_shutdown']);
+const CRITICAL = new Set(['stockout', 'unit_failed', 'process_shutdown', 'scenario']);
 
 function markerColor(e: SimEvent): string {
   return CRITICAL.has(e.type) ? 'var(--alarm)' : 'var(--blue)';

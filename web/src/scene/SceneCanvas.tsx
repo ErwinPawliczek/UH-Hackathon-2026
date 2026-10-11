@@ -4,7 +4,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useSim } from '../store/sim';
-import { MapScene } from './mapScene';
+import { MapScene, viewFromParams } from './mapScene';
 
 export function SceneCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -16,7 +16,7 @@ export function SceneCanvas() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas === null || world === null) return;
-    const scene = new MapScene(canvas, world);
+    const scene = new MapScene(canvas, world, viewFromParams(new URLSearchParams(window.location.search)));
     sceneRef.current = scene;
 
     const ro = new ResizeObserver(() => {

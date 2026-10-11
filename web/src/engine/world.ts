@@ -124,6 +124,8 @@ export interface PipelineSpec {
 }
 
 export interface SiteSpec {
+  /** engine site key (e.g. CRACKER_ETHANE) — what commands address a site by; absent on the stub world */
+  key?: string;
   name: string;
   preset: string;
   x: number;

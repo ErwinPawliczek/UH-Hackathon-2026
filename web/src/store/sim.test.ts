@@ -81,13 +81,29 @@ describe('store boot', () => {
   it('honours settings already saved under the current key', async () => {
     storage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ state: { seed: 7, scenario: 'none', speed: 64 }, version: 0 }),
+      JSON.stringify({ state: { seed: 7, scenario: 'none', speed: 64 }, version: 1 }),
     );
     const { useSim } = await importStore();
     expect(useSim.getState().seed).toBe(7);
     expect(useSim.getState().speed).toBe(64);
     // The backend kind is deliberately absent from the persisted shape.
     expect(useSim.getState().backendKind).toBe('http');
+  });
+
+  it('resets a speed saved before 1× became the default, and keeps the rest', async () => {
+    storage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ state: { seed: 7, scenario: 'none', speed: 16 }, version: 0 }),
+    );
+    const { useSim } = await importStore();
+    expect(useSim.getState().seed).toBe(7);
+    expect(useSim.getState().speed).toBe(1);
+  });
+
+  it('starts at 1× and offers 1×, 4×, 16× and 64×', async () => {
+    const { useSim, SPEEDS } = await importStore();
+    expect(useSim.getState().speed).toBe(1);
+    expect([...SPEEDS]).toEqual([1, 4, 16, 64]);
   });
 
   it('persists only the user-facing settings', async () => {
@@ -97,6 +113,6 @@ describe('store boot', () => {
     const persisted = JSON.parse(storage.getItem(STORAGE_KEY) ?? '{}') as {
       state: Record<string, unknown>;
     };
-    expect(persisted.state).toEqual({ seed: 9, scenario: 'none', speed: 16 });
+    expect(persisted.state).toEqual({ seed: 9, scenario: 'none', speed: 1 });
   });
 });

@@ -77,6 +77,7 @@ async function openSessionFor(
   useSim.setState({
     world,
     events: [],
+    triggered: [],
     lastSeq: -1,
     selected: null,
     prevSnap: null,

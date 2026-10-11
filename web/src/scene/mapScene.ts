@@ -27,6 +27,20 @@ const BOTTOM_INSET_PX = 176;
 /** Default view direction from the orbit target to the camera (tilted, looking north). */
 const VIEW_DIR = new THREE.Vector3(0, 42, 38).normalize();
 
+/**
+ * A starting camera view from the `?view=x,y,dist` URL parameter: the map
+ * point (km) to look at and the camera distance in scene units (10 km each).
+ * Lets a link — or a capture script — open straight onto one corner of the
+ * map. Null when absent or malformed.
+ */
+export function viewFromParams(params: URLSearchParams): { xKm: number; yKm: number; dist: number } | null {
+  const raw = params.get('view');
+  if (raw === null) return null;
+  const [xKm, yKm, dist] = raw.split(',').map(Number);
+  if (![xKm, yKm, dist].every(Number.isFinite) || dist <= 0) return null;
+  return { xKm, yKm, dist };
+}
+
 export class MapScene {
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
@@ -49,7 +63,11 @@ export class MapScene {
   private readonly raycaster = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
 
-  constructor(canvas: HTMLCanvasElement, world: WorldSpec) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    world: WorldSpec,
+    initialView: { xKm: number; yKm: number; dist: number } | null = null,
+  ) {
     this.world = world;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(V3.white);
@@ -136,6 +154,14 @@ export class MapScene {
     this.controls.addEventListener('start', () => {
       this.userMoved = true;
     });
+    if (initialView !== null) {
+      // An explicit view wins over the whole-map framing.
+      const [tx, tz] = mapToWorld(initialView.xKm, initialView.yKm);
+      const dist = Math.min(this.controls.maxDistance, Math.max(this.controls.minDistance, initialView.dist));
+      this.controls.target.set(tx, 0, tz);
+      this.camera.position.set(tx + VIEW_DIR.x * dist, VIEW_DIR.y * dist, tz + VIEW_DIR.z * dist);
+      this.userMoved = true;
+    }
     this.controls.update();
   }
 
