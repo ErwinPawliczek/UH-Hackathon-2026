@@ -230,6 +230,17 @@ body{font-family:"Instrument Sans",system-ui,sans-serif;overflow-x:hidden}
 .cf-lt { margin: 0 0 2px; font-family: "Archivo", sans-serif; font-stretch: 112%; font-weight: 700; font-size: 13px; border-bottom: 1px solid var(--foreground); padding-bottom: 3px; }
 .cf-wf .mc-read { text-align: center; }
 
+/* Market model */
+.mk-table { font-size: 12.5px; }
+.mk-eq { margin: 0 auto 8px; max-width: 640px; text-align: center; }
+.mf-freight { align-items: center; }
+.mk-order { align-items: center; }
+.mk-chain svg { max-width: 520px; }
+.mk-node polygon { fill: var(--background); stroke: var(--foreground); stroke-width: 1.5; }
+.mk-link { stroke: var(--foreground); stroke-width: 1.25; fill: none; }
+.mk-head { fill: var(--foreground); }
+.mk-up { font-family: "IBM Plex Mono", monospace; font-size: 12px; font-weight: 600; fill: var(--alarm); }
+
 /* The engine clock */
 .tk { display: flex; flex-direction: column; gap: 10px; font-family: "Instrument Sans", sans-serif; }
 .tk-top { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
@@ -472,13 +483,16 @@ const CHAPTERS = [
     lede: "A simulator of the Gulf Coast chemical network, from oil and gas fields to the companies that buy plastic, built on real plant units, yields and logistics. Shut down any unit at any plant and it shows who runs short, how soon, and what it costs."
   }
 ];
-const SUBHEADS = ["The supply chain, top to bottom", "Every tank reads three numbers about itself. Everything else follows.", "Run the same moment forward twice, once as it is and once as if nothing had broken, and price the difference."];
-const SUBHEAD_EYEBROWS = { 0: "How it works" };
+const SUBHEADS = ["The supply chain, top to bottom", "Every tank reads three numbers about itself. Everything else follows.", "Run the same moment forward twice, once as it is and once as if nothing had broken, and price the difference.", "Price is set by how full a tank is, and price then decides when buyers order, how much customers consume, and how hard plants run."];
+const SUBHEAD_EYEBROWS = { 0: "How it works", 1: "The supply chain model", 3: "The market model", 2: "The cost of a disruption" };
+const SUBHEAD_IDS = { 0: "how", 1: "model", 3: "market", 2: "cost" };
 const SUBHEAD_NOTES = {
   0: "Click or press on a site to find out more.",
   1: "No planner, no schedule, no script. When something breaks, the numbers change, and the network reacts on its own.",
+  3: "No price is typed in. Scarcity raises it, surplus lowers it, and every site reacts. Steps 3 to 6 run with the Market switch on in the demo.",
   2: "No estimate, no rule of thumb. Two full simulations of the next 30 days, compared tonne for tonne."
 };
+const GROUP_SUBHEAD = { 0: 1, 1: 2, 2: 3 };
 const HOW = [
   {
     title: "One tick is 15 minutes",
@@ -505,10 +519,48 @@ const HOW = [
     body: "A tank not fed by pipeline buys for itself, once an hour: as soon as Urgency is above zero, enough to get back to 70% full, in whole vehicle loads, waiting until a lot fills at least 80% of the vehicle. A truck carries 20 to 25 t, a barge 1,200 to 2,000 t, a ship a few thousand tonnes.",
     figure: "buy"
   },
+  // ── The market (from "9-market-model.md"): price comes from stock, and price changes behaviour ──
   {
-    title: "How the price is set",
-    body: "A seller asks less as its tank fills, a buyer bids more as its Urgency rises, and the price paid is halfway between. The buyer takes the lowest delivered cost. A seller whose tank is filling gets cheaper, buyers switch to it, and its tank drains.",
+    group: 2,
+    title: "How a price is set",
+    body: "Every chemical has a base price. A seller asks less as its tank fills and more as it empties, times any markup it sets. A buyer bids more as its Urgency rises. The price paid is halfway between the two.",
     figure: "price"
+  },
+  {
+    group: 2,
+    title: "Who a buyer buys from",
+    body: "The buyer compares every seller that can physically deliver, and the cheapest delivered cost wins. Freight for a load is tonnes \xD7 kilometres \xD7 the vehicle's rate.",
+    figure: "freight"
+  },
+  {
+    group: 2,
+    title: "Price decides when and how much a buyer orders",
+    body: "A cheap offer pulls orders forward and fills tanks higher; a dear one makes buyers wait and fill less. Below one delivery time of cover the buyer orders at any price, so nobody runs dry to save money.",
+    figure: "order"
+  },
+  {
+    group: 2,
+    title: "Price decides how much customers consume",
+    body: "Customers want less as the price they have been paying rises: normal demand \xD7 (price \xF7 base) to the power \u22120.2, kept between 60% and 120% of normal. Lost sales split in two: priced out, and not delivered. The damage figure counts both.",
+    figure: "demand"
+  },
+  {
+    group: 2,
+    title: "Price decides how hard a plant runs",
+    body: "Once an hour every plant compares what a tonne fetches with what it costs: product value minus feed and energy. Below half its normal margin it slows, down to its minimum rate at no margin. It never shuts down for price alone.",
+    figure: "margin"
+  },
+  {
+    group: 2,
+    title: "Costs pass down the chain",
+    body: "A plant's asking price rises with what its feed costs, and an empty tank will not sell below cost. Feed by pipeline is priced at what it costs its maker, so a price rise moves down the chain about one stage an hour.",
+    figure: "passdown"
+  },
+  {
+    group: 2,
+    title: "What the market model is, and is not",
+    body: "A closed market where every price comes from physical stock, and price changes ordering, consumption and production. When the refinery stops, jet fuel rises 42%, fuel oil 29% and diesel 27% in 24 days.",
+    figure: "marketLimits"
   },
   // ── What a disruption costs (from "7-financial-effect.md") ──
   {
@@ -582,7 +634,7 @@ function lineCount(text, face, size, width) {
   return lines;
 }
 
-const WIDE_FIGURES = /* @__PURE__ */ new Set(["clock", "site", "numbers", "price", "priced"]);
+const WIDE_FIGURES = /* @__PURE__ */ new Set(["clock", "site", "numbers", "price", "priced", "order"]);
 const FIGURE_ROWS = {
   clock: { phone: 20, tablet: 13, desktop: 8, wide: 8 },
   site: { phone: 28, tablet: 28, desktop: 12, wide: 13 },
@@ -590,8 +642,14 @@ const FIGURE_ROWS = {
   rate: { phone: 8, tablet: 8, desktop: 7, wide: 7 },
   buy: { phone: 7, tablet: 7, desktop: 6, wide: 7 },
   price: { phone: 12, tablet: 7, desktop: 7, wide: 8 },
+  freight: { phone: 10, tablet: 7, desktop: 7, wide: 7 },
+  order: { phone: 14, tablet: 8, desktop: 8, wide: 8 },
+  demand: { phone: 7, tablet: 7, desktop: 7, wide: 7 },
+  margin: { phone: 7, tablet: 7, desktop: 7, wide: 7 },
+  passdown: { phone: 5, tablet: 5, desktop: 5, wide: 6 },
+  marketLimits: { phone: 13, tablet: 8, desktop: 8, wide: 8 },
   futures: { phone: 7, tablet: 7, desktop: 7, wide: 8 },
-  priced: { phone: 14, tablet: 7, desktop: 7, wide: 7 },
+  priced: { phone: 15, tablet: 7, desktop: 7, wide: 7 },
   stock: { phone: 8, tablet: 6, desktop: 6, wide: 7 },
   waterfall: { phone: 9, tablet: 9, desktop: 8, wide: 9 },
   countdown: { phone: 7, tablet: 6, desktop: 6, wide: 7 },
@@ -613,6 +671,9 @@ function getTier(width) {
 }
 function getOriginX(width) {
   return width < 600 ? 44 : 64;
+}
+function pageCenterCell(width, originX, row) {
+  return Math.round((width / 2 - originX - (row % 2 !== 0 ? HEX_WIDTH / 2 : 0)) / HEX_WIDTH);
 }
 function maxColumns(width, originX) {
   return Math.floor((width - 8 - originX) / HEX_WIDTH);
@@ -656,9 +717,10 @@ function getPitchLayout(width, originX = getOriginX(width)) {
     r += rows + gap;
   };
   const subhead = (i) => {
-    const long = (SUBHEADS[i]?.length ?? 0) > 80 && stacked;
-    const rows = (tier === "phone" ? 2 : 1) + (long ? 1 : 0) + (SUBHEAD_EYEBROWS[i] ? 1 : 0) + (SUBHEAD_NOTES[i] ? tier === "phone" ? 3 : 2 : 0);
-    items.push({ kind: "region", key: `sh${i}`, id: SUBHEAD_EYEBROWS[i] ? "how" : void 0, cells: block(c0 + 1, textEnd, r, r + rows - 1), variant: "quiet", inset: 4, content: "subhead", index: i });
+    const len = SUBHEADS[i]?.length ?? 0;
+    const long = (len > 80 && stacked ? 1 : 0) + (len > 120 ? 1 : 0) - (len > 120 && tier === "tablet" ? 1 : 0);
+    const rows = (tier === "phone" ? 2 : 1) + long + (SUBHEAD_EYEBROWS[i] ? 1 : 0) + (SUBHEAD_NOTES[i] ? tier === "phone" ? 3 : 2 : 0);
+    items.push({ kind: "region", key: `sh${i}`, id: SUBHEAD_IDS[i], cells: block(c0 + 1, textEnd, r, r + rows - 1), variant: "quiet", inset: 4, content: "subhead", index: i });
     r += rows + 1;
   };
   const heroInset = tier === "phone" ? [EDGE, 18] : [44, 20];
@@ -732,7 +794,7 @@ function getPitchLayout(width, originX = getOriginX(width)) {
   HOW.forEach((step, i) => {
     if (i > 0 && (step.group ?? 0) !== (HOW[i - 1].group ?? 0)) {
       r += partGap - gap;
-      subhead(2);
+      subhead(GROUP_SUBHEAD[step.group ?? 0]);
       n = 0;
     }
     alignEven(0);
@@ -756,13 +818,11 @@ function getPitchLayout(width, originX = getOriginX(width)) {
     }
   });
   r += partGap - gap;
-  if (tier === "phone") {
-    items.push({ kind: "region", key: "close", cells: block(c0, c1, r, r + 8), variant: "blue", inset: EDGE, content: "close" });
-    r += 9;
-  } else {
-    const R = tier === "wide" ? 5 : 4;
-    items.push({ kind: "region", key: "close", cells: blob({ c: mid, r: r + R }, R), variant: "blue", inset: tier === "tablet" ? 60 : 70, content: "close" });
-    r += R * 2 + 1;
+  {
+    const R = tier === "phone" ? 3 : tier === "wide" ? 5 : 4;
+    const rc = r + R;
+    items.push({ kind: "region", key: "close", cells: blob({ c: pageCenterCell(width, originX, rc), r: rc }, R), variant: "blue", inset: tier === "phone" ? 34 : tier === "tablet" ? 60 : 70, content: "close" });
+    r += R * 2 + 1 + R % 2;
   }
   return { tier, columns, firstColumn, height: GRID_TOP + (r + 1) * HEX_ROW_STEP + HEX_RADIUS, items };
 }
@@ -1084,7 +1144,7 @@ function futuresHTML() {
 }
 const table = (head, rows, cls = "") => `<table class="sd-table cf-table ${cls}"><tr>${head.map((h, i) => `<th${i && cls === "cf-num" ? ' class="sd-num"' : ""}>${esc(h)}</th>`).join("")}</tr>${rows.map((r) => `<tr>${r.map((c, i) => `<td${i && cls === "cf-num" ? ' class="sd-num"' : ""}>${c}</td>`).join("")}</tr>`).join("")}</table>`;
 const pricedHTML = () => table(["Part", "What is counted", "How it is priced"], [
-  ["<b>Lost sales</b>", "Every tonne a customer wanted and did not get", "The material's base price per tonne"],
+  ["<b>Lost sales</b>", "Every tonne a customer wanted and did not get, plus, with the market on, demand priced out", "The material's base price per tonne"],
   ["<b>Stock run down</b>", "How much less product is in tanks and on vehicles at the end", "Each material's base price per tonne"],
   ["<b>Energy</b>", "Heat and power the plants bought", "$8 per GJ of heat, $80 per MWh of power"],
   ["<b>Freight</b>", "Every delivery made", "Tonnes \xD7 kilometres \xD7 the vehicle's rate"]
@@ -1168,6 +1228,83 @@ function wireCostCharts(root) {
 }
 
 Object.assign(window, { futuresHTML, pricedHTML, stockHTML, waterfallHTML, countdownHTML, limitsHTML, wireCostCharts });
+})();
+(() => {
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const pct = (v) => `${Math.round(v * 100)}%`;
+const dearness = (ratio) => S(ratio, 0.9, 1.1);
+const fillTarget = (ratio) => 0.9 - 0.4 * dearness(ratio);
+const orderTrigger = (ratio) => (
+  // 4 → 2.5 → 1.5 delivery times
+  ratio < 1 ? 4 - 1.5 * S(ratio, 0.9, 1) : 2.5 - S(ratio, 1, 1.1)
+);
+const demandFactor = (ratio) => Math.min(1.2, Math.max(0.6, Math.pow(ratio, -0.2)));
+const MIN_RATE = 0.5;
+const marginRate = (m) => Math.max(MIN_RATE, S(m, 0, 0.5));
+const PRICE_X = { label: "best offer \xF7 base price", min: 0.7, max: 1.3, ticks: [[0.7, "0.7"], [0.9, "0.9"], [1, "1.0"], [1.1, "1.1"], [1.3, "1.3"]] };
+const fillChart = (w) => chartHTML({
+  w,
+  x: PRICE_X,
+  y: { label: "fills the tank to", min: 0.4, max: 1, ticks: [[0.5, "50%"], [0.7, "70%"], [0.9, "90%"]] },
+  series: [{ label: "fill target", ink: "blue", fn: fillTarget }],
+  read: (x, [v]) => `offer ${x.toFixed(2)}\xD7 base \u2192 fills to ${pct(v)}, orders below ${orderTrigger(x).toFixed(1)} delivery times`
+});
+const orderTableHTML = () => `<table class="sd-table cf-table mk-table"><tr><th>Best offer</th><th>Orders when stock covers less than</th><th>Fills to</th></tr>
+  <tr><td>Cheap: \u2264 90% of base</td><td>4 delivery times</td><td class="sd-num">90%</td></tr>
+  <tr><td>Normal: around base</td><td>2.5 delivery times</td><td class="sd-num">70%</td></tr>
+  <tr><td>Dear: \u2265 110% of base</td><td>1.5 delivery times</td><td class="sd-num">50%</td></tr></table>`;
+const demandChart = (w) => chartHTML({
+  w,
+  x: { label: "price paid \xF7 base price", min: 0.4, max: 3, ticks: [[0.5, "0.5"], [1, "1"], [1.5, "1.5"], [2, "2"], [3, "3"]] },
+  y: { label: "customer wants", min: 0.5, max: 1.3, ticks: [[0.6, "60%"], [1, "100%"], [1.2, "120%"]] },
+  rules: [{ y: 1.2, label: "most: 120%" }, { y: 0.6, label: "least: 60%" }],
+  series: [{ label: "demand", ink: "blue", fn: demandFactor }],
+  read: (x, [v]) => `paying ${x.toFixed(2)}\xD7 base \u2192 wants ${pct(v)} of normal`
+});
+const marginChart = (w) => chartHTML({
+  w,
+  x: { label: "margin \xF7 normal margin", min: 0, max: 1.2, ticks: [[0, "none"], [0.5, "half"], [1, "normal"]] },
+  y: { label: "rate, % of design", min: 0, max: 1, ticks: [[0, "0%"], [0.5, "min"], [1, "100%"]] },
+  rules: [{ y: MIN_RATE, label: "the plant's minimum rate" }],
+  series: [{ label: "rate", ink: "ink", fn: marginRate }],
+  read: (x, [v]) => `margin at ${pct(x)} of normal \u2192 runs at ${v <= MIN_RATE + 1e-3 ? "its minimum" : pct(v)}`
+});
+const freightHTML = () => `<p class="sd-eq mk-eq">delivered cost per tonne = asking price + freight rate \xD7 distance + a charge for a slow trip when the buyer is urgent</p>
+  <table class="sd-table cf-table mk-table"><tr><th>Vehicle</th><th class="sd-num">Freight, $ per tonne-km</th></tr>
+  <tr><td>Tank truck, bulk truck</td><td class="sd-num">0.10</td></tr>
+  <tr><td>Pressurised truck</td><td class="sd-num">0.14</td></tr>
+  <tr><td>Barge</td><td class="sd-num">0.025</td></tr>
+  <tr><td>Ship</td><td class="sd-num">0.004 to 0.008</td></tr>
+  <tr><td>Pipeline</td><td class="sd-num">none</td></tr></table>`;
+const CHAIN = [
+  ["GAS_PLANT", "+30%", "asks 30% more"],
+  ["STEAM_CRACKER_GAS", "+8.7%", "ethylene costs 8.7% of base more to make"],
+  ["POLYETHYLENE", "+6.6%", "polyethylene costs 6.6% more"],
+  ["PACKAGING", "> +2%", "packaging is quoted over 2% more"]
+];
+function passdownHTML() {
+  const W = 400, step = W / CHAIN.length, y = 34;
+  const hex = (cx, cy, r) => Array.from({ length: 6 }, (_, i) => {
+    const a = Math.PI / 3 * i - Math.PI / 2;
+    return `${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`;
+  }).join(" ");
+  const nodes = CHAIN.map(([id, v, note], i) => {
+    const site = SITES.find((s) => s.id === id), cx = step * i + step / 2;
+    const link = i < CHAIN.length - 1 ? `<path class="mk-link" d="M${cx + 24},${y} H${cx + step - 30}"/><path class="mk-head" d="M${cx + step - 31},${y - 4} L${cx + step - 24},${y} L${cx + step - 31},${y + 4} Z"/>` : "";
+    return `<g class="mk-node"><title>${esc(note)}</title><polygon points="${hex(cx, y, 20)}"/>
+      <g transform="translate(${cx - 11} ${y - 11}) scale(0.92)" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${site?.inner ?? ""}</g>
+      <text class="mc-t mc-ax" x="${cx}" y="${y + 36}" text-anchor="middle">${esc(site?.short ?? site?.name ?? id)}</text>
+      <text class="mk-up" x="${cx}" y="${y + 54}" text-anchor="middle">${esc(v)}</text></g>${link}`;
+  }).join("");
+  return `<figure class="cf mk-chain"><svg viewBox="0 0 ${W} 100" role="img" aria-label="A price rise passing down the chain: the gas plant asks 30% more; three days later ethylene costs 8.7% more to make, polyethylene 6.6% more, and packaging is quoted over 2% more">${nodes}</svg></figure>`;
+}
+const marketLimitsHTML = () => `<div class="cf-limits"><p class="cf-lt">It is not yet</p><ul class="cf-list">
+  <li><b>Connected to the outside world.</b> No imports, exports or world price to cap or floor a local price.</li>
+  <li><b>Contract based.</b> Every trade is a spot trade. Real chemical volume moves mostly on term contracts.</li>
+  <li><b>Calibrated.</b> Base prices, the 0.2 demand response and the plants are realistic in size, not fitted to real plants or price history.</li>
+  <li><b>A profit model.</b> No fixed costs, wages or penalties.</li></ul></div>`;
+
+Object.assign(window, { fillTarget, orderTrigger, demandFactor, marginRate, fillChart, orderTableHTML, demandChart, marginChart, freightHTML, passdownHTML, marketLimitsHTML });
 })();
 (() => {
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -1307,6 +1444,18 @@ function body(kind) {
       return sawtoothChart(W);
     case "price":
       return `<div class="mf-row mf-2">${askChart()}${bidChart()}</div>`;
+    case "freight":
+      return freightHTML();
+    case "order":
+      return `<div class="mf-row mf-2 mk-order">${fillChart()}${orderTableHTML()}</div>`;
+    case "demand":
+      return demandChart(W);
+    case "margin":
+      return marginChart(W);
+    case "passdown":
+      return passdownHTML();
+    case "marketLimits":
+      return marketLimitsHTML();
     case "futures":
       return futuresHTML();
     case "priced":
@@ -1400,7 +1549,8 @@ function modelFor(site) {
   out.push(sec(
     "How the price is set",
     ...sells ? [
-      eq("seller's asking price = base \xD7 ( 1 + 0.5 \xD7 ( 1 \u2212 2 \xD7 how full the seller's tank is ) )"),
+      eq("seller's asking price = base \xD7 ( 1 + 0.5 \xD7 ( 1 \u2212 2 \xD7 how full the seller's tank is ) ) \xD7 ( 1 + seller's markup )"),
+      prose("The markup is zero unless someone sets it (in a shared session a player can, from \u221220% to +30%)."),
       table(["Seller's tank", "Asking price"], [["Full", "50% below base"], ["Half full", "base"], ["Empty", "50% above base"]]),
       askChart()
     ] : [],
@@ -1412,6 +1562,22 @@ function modelFor(site) {
       prose("The cheapest wins. A seller whose tank is filling gets cheaper, buyers switch to it, and its tank drains.")
     ] : [eq("price paid = halfway between the asking price and the buyer's bid")]
   ));
+  const market = [];
+  if (buys) market.push(prose("Ordering moves with the best offer: cheap (\u2264 90% of base) orders below 4 delivery times of cover and fills to 90%; around base, 2.5 and 70%; dear (\u2265 110%), 1.5 and 50%. Below one delivery time it orders at any price."), fillChart());
+  if (site.kind === "Customer") market.push(
+    eq("what it wants = normal demand \xD7 ( price it has been paying \xF7 base )^\u22120.2, kept between 60% and 120%"),
+    demandChart(),
+    prose("The price it has been paying is a running average: each load moves it 20% of the way. Lost sales count twice over: priced out, and not delivered.")
+  );
+  if (site.kind === "Plant") market.push(
+    eq("margin per tonne of feed = \u03A3 product price \xD7 yield \u2212 \u03A3 feed price \xD7 usage \u2212 energy ($8/GJ heat, $80/MWh power)"),
+    eq("plant rate = design rate \xD7 the lowest ( Feed , Room , margin signal ), never below its minimum rate for margin alone"),
+    marginChart(),
+    prose("Full rate while the margin is at least half of normal; down to the minimum rate at no margin. It never shuts down for price alone."),
+    eq("asking price = the higher of ( asking price + base \xD7 cost rise , cost floor \xD7 ( 1 \u2212 how full its tank is ) )"),
+    prose("An empty tank will not sell below cost; a full one may, to keep running. Pipeline feed is priced at its maker's cost, so a price rise moves down the chain about one stage an hour.")
+  );
+  if (market.length) out.push(sec("With the Market switch on", ...market));
   return out;
 }
 function siteHeadHTML(site) {
