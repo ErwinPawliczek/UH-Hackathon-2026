@@ -2,6 +2,7 @@
 // floating windows over it (a selected site or vehicle opens its own
 // window), and shows loading/error states.
 
+import { EDITOR_PATH, leaveCustomMap } from './store/customMap';
 import { useEffect } from 'react';
 import { useSimEngine } from './store/useSimEngine';
 import { useSim } from './store/sim';
@@ -22,6 +23,7 @@ export default function App() {
   const error = useSim((s) => s.error);
   const retry = useSim((s) => s.retry);
   const ended = useSim((s) => s.ended);
+  const customMap = useSim((s) => s.customMap);
   const queued = useSim((s) => s.triggered.length);
   const started = useSim((s) => s.started);
   const togglePlay = useSim((s) => s.togglePlay);
@@ -70,7 +72,11 @@ export default function App() {
         </div>
       )}
       {world === null && error !== null && (
-        <EngineErrorOverlay message={error} onRetry={retry} />
+        <EngineErrorOverlay
+          message={error}
+          onRetry={retry}
+          custom={customMap ? { editHref: EDITOR_PATH, onDefaultWorld: () => { leaveCustomMap(); retry(); } } : null}
+        />
       )}
       {ended && <RunEndedOverlay onNewRun={retry} />}
       {world !== null && snap === null && error !== null && (

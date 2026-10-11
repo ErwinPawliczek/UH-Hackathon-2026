@@ -19,6 +19,12 @@ export interface SimConfig {
    * 'sixsite' asks for the engine's built-in six-site world.
    */
   world?: string;
+  /**
+   * A layout drawn in the map builder: the named world's plants on this
+   * geography. Sent as is; the server answers 400 with a reason when it
+   * cannot be run.
+   */
+  layout?: Record<string, unknown>;
 }
 
 /** §7.2 log entry. */
