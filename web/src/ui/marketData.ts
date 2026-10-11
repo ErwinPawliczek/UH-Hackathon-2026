@@ -105,7 +105,8 @@ export function rulesWords(rules: MarketReply['rules']): string {
   return parts.length === 0 ? 'Market rules are off in this world.' : `Market rules: ${parts.join('; ')}.`;
 }
 
-export const marketTitle = (key: string, name?: string) => (name !== undefined && name !== '' ? name : materialTitle(key));
+// the app's own label for the chemical ("Naphtha"), not the catalog's longer description
+export const marketTitle = (key: string, _name?: string) => materialTitle(key);
 
 /** True when the server does not have the market view (an engine a commit behind). */
 export const marketMissing = (error: string | null) => error !== null && /404|not found|no route/i.test(error);
