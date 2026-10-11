@@ -593,6 +593,30 @@ void registerRoutes(httplib::Server& svr, SessionRegistry& sessions, const std::
             sendBinary(res, std::move(kpis));
           });
 
+  // The run so far in time buckets: ?bucket_h=1..168 (default 24).
+  svr.Get("/api/sim/" + id + "/economy",
+          [&sessions](const httplib::Request& req, httplib::Response& res) {
+            uint32_t bucket_h = 24;
+            if (req.has_param("bucket_h")) {
+              bool ok = false;
+              bucket_h = parseU32(req.get_param_value("bucket_h"), &ok);
+              if (!ok || bucket_h < 1 || bucket_h > 168) {
+                sendJson(res, 400, jsonError("bucket_h must be a whole number of hours, 1 to 168"));
+                return;
+              }
+            }
+            std::string doc;
+            const bool found = sessions.withSession(req.matches[1].str(), [&](Session& s) {
+              const char* text = crx_economy(s.sim, bucket_h);
+              if (text != nullptr) doc = text;
+            });
+            if (!found) {
+              sendJson(res, 404, jsonError("unknown session"));
+              return;
+            }
+            sendJson(res, 200, std::move(doc));
+          });
+
   // One vehicle: where it is going, where from, and what it holds.
   svr.Get("/api/sim/" + id + "/vehicle",
           [&sessions](const httplib::Request& req, httplib::Response& res) {

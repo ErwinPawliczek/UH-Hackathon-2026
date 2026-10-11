@@ -18,6 +18,19 @@ struct Recorder {
   std::vector<std::vector<float>> tank_fill, proc_rate;
   std::vector<LogEntry> log;
   uint64_t next_seq = 1;
+
+  // Economy history (inspect.h economyJson): one row per recorded hour since
+  // tick 0, never trimmed (a 60-day run of the 22-site world is about
+  // 0.4 MB). Row h is the state at the end of hour h + 1.
+  //   hour_rate  [hour][process]   rate ÷ design
+  //   hour_price [hour][material]  market price index
+  //   hour_totals[hour]            the cumulative accumulators
+  struct HourTotals {
+    double demand_t = 0, unmet_t = 0, unmet_usd = 0;
+    double freight_usd = 0, energy_usd = 0, shutdown_h = 0;
+  };
+  std::vector<float> hour_rate, hour_price;
+  std::vector<HourTotals> hour_totals;
 };
 
 // Records one hourly sample (call on ticks where tick % 4 == 0 at dt = 0.25 h).

@@ -146,7 +146,7 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
       // strictly lower cost replaces the incumbent).
       struct Candidate {
         uint32_t seller_tank, cls;
-        double cost, price, freight_usd, eta_h;
+        double cost, price, freight_usd, eta_h, km;
       };
       Candidate best{};
       bool found = false;
@@ -165,7 +165,7 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
           if (!found || q.cost < best.cost) {
             best = {static_cast<uint32_t>(s), static_cast<uint32_t>(cls), q.cost,
                     (q.ask + q.bid) / 2.0,
-                    q.lot_t * catalog.vehicle_classes[cls].freight * q.km, q.eta_h};
+                    q.lot_t * catalog.vehicle_classes[cls].freight * q.km, q.eta_h, q.km};
             found = true;
           }
         }
@@ -198,6 +198,7 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
       o.qty_t = lot_t;
       o.price = best.price;
       o.freight_usd = best.freight_usd;
+      o.km = best.km;
       o.urgency = req.urgency;
       o.cls = static_cast<uint16_t>(best.cls);
       o.vehicle = UINT32_MAX;  // dispatch assigns (§5.7)
