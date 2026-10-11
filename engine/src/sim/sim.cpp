@@ -49,6 +49,9 @@ std::unique_ptr<Sim> Sim::createNamed(const std::string& world_name, uint64_t se
     ts.caution = 1;
   }
   sim->state_.proc.resize(w.processes.size());
+  if (w.warm_start)
+    for (size_t p = 0; p < w.processes.size(); ++p)
+      sim->state_.proc[p].rate_t_h = w.processes[p].design_rate_t_h;
   sim->state_.unit.resize(w.units.size());
   sim->state_.pipe_flow_t_h.assign(w.pipelines.size(), 0.0);
   sim->state_.ledger.resize(w.sites.size());

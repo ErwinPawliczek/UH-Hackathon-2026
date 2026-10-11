@@ -530,6 +530,11 @@ bool loadWorld(const std::string& name, const std::string& text, uint64_t seed, 
           kModeNames[m] + " access)");
   }
 
+  if (doc.contains("warm_start")) {
+    if (!doc.at("warm_start").is_boolean()) bad("\"warm_start\" must be true or false");
+    out.warm_start = doc.at("warm_start").get<bool>();
+  }
+
   // Render-only map data.
   out.name = name;
   out.w_km = w_km;

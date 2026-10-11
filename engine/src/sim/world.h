@@ -179,6 +179,10 @@ struct World {
   };
   Market market;
 
+  // Named worlds may open already running: every process starts at its design
+  // rate instead of ramping up from a cold stop over the first day.
+  bool warm_start = false;
+
   int findSite(const std::string& key) const;
   int findTank(const std::string& key) const;
 };
