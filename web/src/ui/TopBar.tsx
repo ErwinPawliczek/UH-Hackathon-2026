@@ -19,6 +19,7 @@ import { fmtClock } from './format';
 import { LOG_WINDOW_AT, LOG_WINDOW_ID } from './EventLog';
 import { REWIND_WINDOW_AT, REWIND_WINDOW_ID } from './RewindWindow';
 import { SITES_WINDOW_AT, SITES_WINDOW_ID } from './SitesKey';
+import { ECONOMY_WINDOW_AT, ECONOMY_WINDOW_ID } from './EconomyWindow';
 import { useWindows } from './windows';
 
 /**
@@ -81,6 +82,7 @@ export function TopBar() {
   const logOpen = useWindows((s) => s.windows[LOG_WINDOW_ID]?.open === true);
   const rewindOpen = useWindows((s) => s.windows[REWIND_WINDOW_ID]?.open === true);
   const sitesOpen = useWindows((s) => s.windows[SITES_WINDOW_ID]?.open === true);
+  const economyOpen = useWindows((s) => s.windows[ECONOMY_WINDOW_ID]?.open === true);
   const canRewind = useSim((s) => s.rewindTo !== null) && Number(tick ?? 0) > 0;
 
   const { togglePlay, setScenario, triggerScenario } = useSim.getState();
@@ -151,6 +153,14 @@ export function TopBar() {
         data-testid="sites-toggle"
       >
         Sites
+      </button>
+      <button
+        className={`btn ${economyOpen ? 'btn-active' : ''}`}
+        onClick={() => useWindows.getState().toggle(ECONOMY_WINDOW_ID, ECONOMY_WINDOW_AT)}
+        aria-pressed={economyOpen}
+        data-testid="economy-toggle"
+      >
+        Economy
       </button>
       <button
         className={`btn ${logOpen ? 'btn-active' : ''}`}

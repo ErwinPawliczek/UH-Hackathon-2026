@@ -31,6 +31,8 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <array>
+#include <map>
 #include <memory>
 #include <set>
 #include <sstream>
@@ -583,4 +585,415 @@ TEST_CASE("M10: every vehicle on the map world can say where it is going") {
   CHECK(travelling > 100);
   CHECK(loaded > 50);
   CHECK(vehicleJson(w, sim->state(), static_cast<uint32_t>(w.fleet.size())).empty());
+}
+
+TEST_CASE("M11: the economy view adds up to the order book and the running totals") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  const World& w = sim->world();
+
+  // Nothing has happened yet: no buckets, no rows.
+  const json empty = json::parse(economyJson(w, sim->state(), sim->recorder(), 24));
+  CHECK(empty.at("buckets") == 0);
+  CHECK(empty.at("materials").empty());
+  CHECK(empty.at("totals").at("spendUsd").empty());
+
+  sim->step(60 * 96);
+  const State& st = sim->state();
+  const json doc = json::parse(economyJson(w, st, sim->recorder(), 24));
+  const size_t n = doc.at("buckets").get<size_t>();
+  CHECK(n == 60);
+  CHECK(doc.at("tick") == 60 * 96);
+  CHECK(doc.at("bucketH") == 24);
+  const auto sum = [](const json& arr) {
+    double s = 0;
+    for (const json& v : arr) s += v.get<double>();
+    return s;
+  };
+  const double tol = 0.01 * static_cast<double>(n);  // each bucket is rounded to the cent
+
+  // Per material: tonnes ordered, dollars spent and tonnes delivered match
+  // the order book, bucket arrays are all N long.
+  std::map<std::string, std::array<double, 4>> book;  // ordered, spend, delivered, freight
+  double freight_book = 0;
+  for (const Order& o : st.order) {
+    if (o.status == OrdStatus::Cancelled) continue;
+    auto& b = book[w.catalog.materials[o.material].key];
+    b[0] += o.qty_t;
+    b[1] += o.qty_t * o.price;
+    if (o.status == OrdStatus::Delivered) {
+      b[2] += o.qty_t;
+      b[3] += o.freight_usd;
+      freight_book += o.freight_usd;
+      CHECK(o.delivered_tick >= o.created_tick);
+      CHECK(o.km > 0.0);
+    }
+  }
+  CHECK(doc.at("materials").size() == book.size());
+  CHECK(book.size() >= 15);
+  for (const json& m : doc.at("materials")) {
+    const auto& b = book.at(m.at("key").get<std::string>());
+    for (const char* key : {"orderedT", "lots", "spendUsd", "freightUsd", "deliveredT", "priceIndex"})
+      CHECK(m.at(key).size() == n);
+    CHECK(std::abs(sum(m.at("orderedT")) - b[0]) <= tol);
+    CHECK(std::abs(sum(m.at("spendUsd")) - b[1]) <= tol);
+    CHECK(std::abs(sum(m.at("deliveredT")) - b[2]) <= tol);
+    CHECK(std::abs(sum(m.at("freightUsd")) - b[3]) <= tol);
+    for (const json& idx : m.at("priceIndex")) {
+      CHECK(idx.get<double>() >= 0.25);
+      CHECK(idx.get<double>() <= 4.0);
+    }
+    CHECK(m.at("basePriceUsdT").get<double>() > 0.0);
+  }
+
+  // By class and in total: freight equals the engine's running total, and
+  // every other total is the accumulator it came from.
+  double class_freight = 0, class_tonnes = 0, delivered_tonnes = 0;
+  for (const json& c : doc.at("byClass")) {
+    class_freight += sum(c.at("freightUsd"));
+    class_tonnes += sum(c.at("tonnes"));
+    CHECK(sum(c.at("tonneKm")) > 0.0);
+  }
+  for (const auto& entry : book) delivered_tonnes += entry.second[2];
+  CHECK(doc.at("byClass").size() == 7);  // every class in the fleet has delivered
+  CHECK(std::abs(class_freight - freight_book) <= 7 * tol);
+  CHECK(std::abs(class_tonnes - delivered_tonnes) <= 7 * tol);
+  const json& totals = doc.at("totals");
+  CHECK(std::abs(sum(totals.at("freightUsd")) - st.cum_freight_usd) <= tol);
+  CHECK(std::abs(sum(totals.at("energyUsd")) - st.cum_energy_usd) <= tol);
+  CHECK(std::abs(sum(totals.at("demandT")) - st.cum_demand_t) <= tol);
+  CHECK(std::abs(sum(totals.at("unmetT")) - st.cum_unmet_t) <= tol);
+  CHECK(std::abs(sum(totals.at("shutdownH")) - st.cum_shutdown_h) <= tol);
+  double spend_book = 0;
+  for (const auto& entry : book) spend_book += entry.second[1];
+  CHECK(std::abs(sum(totals.at("spendUsd")) - spend_book) <= tol);
+  for (const json& s : totals.at("service")) CHECK(s.get<double>() == doctest::Approx(1.0));
+
+  // Plants: sources and plants (no customers), each with a rate band inside
+  // [0, 1.1] per bucket.
+  CHECK(doc.at("plants").size() == 18);
+  for (const json& pl : doc.at("plants")) {
+    CHECK(pl.at("designRateTph").get<double>() > 0.0);
+    for (size_t b = 0; b < n; ++b) {
+      const double lo = pl.at("rateMin")[b].get<double>(), mid = pl.at("rateMean")[b].get<double>(),
+                   hi = pl.at("rateMax")[b].get<double>();
+      CHECK(lo >= 0.0);
+      CHECK(hi <= 1.1);
+      CHECK(lo <= mid + 1e-4);
+      CHECK(mid <= hi + 1e-4);
+    }
+  }
+
+  // A fork carries its parent's history; a few more ticks open a partial
+  // bucket; other bucket sizes re-cut the same history.
+  Sim fork(*sim);
+  CHECK(economyJson(w, fork.state(), fork.recorder(), 24) ==
+        economyJson(w, st, sim->recorder(), 24));
+  fork.step(10);
+  const json more = json::parse(economyJson(w, fork.state(), fork.recorder(), 24));
+  CHECK(more.at("buckets") == 61);
+  CHECK(more.at("plants")[5].at("rateMean").size() == 61);
+  const json hourly = json::parse(economyJson(w, st, sim->recorder(), 1));
+  CHECK(hourly.at("buckets") == 60 * 24);
+  CHECK(std::abs(sum(hourly.at("totals").at("freightUsd")) - st.cum_freight_usd) <= 0.01 * 1440);
+  const json weekly = json::parse(economyJson(w, st, sim->recorder(), 168));
+  CHECK(weekly.at("buckets") == 9);  // 60 days = 8 full weeks and a part
+  CHECK(std::abs(sum(weekly.at("totals").at("demandT")) - st.cum_demand_t) <= 0.1);
+}
+
+TEST_CASE("M12: sourcing lists every way to supply a tank and names what the next pass books") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  const World& w = sim->world();
+
+  // The picker list: tanks that buy by vehicle and have a supplier.
+  const json list = json::parse(buyTanksJson(*sim));
+  CHECK(list.at("tanks").size() == 20);
+  for (const json& t : list.at("tanks")) {
+    CHECK(t.at("options").get<int>() >= 1);
+    CHECK(t.at("cover_h").get<double>() > 0.0);
+    CHECK(t.at("usual").is_null());  // nothing has been delivered yet
+  }
+
+  // Run for ten days. Just before each hourly pass ask every buying tank
+  // what the pass will book for it, then let the pass happen and compare
+  // with the order book.
+  size_t compared_tanks = 0, compared_lots = 0, tanks_with_bookings = 0;
+  for (int hour = 0; hour < 240; ++hour) {
+    sim->step(3);
+    REQUIRE(sim->state().tick % 4 == 3);
+    struct Expect {
+      uint32_t tank;
+      json doc;
+    };
+    std::vector<Expect> expected;
+    if (hour % 6 == 0) {  // every sixth hour is plenty, and keeps the test quick
+      for (const json& t : list.at("tanks")) {
+        const std::string site = t.at("site"), material = t.at("material");
+        const int tank = w.findTank(site + "/" + material);
+        REQUIRE(tank >= 0);
+        expected.push_back({static_cast<uint32_t>(tank), json::parse(sourcingJson(*sim, site, material))});
+      }
+    }
+    const uint64_t hash_before = sim->stateHash();
+    if (!expected.empty()) CHECK(sim->stateHash() == hash_before);  // asking changes nothing
+    const size_t orders_before = sim->state().order.size();
+    sim->step(1);
+    for (const Expect& e : expected) {
+      ++compared_tanks;
+      const json& pass = e.doc.at("next_pass");
+      CHECK(pass.at("tick") == sim->state().tick);
+      // The lots the pass really booked for this tank, in booking order.
+      std::vector<const Order*> booked;
+      for (size_t i = orders_before; i < sim->state().order.size(); ++i)
+        if (sim->state().order[i].to == e.tank) booked.push_back(&sim->state().order[i]);
+      REQUIRE(pass.at("lots").size() == booked.size());
+      std::set<std::pair<std::string, std::string>> chosen_pairs, booked_pairs;
+      for (size_t i = 0; i < booked.size(); ++i) {
+        const Order& o = *booked[i];
+        const std::string seller = w.sites[w.tanks[o.from].site.v].key;
+        const std::string cls = w.catalog.vehicle_classes[o.cls].key;
+        CHECK(pass.at("lots")[i].at("seller") == seller);
+        CHECK(pass.at("lots")[i].at("cls") == cls);
+        CHECK(pass.at("lots")[i].at("tonnes").get<double>() == doctest::Approx(o.qty_t).epsilon(1e-3));
+        booked_pairs.insert({seller, cls});
+        ++compared_lots;
+      }
+      for (const json& o : e.doc.at("options"))
+        if (o.at("chosen").get<bool>())
+          chosen_pairs.insert({o.at("seller").get<std::string>(), o.at("cls").get<std::string>()});
+      CHECK(chosen_pairs == booked_pairs);  // "chosen" is exactly what gets booked
+      if (!booked.empty()) ++tanks_with_bookings;
+    }
+  }
+  CHECK(compared_tanks == 40 * 20);
+  CHECK(tanks_with_bookings > 30);
+  CHECK(compared_lots > 40);
+
+  // One tank in detail, after ten days of deliveries.
+  const json doc = json::parse(sourcingJson(*sim, "STYRENICS", "BENZENE"));
+  const json& tank = doc.at("tank");
+  CHECK(tank.at("buys") == true);
+  CHECK(tank.at("cover_h").get<double>() ==
+        doctest::Approx(tank.at("level_t").get<double>() / tank.at("draw_t_h").get<double>())
+            .epsilon(1e-3));
+  CHECK(doc.at("usual").at("delivered_t").get<double>() > 0.0);
+  const json& options = doc.at("options");
+  REQUIRE(options.size() == 3);  // refinery and both crackers, by tank truck
+  double last = 0;
+  int usual_rows = 0;
+  for (const json& o : options) {
+    CHECK(o.at("cls") == "TRUCK_TANK");
+    CHECK(o.at("landed_usd_t").get<double>() >= last);  // cheapest first
+    last = o.at("landed_usd_t").get<double>();
+    // Landed cost is its parts, and freight is the class rate times distance.
+    CHECK(o.at("landed_usd_t").get<double>() ==
+          doctest::Approx(o.at("ask_usd_t").get<double>() + o.at("freight_usd_t").get<double>() +
+                          o.at("time_usd_t").get<double>() + o.at("switch_usd_t").get<double>())
+              .epsilon(1e-4));
+    CHECK(o.at("freight_usd_t").get<double>() ==
+          doctest::Approx(0.10 * o.at("km").get<double>()).epsilon(1e-3));
+    CHECK(o.at("travel_h").get<double>() ==
+          doctest::Approx(o.at("km").get<double>() / 70.0).epsilon(1e-2));
+    CHECK(o.at("lot_t").get<double>() <= 25.0);
+    CHECK(o.at("free_t").get<double>() <= o.at("stock_t").get<double>() + 1e-6);
+    CHECK(o.at("vehicles") == 13);
+    CHECK(o.at("feasible_now").get<bool>() == o.at("blocked").is_null());
+    CHECK(o.at("arrives_before_dry").get<bool>() ==
+          (o.at("travel_h").get<double>() + o.at("handling_h").get<double>() <
+           tank.at("cover_h").get<double>()));
+    usual_rows += o.at("usual").get<bool>() ? 1 : 0;
+  }
+  CHECK(usual_rows == 1);
+
+  // A supplier that is down shows as down, and a pipeline-fed tank says so.
+  REQUIRE(sim->command(R"({"type":"site_shutdown","site":"CRACKER_FLEX","duration_h":240})")
+              .find("\"ok\":true") != std::string::npos);
+  sim->step(8);
+  bool flex_down = false;
+  const json after_trip = json::parse(sourcingJson(*sim, "STYRENICS", "BENZENE"));
+  for (const json& o : after_trip.at("options"))
+    if (o.at("seller") == "CRACKER_FLEX") flex_down = o.at("seller_state") == "shut_down";
+  CHECK(flex_down);
+  const json piped = json::parse(sourcingJson(*sim, "VINYLS", "ETHYLENE"));
+  CHECK(piped.at("tank").at("buys") == false);
+  CHECK(piped.at("tank").at("piped_in") == true);
+  CHECK(piped.at("options").empty());
+  CHECK(piped.at("next_pass").is_null());
+
+  // Bad queries say why.
+  CHECK(json::parse(sourcingJson(*sim, "NOPE", "PE")).contains("error"));
+  CHECK(json::parse(sourcingJson(*sim, "VINYLS", "NOPE")).contains("error"));
+  CHECK(json::parse(sourcingJson(*sim, "VINYLS", "PE")).contains("error"));
+  CHECK(json::parse(sourcingJson(*sim, "11", "CHLORINE")).at("tank").at("site") == "VINYLS");
+}
+
+namespace {
+
+// The first route edge on the way between two sites in a mode.
+uint32_t firstEdgeBetween(const Sim& sim, const char* from, const char* to, crx::Mode mode) {
+  const World& w = sim.world();
+  PathCache paths = sim.paths();
+  refreshPaths(w, sim.state(), paths);
+  const int m = modeIndex(mode);
+  const uint32_t a = w.sites[static_cast<size_t>(w.findSite(from))].node[m];
+  const uint32_t b = w.sites[static_cast<size_t>(w.findSite(to))].node[m];
+  const std::vector<uint32_t> path = buildPath(w, paths, mode, a, b);
+  REQUIRE(path.size() >= 2);
+  return edgeBetween(w, mode, path[0], path[1]);
+}
+
+bool routeOpen(const Sim& sim, const char* from, const char* to, crx::Mode mode) {
+  const World& w = sim.world();
+  PathCache paths;
+  refreshPaths(w, sim.state(), paths);
+  const int m = modeIndex(mode);
+  return std::isfinite(travelKm(w, paths, mode,
+                                w.sites[static_cast<size_t>(w.findSite(from))].node[m],
+                                w.sites[static_cast<size_t>(w.findSite(to))].node[m]));
+}
+
+// Books stay sane while routes are cut: nothing negative, no vehicle
+// carrying more than its order, mass conserved over the stretch.
+void checkBooks(const Sim& sim) {
+  const World& w = sim.world();
+  const State& st = sim.state();
+  for (size_t t = 0; t < st.tank.size(); ++t) {
+    CHECK_MESSAGE(st.tank[t].level_t >= -1e-6, w.tanks[t].key << " level " << st.tank[t].level_t);
+    CHECK_MESSAGE(st.tank[t].reserved_out_t >= -1e-6,
+                  w.tanks[t].key << " reserved " << st.tank[t].reserved_out_t);
+    CHECK_MESSAGE(st.tank[t].inbound_t >= -1e-6, w.tanks[t].key << " inbound " << st.tank[t].inbound_t);
+  }
+  for (size_t v = 0; v < st.vehicle.size(); ++v) {
+    const VehicleState& vs = st.vehicle[v];
+    if (vs.status == VehStatus::Idle || vs.order >= st.order.size()) continue;
+    CHECK_MESSAGE(vs.cargo_t <= st.order[vs.order].qty_t + 1e-6,
+                  "vehicle " << v << " carries " << vs.cargo_t << " t of a "
+                             << st.order[vs.order].qty_t << " t lot");
+  }
+}
+
+}  // namespace
+
+TEST_CASE("M13: a route edge can be closed by index, traffic copes, and it reopens") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  const World& w = sim->world();
+  const auto ok = [&](const json& cmd) {
+    return json::parse(sim->command(cmd.dump())).at("ok").get<bool>();
+  };
+
+  // Validation: the index must be a route of this world; the site form still works.
+  CHECK(!ok({{"type", "route_break"}, {"edge", w.edges.size()}, {"duration_h", 24}}));
+  CHECK(!ok({{"type", "route_break"}, {"edge", -1}, {"duration_h", 24}}));
+  CHECK(!ok({{"type", "route_break"}, {"edge", "43"}, {"duration_h", 24}}));
+  CHECK(!ok({{"type", "route_break"}, {"duration_h", 24}}));
+
+  sim->step(960);  // day 10
+  const uint32_t river = firstEdgeBetween(*sim, "SALT_MINE", "CHLOR_ALKALI", crx::Mode::River);
+  REQUIRE(river < w.edges.size());
+  REQUIRE(w.edges[river].mode == crx::Mode::River);
+  REQUIRE(routeOpen(*sim, "SALT_MINE", "CHLOR_ALKALI", crx::Mode::River));
+  const double stock0 = stockSum(sim->state());
+  const double supplied0 = sim->state().cum_supplied_t, consumed0 = sim->state().cum_consumed_t,
+               loss0 = sim->state().cum_loss_t;
+
+  // Close the salt barges' river lane for five days.
+  const uint64_t version = sim->state().graph_version;
+  REQUIRE(ok({{"type", "route_break"}, {"edge", river}, {"duration_h", 120}}));
+  sim->step(1);
+  CHECK(sim->state().edge_open[river] == 0);
+  CHECK(sim->state().graph_version > version);
+  CHECK(!routeOpen(*sim, "SALT_MINE", "CHLOR_ALKALI", crx::Mode::River));  // the river is a tree
+  for (int hour = 0; hour < 119; ++hour) {
+    sim->step(4);
+    CHECK(sim->state().edge_open[river] == 0);
+    if (hour % 12 == 0) checkBooks(*sim);
+  }
+  sim->step(8);
+  CHECK(sim->state().edge_open[river] == 1);
+  CHECK(routeOpen(*sim, "SALT_MINE", "CHLOR_ALKALI", crx::Mode::River));
+  bool logged_close = false, logged_open = false;
+  for (const LogEntry& e : sim->recorder().log) {
+    if (e.type == "route_break" && e.unit == std::to_string(river)) logged_close = true;
+    if (e.type == "route_reopened" && e.unit == std::to_string(river)) logged_open = true;
+  }
+  CHECK(logged_close);
+  CHECK(logged_open);
+
+  // While the river was shut, salt went by road.
+  const int bulk_truck = w.catalog.findVehicle("TRUCK_BULK");
+  const int salt = w.catalog.findMaterial("SALT");
+  REQUIRE(bulk_truck >= 0);
+  size_t salt_by_truck = 0;
+  for (const Order& o : sim->state().order)
+    if (o.material == salt && o.cls == bulk_truck && o.created_tick > 960) ++salt_by_truck;
+  CHECK(salt_by_truck > 10);
+
+  // On to day 60: nothing is left waiting, the customers were served, and
+  // mass is conserved across the whole episode.
+  while (sim->state().tick < 60 * 96) sim->step(96);
+  checkBooks(*sim);
+  for (const Order& o : sim->state().order)
+    if (o.status == OrdStatus::Open)
+      CHECK(sim->state().tick - o.created_tick < 10 * 96);
+  std::vector<double> kpis;
+  sim->computeKpis(kpis);
+  CHECK(kpis[0] > 0.99);
+  const State& st = sim->state();
+  const double residual = (stockSum(st) - stock0) - ((st.cum_supplied_t - supplied0) -
+                                                     (st.cum_consumed_t - consumed0) -
+                                                     (st.cum_loss_t - loss0));
+  CHECK(std::fabs(residual) <= 1e-6 * conservationScale(st));
+}
+
+TEST_CASE("M14: a closed sea lane holds loaded ships at the berth without loading them twice") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  const World& w = sim->world();
+  sim->step(960);
+  // The lane every ship between the refinery and the fuel depot uses.
+  PathCache paths = sim->paths();
+  refreshPaths(w, sim->state(), paths);
+  const int sea = modeIndex(crx::Mode::Sea);
+  const std::vector<uint32_t> path =
+      buildPath(w, paths, crx::Mode::Sea, w.sites[static_cast<size_t>(w.findSite("REFINERY"))].node[sea],
+                w.sites[static_cast<size_t>(w.findSite("FUEL_DEPOT"))].node[sea]);
+  REQUIRE(path.size() >= 3);
+  const uint32_t lane = edgeBetween(w, crx::Mode::Sea, path[path.size() - 3], path[path.size() - 2]);
+  REQUIRE(lane < w.edges.size());
+
+  // Two overlapping closures of the same lane: the longer one holds it shut.
+  REQUIRE(json::parse(sim->command(json{{"type", "route_break"}, {"edge", lane}, {"duration_h", 96}}
+                                       .dump()))
+              .at("ok") == true);
+  REQUIRE(json::parse(sim->command(json{{"type", "route_break"}, {"edge", lane}, {"duration_h", 240}}
+                                       .dump()))
+              .at("ok") == true);
+  size_t held_at_berth = 0;
+  for (int hour = 0; hour < 239; ++hour) {
+    sim->step(4);
+    CHECK(sim->state().edge_open[lane] == 0);  // still shut after the first one ends
+    checkBooks(*sim);  // the regression: a held ship used to load its lot again and again
+    for (size_t v = 0; v < sim->state().vehicle.size(); ++v) {
+      const VehicleState& vs = sim->state().vehicle[v];
+      if (vs.status == VehStatus::Loading && vs.order < sim->state().order.size() &&
+          vs.cargo_t >= sim->state().order[vs.order].qty_t - 1e-6)
+        ++held_at_berth;
+    }
+  }
+  CHECK(held_at_berth > 0);  // some ship did sit loaded, waiting for the lane
+  sim->step(8);
+  CHECK(sim->state().edge_open[lane] == 1);
+
+  // It recovers: by day 45 every plant is running again and customers are served.
+  while (sim->state().tick < 45 * 96) sim->step(96);
+  checkBooks(*sim);
+  std::vector<double> at45, at60;
+  sim->computeKpis(at45);
+  while (sim->state().tick < 60 * 96) sim->step(96);
+  sim->computeKpis(at60);
+  CHECK(at60[1] - at45[1] == doctest::Approx(0.0).epsilon(1e-9));  // no unmet demand days 45 to 60
+  for (size_t p = 0; p < w.processes.size(); ++p)
+    CHECK(sim->state().proc[p].status == ProcStatus::Running);
 }

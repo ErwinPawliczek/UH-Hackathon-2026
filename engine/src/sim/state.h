@@ -74,6 +74,10 @@ struct Order {
   uint32_t vehicle = UINT32_MAX;
   uint64_t created_tick = 0, eta_tick = 0;
   OrdStatus status = OrdStatus::Open;
+  // Bookkeeping for the economy view, outside the state hash: the route
+  // length the lot was priced on and the tick it was delivered (0 = not yet).
+  double km = 0;
+  uint64_t delivered_tick = 0;
 };
 
 struct ProcState {
@@ -96,6 +100,7 @@ struct EventDef {
   Type type = Type::UnitOutage;
   uint32_t site = 0;
   uint32_t site2 = UINT32_MAX;  // route_break: the far end of the closed span
+  uint32_t edge = UINT32_MAX;   // route_break by edge: the one route edge closed
   int32_t unit = -1;      // world unit index; unit-level events only
   uint32_t trains = 0;    // unit_outage
   double multiplier = 1;  // demand/supply shocks

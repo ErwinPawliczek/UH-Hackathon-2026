@@ -12,6 +12,7 @@ import { SiteWindow } from './ui/SiteWindow';
 import { VehicleWindow } from './ui/VehicleWindow';
 import { RewindWindow } from './ui/RewindWindow';
 import { SitesKey } from './ui/SitesKey';
+import { EconomyWindow } from './ui/EconomyWindow';
 import { EventLog } from './ui/EventLog';
 
 export default function App() {
@@ -39,6 +40,7 @@ export default function App() {
       <EventLog />
       <RewindWindow />
       <SitesKey />
+      <EconomyWindow />
       <VehicleWindow />
       <SiteWindow />
 

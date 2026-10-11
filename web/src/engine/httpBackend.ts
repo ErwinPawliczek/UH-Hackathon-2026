@@ -4,7 +4,7 @@
 
 import { decode, type Snapshot } from './snapshot';
 import type { WorldSpec } from './world';
-import type { SimBackend, SimConfig, SimEvent, VehicleDetail } from './api';
+import type { EconomyReply, ForecastReply, SimBackend, SimConfig, SimEvent, VehicleDetail } from './api';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 
@@ -148,6 +148,16 @@ export class HttpBackend implements SimBackend {
 
   async vehicle(id: string, index: number): Promise<VehicleDetail> {
     return this.json(`/api/sim/${encodeURIComponent(id)}/vehicle?index=${Math.max(0, Math.floor(index))}`);
+  }
+
+  async forecast(id: string, days: number): Promise<ForecastReply> {
+    return this.json(`/api/sim/${encodeURIComponent(id)}/forecast`, {
+      method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ days }),
+    });
+  }
+
+  async economy(id: string, bucketH: number): Promise<EconomyReply> {
+    return this.json(`/api/sim/${encodeURIComponent(id)}/economy?bucket_h=${Math.max(1, Math.floor(bucketH))}`);
   }
 
   async rewind(id: string, tick: number): Promise<{ tick: number }> {

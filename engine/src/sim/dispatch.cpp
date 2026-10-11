@@ -266,13 +266,14 @@ void stepTransport(const World& world, State& state, PathCache& paths, Recorder&
     vs.cargo_material = o.material;
 
     if (vs.moved_t >= o.qty_t - 1e-9) {
-      vs.moved_t = 0;
       const uint32_t drop = world.sites[world.tanks[o.to].site.v].node[modeIndex(vc.mode)];
       const std::vector<uint32_t> path = buildPath(world, paths, vc.mode, vs.at_node, drop);
-      if (path.empty()) {
-        vs.status = VehStatus::QueueLoad;  // route cut: re-queue and retry
-        continue;
-      }
+      // Route cut: stay at the berth with the lot aboard and try again next
+      // tick. The load counter is kept, so nothing more is loaded meanwhile.
+      // (Re-queueing with the counter reset loaded the lot again every time
+      // a bay came free, until the vehicle was full and could never finish.)
+      if (path.empty()) continue;
+      vs.moved_t = 0;
       vs.status = VehStatus::ToDropoff;
       vs.route_nodes = path;
       vs.leg = 0;
@@ -298,6 +299,7 @@ void stepTransport(const World& world, State& state, PathCache& paths, Recorder&
       // the buyer's lead-time estimate (§5.7–5.8).
       buyer.inbound_t -= o.qty_t;
       o.status = OrdStatus::Delivered;
+      o.delivered_tick = state.tick;
       Ledger& seller_led = state.ledger[world.tanks[o.from].site.v];
       Ledger& buyer_led = state.ledger[world.tanks[o.to].site.v];
       seller_led.revenue += o.qty_t * o.price;

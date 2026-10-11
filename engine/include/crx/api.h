@@ -61,6 +61,18 @@ const char* crx_step_report(crx_sim* sim, uint32_t ticks);
    NULL when `index` is not a vehicle. Reply valid until the next call. */
 const char* crx_vehicle(const crx_sim* sim, uint32_t index);
 
+/* The run so far in buckets of `bucket_h` hours (1..168): per material what
+   was ordered, spent and delivered and its price index, per vehicle class what
+   it moved, per bucket the money and service totals, per plant its rate band.
+   NULL when bucket_h is out of range. Reply valid until the next call. */
+const char* crx_economy(const crx_sim* sim, uint32_t bucket_h);
+
+/* Sourcing. With site (key or index) and material: the buying tank and every
+   way of supplying it, priced as procurement prices it. With both NULL or
+   empty: the list of tanks that buy by vehicle. A bad query returns
+   {"error": "..."}. Reply valid until the next call. */
+const char* crx_sourcing(const crx_sim* sim, const char* site, const char* material);
+
 uint64_t crx_tick(const crx_sim* sim);
 uint64_t crx_state_hash(const crx_sim* sim);
 const char* crx_version(void);

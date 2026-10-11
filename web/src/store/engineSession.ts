@@ -58,6 +58,16 @@ function serial<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /**
+ * Run one read against the live session through the same queue as steps and
+ * commands (so it sees the run at a settled tick). Null when no session is
+ * open. For panels that fetch their own data: the economy and forecast views.
+ */
+export function sessionRequest<T>(fn: (backend: SimBackend, id: string) => Promise<T>): Promise<T> | null {
+  const live = session;
+  return live === null ? null : serial(() => fn(live.backend, live.id));
+}
+
+/**
  * Take the session back to `tick` and reload what the client derived from
  * the run: the snapshot (dropping the interpolation partner), the engine's
  * event log from its first entry, and the scenario notes and ticks — a

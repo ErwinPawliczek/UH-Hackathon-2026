@@ -1,8 +1,7 @@
 // Road bridges: wherever a road runs over water it is carried on a small
-// bridge — a deck at road height with low side rails, on piers standing in
+// bridge — a deck at road height with low parapets, on piers standing in
 // the water, running a little way onto each bank so it meets the land road.
-// Roads only: rail lines keep their pale deck, pipelines and water lanes are
-// plain lines.
+// Roads only: pipelines and water lanes are plain lines.
 //
 // The bridge is drawn after the route lines and before sites and vehicles,
 // and does not write depth: a truck on the deck and a vessel passing below
@@ -29,11 +28,11 @@ const STEP_KM = 0.5;
 
 const DECK_TOP = 0.03; // world units above the road height
 const DECK_THICK = 0.05;
-const RAIL_HEIGHT = 0.05;
-const RAIL_WIDTH = 0.035;
+const PARAPET_HEIGHT = 0.05;
+const PARAPET_WIDTH = 0.035;
 
 const DECK_COLOR = 0xc3c8cd;
-const RAIL_COLOR = 0x8b9198;
+const PARAPET_COLOR = 0x8b9198;
 const PIER_COLOR = 0xa9afb5;
 
 /** A stretch of one road polyline carried on a bridge, as arc lengths in km (ramps included). */
@@ -139,7 +138,7 @@ export function buildBridges(
   waterAt: (xKm: number, yKm: number) => number,
 ): THREE.Group | null {
   const decks: THREE.BufferGeometry[] = [];
-  const rails: THREE.BufferGeometry[] = [];
+  const parapets: THREE.BufferGeometry[] = [];
   const piers: THREE.BufferGeometry[] = [];
   const width = BRIDGE_WIDTH_KM * SCALE;
   for (const route of world.routes) {
@@ -158,8 +157,8 @@ export function buildBridges(
           const yb = deckAt(cur.x, cur.y) + DECK_TOP - DECK_THICK;
           decks.push(boxAlong(ax, az, bx, bz, width, ya, yb, DECK_THICK));
           for (const sign of [-1, 1]) {
-            rails.push(
-              boxAlong(ax, az, bx, bz, RAIL_WIDTH, ya + DECK_THICK, yb + DECK_THICK, RAIL_HEIGHT, (sign * (width - RAIL_WIDTH)) / 2),
+            parapets.push(
+              boxAlong(ax, az, bx, bz, PARAPET_WIDTH, ya + DECK_THICK, yb + DECK_THICK, PARAPET_HEIGHT, (sign * (width - PARAPET_WIDTH)) / 2),
             );
           }
         }
@@ -182,8 +181,8 @@ export function buildBridges(
     }
   }
   const group = new THREE.Group();
-  // after the route lines (-1), before sites and vehicles (0); piers, then deck, then rails
-  for (const part of [mesh(piers, PIER_COLOR, -0.6), mesh(decks, DECK_COLOR, -0.55), mesh(rails, RAIL_COLOR, -0.5)]) {
+  // after the route lines (-1), before sites and vehicles (0); piers, then deck, then parapets
+  for (const part of [mesh(piers, PIER_COLOR, -0.6), mesh(decks, DECK_COLOR, -0.55), mesh(parapets, PARAPET_COLOR, -0.5)]) {
     if (part !== null) group.add(part);
   }
   return group.children.length > 0 ? group : null;

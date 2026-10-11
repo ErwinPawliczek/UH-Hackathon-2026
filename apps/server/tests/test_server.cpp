@@ -337,6 +337,124 @@ TEST_CASE("vehicle: where it is going, where from, and what it holds") {
   CHECK(unknown->status == 404);
 }
 
+TEST_CASE("economy: the run so far in time buckets, cut back by a rewind") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  const auto economy = [&](const std::string& query) {
+    auto res = cli.Get("/api/sim/" + id + "/economy" + query);
+    REQUIRE(res);
+    return *res;
+  };
+
+  // Before the first tick there is nothing to show.
+  CHECK(json::parse(economy("").body).at("buckets") == 0);
+
+  REQUIRE(cli.Post("/api/sim/" + id + "/step", R"({"ticks":1000})", "application/json"));
+  const json daily = json::parse(economy("").body);  // default bucket: a day
+  CHECK(daily.at("bucketH") == 24);
+  CHECK(daily.at("tick") == 1000);
+  CHECK(daily.at("buckets") == 11);  // ten full days and a part
+  CHECK(!daily.at("materials").empty());
+  CHECK(daily.at("materials")[0].at("orderedT").size() == 11);
+  CHECK(daily.at("totals").at("energyUsd").size() == 11);
+  CHECK(daily.at("plants")[0].at("rateMax").size() == 11);
+  CHECK(json::parse(economy("?bucket_h=6").body).at("buckets") == 42);
+  CHECK(json::parse(economy("?bucket_h=168").body).at("buckets") == 2);
+
+  // A rewind shortens the history to the moment gone back to.
+  REQUIRE(cli.Post("/api/sim/" + id + "/rewind", R"({"tick":300})", "application/json"));
+  const json earlier = json::parse(economy("").body);
+  CHECK(earlier.at("tick") == 300);
+  CHECK(earlier.at("buckets") == 4);
+  CHECK(earlier.at("totals").at("demandT").size() == 4);
+
+  CHECK(economy("?bucket_h=0").status == 400);
+  CHECK(economy("?bucket_h=169").status == 400);
+  CHECK(economy("?bucket_h=day").status == 400);
+  auto unknown = cli.Get("/api/sim/nope/economy");
+  REQUIRE(unknown);
+  CHECK(unknown->status == 404);
+}
+
+TEST_CASE("sourcing: the buying tanks, one tank's options, and refusals") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  REQUIRE(cli.Post("/api/sim/" + id + "/step", R"({"ticks":480})", "application/json"));
+  const auto get = [&](const std::string& query) {
+    auto res = cli.Get("/api/sim/" + id + "/sourcing" + query);
+    REQUIRE(res);
+    return *res;
+  };
+  const std::string before =
+      cli.Post("/api/sim/" + id + "/step", R"({"ticks":0})", "application/json")->body;
+
+  const auto list = get("");
+  CHECK(list.status == 200);
+  CHECK(json::parse(list.body).at("tanks").size() == 20);
+
+  const auto one = get("?site=VINYLS&material=CHLORINE");
+  CHECK(one.status == 200);
+  const json doc = json::parse(one.body);
+  CHECK(doc.at("tick") == 480);
+  CHECK(doc.at("tank").at("name") == "Vinyls (VCM + PVC)");
+  REQUIRE(doc.at("options").size() == 1);  // chlorine has one maker and goes by pressurised truck
+  CHECK(doc.at("options")[0].at("seller") == "CHLOR_ALKALI");
+  CHECK(doc.at("options")[0].at("cls") == "TRUCK_PRESS");
+  CHECK(doc.at("options")[0].at("usual") == true);
+  CHECK(get("?site=11&material=CHLORINE").body == one.body);  // site by index
+
+  CHECK(get("?site=NOPE&material=PE").status == 400);
+  CHECK(get("?site=VINYLS&material=NOPE").status == 400);
+  CHECK(get("?site=VINYLS").status == 400);
+  CHECK(get("?material=PE").status == 400);
+  auto unknown = cli.Get("/api/sim/nope/sourcing");
+  REQUIRE(unknown);
+  CHECK(unknown->status == 404);
+
+  // Asking never moves the run.
+  CHECK(cli.Post("/api/sim/" + id + "/step", R"({"ticks":0})", "application/json")->body == before);
+}
+
+TEST_CASE("route_break by edge: the index is the route's position in the world JSON") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  const auto world = cli.Get("/api/sim/" + id + "/world");
+  REQUIRE(world);
+  const json routes = json::parse(world->body).at("routes");
+  REQUIRE(routes.size() == 88);
+  size_t river = routes.size();
+  for (size_t i = 0; i < routes.size() && river == routes.size(); ++i)
+    if (routes[i].at("mode") == "river") river = i;
+  REQUIRE(river < routes.size());
+
+  const auto command = [&](const json& cmd) {
+    auto res = cli.Post("/api/sim/" + id + "/command", cmd.dump(), "application/json");
+    REQUIRE(res);
+    return json::parse(res->body);
+  };
+  CHECK(command({{"type", "route_break"}, {"edge", river}, {"duration_h", 48}}).at("ok") == true);
+  CHECK(command({{"type", "route_break"}, {"edge", routes.size()}, {"duration_h", 48}}).at("ok") ==
+        false);
+  REQUIRE(cli.Post("/api/sim/" + id + "/step", R"({"ticks":8})", "application/json"));
+  const auto events = cli.Get("/api/sim/" + id + "/events?since=0");
+  REQUIRE(events);
+  bool closed = false;
+  for (const json& e : json::parse(events->body))
+    if (e.at("type") == "route_break" && e.at("unit") == std::to_string(river))
+      closed = e.at("text").get<std::string>().rfind("River lane closed", 0) == 0;
+  CHECK(closed);
+
+  // A rewind to before the closure forgets it, like any other disruption.
+  REQUIRE(cli.Post("/api/sim/" + id + "/rewind", R"({"tick":0})", "application/json"));
+  REQUIRE(cli.Post("/api/sim/" + id + "/step", R"({"ticks":8})", "application/json"));
+  const auto after = cli.Get("/api/sim/" + id + "/events?since=0");
+  REQUIRE(after);
+  for (const json& e : json::parse(after->body)) CHECK(e.at("type") != "route_break");
+}
+
 TEST_CASE("world json: fleet manifest without a fabricated shuttle schedule") {
   TestServer srv;
   auto cli = client(srv.port);
