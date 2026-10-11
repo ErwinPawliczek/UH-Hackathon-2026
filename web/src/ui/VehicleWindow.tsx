@@ -20,7 +20,7 @@ import { VEHICLE_CLASSES, type VehicleClassKey, type WorldSpec } from '../engine
 import { useSim } from '../store/sim';
 import { DraggableWindow } from './DraggableWindow';
 import { SiteBadge } from './SiteIcon';
-import { fmtClock } from './format';
+import { fmtMomentWords } from './format';
 import { materialName } from './materials';
 import { standingAt, vehicleLive } from './vehicleLive';
 
@@ -46,6 +46,9 @@ const STATUS_BY_NUMBER = ['idle', 'to_pickup', 'queue_load', 'loading', 'to_drop
 
 const tonnes = (t: number) => `${t >= 100 ? Math.round(t).toLocaleString('en-US') : Math.round(t * 10) / 10} t`;
 
+/** A truck drives; a barge or a ship sails. */
+export const goingWord = (cls: string) => (cls.startsWith('BARGE') || cls.startsWith('SHIP') ? 'Sailing' : 'Driving');
+
 /**
  * What the vehicle is doing, in one sentence that always names the cargo and
  * the place: "Driving to pick up 20 t of propylene at Steam cracker (flex)."
@@ -59,7 +62,7 @@ export function tripSentence(d: VehicleDetail, idleAt: string | null = null): st
   const lot = `${tonnes(o.tonnes)} of ${what}`;
   const onBoard = d.cargo !== null ? `${tonnes(d.cargo.tonnes)} of ${materialName(d.cargo.material)}` : lot;
   switch (d.status) {
-    case 'to_pickup': return `Driving to pick up ${lot} at ${o.from.name}.`;
+    case 'to_pickup': return `${goingWord(d.cls)} to pick up ${lot} at ${o.from.name}.`;
     case 'queue_load': return `Waiting for a bay to load ${lot} at ${o.from.name}.`;
     case 'loading': return `Loading ${lot} at ${o.from.name}${d.cargo !== null ? ` — ${tonnes(d.cargo.tonnes)} on board so far` : ''}.`;
     case 'to_dropoff': return `Carrying ${onBoard} to ${o.to.name}.`;
@@ -73,9 +76,9 @@ export function tripSentence(d: VehicleDetail, idleAt: string | null = null): st
  * The first line before the trip is known: the status in words, and that the
  * details are on their way — or that they could not be fetched.
  */
-export function pendingSentence(status: string, idleAt: string | null, failure: string | null): string {
+export function pendingSentence(status: string, idleAt: string | null, failure: string | null, cls?: string): string {
   if (status === 'idle') return idleAt === null ? 'Idle, not shown on the map.' : `Idle at ${idleAt}, not shown on the map.`;
-  const words = STATUS_WORDS[status] ?? status;
+  const words = status === 'to_pickup' && cls !== undefined ? `${goingWord(cls)} to pick up` : STATUS_WORDS[status] ?? status;
   return failure === null ? `${words} (loading details…)` : `${words} — the trip details could not be loaded (${failure}).`;
 }
 
@@ -176,7 +179,8 @@ function TripEnd({ label, end, world }: { label: string; end: SiteRef; world: Wo
       <SiteBadge preset={site?.preset ?? end.key} />
       <span className="min-w-0">
         <span className="label block">{label}</span>
-        <span className="block truncate text-ink">{end.name}</span>
+        {/* a long name wraps: never "Paints and co…" */}
+        <span className="block break-words leading-tight text-ink">{end.name}</span>
       </span>
     </button>
   );
@@ -270,7 +274,7 @@ export function VehicleWindow() {
         {/* the status line: always what, how much and where */}
         <div className="flex items-start gap-2">
           <p className="min-w-0 flex-1 text-sm leading-snug text-ink" data-testid="vehicle-status">
-            {d !== null ? tripSentence(d, idleAt) : pendingSentence(status, idleAt, failure)}
+            {d !== null ? tripSentence(d, idleAt) : pendingSentence(status, idleAt, failure, veh.cls)}
           </p>
         </div>
 
@@ -314,7 +318,7 @@ export function VehicleWindow() {
               <dt className="label">Order</dt>
               <dd className="data">
                 #{order.id} · {tonnes(order.tonnes)} of {materialName(order.material)}
-                <span className="block text-muted">placed {fmtClock(order.createdTick)}</span>
+                <span className="block text-muted">placed {fmtMomentWords(order.createdTick)}</span>
               </dd>
 
               {d !== null && arrivalWords(d, spec) !== null && (
@@ -335,10 +339,6 @@ export function VehicleWindow() {
             </>
           )}
 
-          <dt className="label">Position</dt>
-          <dd className="data">
-            {live.x.toFixed(0)}, {live.y.toFixed(0)} km
-          </dd>
         </dl>
       </div>
     </DraggableWindow>

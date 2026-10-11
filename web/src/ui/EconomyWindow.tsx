@@ -24,7 +24,7 @@ import { EconomySupply } from './EconomySupply';
 import { EconomyProcurement, EconomyProduction } from './EconomyTabs';
 import { ECONOMY_WINDOW_AT, ECONOMY_WINDOW_ID, useEconomyView, type EconomyTab } from './economyView';
 import { costParts, countdownSentence, fmtMoney, fmtTonnes, nothingBroken, useForecast } from './economyData';
-import { fmtClock } from './format';
+import { fmtClock, fmtMomentWords } from './format';
 import { useWindows } from './windows';
 
 export { ECONOMY_WINDOW_AT, ECONOMY_WINDOW_ID, openSupplyOptions } from './economyView';
@@ -122,7 +122,7 @@ export function ImpactView({ f, presetOf, note = null }: { f: ForecastReply; pre
       <Comparison f={f} quiet={quiet} />
       {!quiet && <ShortCustomers f={f} />}
       <p className="text-xs text-muted">
-        Worked out at {fmtClock(f.tick)} by running the next {f.days} days twice: once as things are, once with
+        Worked out at {fmtMomentWords(f.tick)} by running the next {f.days} days twice: once as things are, once with
         everything repaired. It updates when something breaks or is repaired, and once a simulated day.
         {note !== null && ` (${note})`}
       </p>

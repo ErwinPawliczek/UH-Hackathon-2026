@@ -57,6 +57,8 @@ export interface RouteSpec {
  */
 export interface StreamSpec {
   key: string;
+  /** the stream in plain words, when the engine gives one ("ethylene dichloride" for `edc`) */
+  name?: string;
   /** tonnes per hour at design rate */
   tph: number;
   kind: 'material' | 'internal' | 'utility';

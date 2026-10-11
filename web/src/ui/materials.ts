@@ -35,6 +35,7 @@ const NAMES: Record<string, string> = {
   WATER: 'water',
   STEAM: 'steam',
   AIR: 'air',
+  AIR_O2: 'air (oxygen)',
   HYDROGEN: 'hydrogen',
   LOSS: 'losses',
 };

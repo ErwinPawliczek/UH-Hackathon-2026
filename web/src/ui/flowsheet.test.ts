@@ -272,7 +272,17 @@ describe('live values on the diagram', () => {
   it('formats names, flows and times for labels', () => {
     expect(streamLabel('HEAVY_NAPHTHA')).toBe('Heavy naphtha');
     expect(streamLabel('LPG')).toBe('LPG');
-    expect(streamLabel('wet_cl2')).toBe('wet cl2');
+    // internal streams: abbreviations spelled out, the rest tidied
+    expect(streamLabel('wet_cl2')).toBe('Wet chlorine');
+    expect(streamLabel('edc')).toBe('EDC');
+    expect(streamLabel('eb')).toBe('Ethylbenzene');
+    expect(streamLabel('cracked')).toBe('Cracked');
+    // a plain name from the world JSON wins once a flowsheet carrying it is built
+    const named = JSON.parse(JSON.stringify(world)) as WorldSpec;
+    const vin = named.sites.findIndex((x) => x.key === 'VINYLS');
+    for (const p of named.sites[vin].processes) for (const u of p.units) for (const st of [...(u.in ?? []), ...(u.out ?? [])]) if (st.key === 'hcl') st.name = 'hydrochloric acid gas';
+    buildFlowsheet(named, vin);
+    expect(streamLabel('hcl')).toBe('Hydrochloric acid gas');
     expect(fmtTph(40.31)).toBe('40.3');
     expect(fmtTph(321.4)).toBe('321');
     expect(fmtHours(5.4)).toBe('5 h');

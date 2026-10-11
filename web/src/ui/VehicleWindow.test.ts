@@ -158,3 +158,14 @@ describe('arrivalWords', () => {
     expect(fmtAbout(60)).toBe('2.5 days');
   });
 });
+
+
+describe('vessels', () => {
+  it("sail; trucks drive", () => {
+    const toLoad = { ...base, status: 'to_pickup', cargo: null };
+    expect(tripSentence({ ...toLoad, cls: 'BARGE_TANK' })).toMatch(/^Sailing to pick up /);
+    expect(tripSentence({ ...toLoad, cls: 'SHIP_GAS' })).toMatch(/^Sailing to pick up /);
+    expect(tripSentence(toLoad)).toMatch(/^Driving to pick up /);
+    expect(pendingSentence('to_pickup', null, null, 'BARGE_DRY')).toBe('Sailing to pick up (loading details…)');
+  });
+});
