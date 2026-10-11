@@ -1,6 +1,7 @@
 // Full-viewport three.js canvas: builds the MapScene when the world changes,
-// drives the render loop (frame interpolation between 250 ms snapshots, flow
-// animation), forwards clicks to picking, and handles resize.
+// drives the render loop (vehicles drive continuously between the 250 ms
+// snapshots, see vehicleMotion.ts), forwards clicks to picking, and handles
+// resize.
 
 import { useEffect, useRef } from 'react';
 import { useSim } from '../store/sim';
@@ -18,6 +19,10 @@ export function SceneCanvas() {
     if (canvas === null || world === null) return;
     const scene = new MapScene(canvas, world, viewFromParams(new URLSearchParams(window.location.search)));
     sceneRef.current = scene;
+    // `?debug` exposes the scene to the console and to capture scripts
+    if (new URLSearchParams(window.location.search).has('debug')) {
+      (window as unknown as { __petrogridScene?: MapScene }).__petrogridScene = scene;
+    }
 
     const ro = new ResizeObserver(() => {
       const parent = canvas.parentElement;
@@ -35,9 +40,10 @@ export function SceneCanvas() {
       last = now;
       const st = useSim.getState();
       if (st.snap !== null) {
-        const stepMs = 250;
+        // real time between snapshots: the store says so once it has slower speeds
+        const stepMs = (st as { stepIntervalMs?: number }).stepIntervalMs ?? 250;
         const f = st.playing ? Math.min(1, (now - st.snapAt) / stepMs) : 1;
-        scene.applySnapshot(st.snap, st.prevSnap, f, st.selected);
+        scene.applySnapshot(st.snap, st.prevSnap, f, st.selected, now, st.runEpoch, stepMs);
       }
       scene.animate(dt);
       scene.render();

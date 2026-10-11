@@ -15,9 +15,10 @@ import { MODE_LINE_STYLE, PIPELINE_WIDTH, V3, flowColor, routeLineColor } from '
 import { SiteLabels } from './siteLabels';
 import { buildSiteLayer, updateInstances, type SiteLayer } from './siteClusters';
 import {
-  buildVehicleLayer, classMode, lerpPose, updateVehicleCargo, updateVehicles, waterSpan,
+  buildVehicleLayer, classMode, updateVehicleCargo, updateVehicles, waterSpan,
   type VehicleLayer, type VehiclePose, type WaterSpan,
 } from './instances';
+import { RouteNet, VehicleMotion, type DrawTarget } from './vehicleMotion';
 
 export interface PickHit {
   kind: 'site' | 'vehicle';
@@ -81,6 +82,17 @@ export class MapScene {
   private readonly berths = new Map<string, Berth>();
   /** Last snapshot the vehicle cargo colours were taken from. */
   private cargoSnap: Snapshot | null = null;
+  /** The routes as a graph, and the drive of every vehicle between snapshots. */
+  private readonly net: RouteNet;
+  private readonly motion: VehicleMotion;
+  private readonly poses: VehiclePose[] = [];
+  /** Snapshot and run the vehicles are currently heading for. */
+  private motionSnap: Snapshot | null = null;
+  private motionEpoch = -1;
+  /** Parking slot per standing vehicle, kept while it stays at its site. */
+  private readonly slots = new Map<number, { key: string; slot: number }>();
+  /** Site index by position, for telling which site a standing vehicle is at. */
+  private readonly siteAtCache = new Map<string, number>();
   private readonly raycaster = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
 
@@ -161,6 +173,13 @@ export class MapScene {
         if (known === undefined || dist(berth) < dist(known)) this.berths.set(key, berth);
       });
     });
+
+    this.net = new RouteNet(world);
+    this.motion = new VehicleMotion(
+      this.net,
+      world.vehicles.map((v) => ({ mode: classMode(v.cls), speedKmh: VEHICLE_CLASSES[v.cls]?.speedKmh ?? 70 })),
+      isWater,
+    );
 
     this.siteLayer = buildSiteLayer(world);
     this.scene.add(this.siteLayer.pads, this.siteLayer.rings, this.siteLayer.tanks);
@@ -264,8 +283,22 @@ export class MapScene {
     this.controls.update();
   }
 
-  /** Push a snapshot into the layers; `f` (0..1) interpolates from `prev`. */
-  applySnapshot(cur: Snapshot, prev: Snapshot | null, f: number, selection: Selection): void {
+  /**
+   * Push a snapshot into the layers. `f` (0..1) interpolates tank levels from
+   * `prev`; vehicles drive on their own clock (`nowMs`), see vehicleMotion.ts.
+   * `epoch` changes whenever the run is replaced or taken back in time:
+   * vehicles are then placed at once instead of driving to where they are.
+   * `stepMs` is the real time between snapshots the step loop aims for.
+   */
+  applySnapshot(
+    cur: Snapshot,
+    prev: Snapshot | null,
+    f: number,
+    selection: Selection,
+    nowMs: number = performance.now(),
+    epoch = 0,
+    stepMs = 250,
+  ): void {
     const selectedSite = selection !== null && selection.kind === 'site' ? selection.index : null;
     updateInstances(this.siteLayer, cur, prev, f, selectedSite);
     // closed routes (array 10) turn alarm red until they reopen
@@ -273,15 +306,32 @@ export class MapScene {
       const line = this.flowLines[i];
       setFlowLineColor(line, cur.edgeOpen[i] === 0 ? V3.alarm : line.color);
     }
-    const poses: VehiclePose[] = [];
-    for (let v = 0; v < cur.nVeh; v++) poses.push(lerpPose(this.world, cur, prev, v, f, this.clampToWater));
-    this.parkVehicles(cur, poses);
-    updateVehicles(this.vehicleLayer, poses, (x, y) => surfaceYAt(this.world, x, y));
+    if (cur !== this.motionSnap) {
+      const last = this.motionSnap;
+      const instant =
+        last === null || epoch !== this.motionEpoch || cur.tick <= last.tick || cur.nVeh !== last.nVeh;
+      if (instant) this.slots.clear();
+      const ticks = last === null ? 0 : Number(cur.tick - last.tick);
+      this.motion.retarget(this.drawTargets(cur), nowMs, ticks, instant, stepMs);
+      this.motionSnap = cur;
+      this.motionEpoch = epoch;
+    }
+    this.motion.sample(nowMs, this.poses);
+    const world = this.world;
+    updateVehicles(this.vehicleLayer, this.poses, (x, y, v) =>
+      // trucks keep to the road deck over water; vessels ride the water surface
+      classMode(world.vehicles[v]?.cls ?? '') === 'road' ? deckYAt(world, x, y) : surfaceYAt(world, x, y),
+    );
     if (cur !== this.cargoSnap) {
       updateVehicleCargo(this.vehicleLayer, this.world, cur);
       this.cargoSnap = cur;
     }
-    this.syncRing(selection, poses);
+    this.syncRing(selection, this.poses);
+  }
+
+  /** Where every vehicle is drawn this frame (map km) — for the selection ring, picking and checks. */
+  vehiclePoses(): readonly VehiclePose[] {
+    return this.poses;
   }
 
   /** Keep a vessel's drawn progress on the wet stretch of its lane. */
@@ -291,54 +341,108 @@ export class MapScene {
     return Math.min(span.s1, Math.max(span.s0, p * span.length)) / span.length;
   };
 
-  /**
-   * Vehicles standing at a site all report the site's own position. Draw
-   * them where they would stand instead: trucks parked in rows on the site's
-   * near side, vessels moored one behind another at the site's berth.
-   */
-  private parkVehicles(snap: Snapshot, poses: VehiclePose[]): void {
-    const world = this.world;
-    const parked = new Map<string, number>();
-    for (let v = 0; v < poses.length && v < world.vehicles.length; v++) {
-      if (!AT_SITE.has(snap.vehStatus[2 * v])) continue;
-      const pose = poses[v];
-      const site = world.sites.findIndex((s) => Math.abs(s.x - pose.x) < 1 && Math.abs(s.y - pose.y) < 1);
-      if (site < 0) continue;
-      const cls = world.vehicles[v].cls;
-      const mode = classMode(cls);
-      const key = `${site}:${mode}`;
-      const slot = parked.get(key) ?? 0;
-      parked.set(key, slot + 1);
+  /** Index of the site at a map position (within 1 km), or -1. */
+  private siteAt(x: number, y: number): number {
+    const key = `${Math.round(x)}:${Math.round(y)}`;
+    let site = this.siteAtCache.get(key);
+    if (site === undefined) {
+      site = this.world.sites.findIndex((s) => Math.abs(s.x - x) < 1 && Math.abs(s.y - y) < 1);
+      this.siteAtCache.set(key, site);
+    }
+    return site;
+  }
 
-      if (mode === 'road') {
-        const anchor = this.siteLayer.siteAnchors[site];
-        const row = Math.floor(slot / PARK_PER_ROW);
-        const col = slot % PARK_PER_ROW;
-        // an arc on the south side of the cluster (towards the default camera)
-        const angle = Math.PI / 2 + (col / (PARK_PER_ROW - 1) - 0.5) * Math.PI * 0.8;
-        const radiusKm = (anchor.clusterR + 0.42 + 0.56 * row) / SCALE;
-        poses[v] = {
-          x: world.sites[site].x + Math.cos(angle) * radiusKm,
-          y: world.sites[site].y + Math.sin(angle) * radiusKm,
-          dirX: Math.cos(angle),
-          dirY: Math.sin(angle),
-        };
+  /** A standing vehicle's parking slot: kept while it stays, else the lowest free one. */
+  private slotFor(v: number, key: string): number {
+    const held = this.slots.get(v);
+    if (held !== undefined && held.key === key) return held.slot;
+    const taken = new Set<number>();
+    for (const other of this.slots.values()) if (other.key === key) taken.add(other.slot);
+    let slot = 0;
+    while (taken.has(slot)) slot++;
+    this.slots.set(v, { key, slot });
+    return slot;
+  }
+
+  /**
+   * Where every vehicle of a snapshot is to be drawn. Vehicles standing at a
+   * site all report the site's own position: trucks are parked in rows on
+   * the site's near side, vessels moored one behind another at its berth.
+   * The rest are on their route, or at a junction.
+   */
+  private drawTargets(snap: Snapshot): DrawTarget[] {
+    const world = this.world;
+    const targets: DrawTarget[] = [];
+    for (let v = 0; v < snap.nVeh; v++) {
+      const x = snap.vehPos[5 * v];
+      const y = snap.vehPos[5 * v + 1];
+      const dir: [number, number] = [snap.vehPos[5 * v + 2] || 0, snap.vehPos[5 * v + 3] || 1];
+      const mode = classMode(world.vehicles[v]?.cls ?? '');
+      const site = AT_SITE.has(snap.vehStatus[2 * v]) && v < world.vehicles.length ? this.siteAt(x, y) : -1;
+      if (site >= 0) {
+        const parked = this.parkTarget(v, site, this.slotFor(v, `${site}:${mode}`), dir);
+        if (parked !== null) {
+          targets.push(parked);
+          continue;
+        }
+      }
+      this.slots.delete(v);
+      const routeId = snap.vehRoute?.[v];
+      const progress = snap.vehProgress?.[v];
+      if (routeId !== undefined && progress !== undefined && routeId < world.routes.length) {
+        const s = this.clampToWater(routeId, progress) * this.net.routes[routeId].length;
+        const at = this.net.pointAt(routeId, s);
+        targets.push({ x: at.x, y: at.y, net: { kind: 'route', route: routeId, s }, dir, restDir: null, standoffKm: 0 });
         continue;
       }
-
-      const berth = this.berths.get(key);
-      if (berth === undefined) continue; // no wet lane ends here: leave the engine pose
-      const span = this.routeSpans[berth.route];
-      if (span === null) continue;
-      // half a hull out from the water's edge so the bow is not on the bank,
-      // then one hull and a gap per vessel already moored here
-      const hullKm = VEHICLE_CLASSES[cls]?.sceneLength ?? 12;
-      const offsetKm = hullKm / 2 + 4 + slot * (hullKm + 4);
-      const s = Math.min(span.s1, Math.max(span.s0, berth.s + berth.away * offsetKm));
-      const at = routePointAt(world.routes[berth.route].points, s);
-      // bow towards the site
-      poses[v] = { x: at.x, y: at.y, dirX: -berth.away * at.dirX, dirY: -berth.away * at.dirY };
+      const node = this.net.nodeNear(mode, x, y, 1.5);
+      targets.push({ x, y, net: node >= 0 ? { kind: 'node', node } : null, dir, restDir: null, standoffKm: 0 });
     }
+    return targets;
+  }
+
+  /** The standing place of vehicle `v` at `site`, in parking slot `slot`. */
+  private parkTarget(v: number, site: number, slot: number, dir: [number, number]): DrawTarget | null {
+    const world = this.world;
+    const cls = world.vehicles[v].cls;
+    const mode = classMode(cls);
+    if (mode === 'road') {
+      const anchor = this.siteLayer.siteAnchors[site];
+      const row = Math.floor(slot / PARK_PER_ROW);
+      const col = slot % PARK_PER_ROW;
+      // an arc on the south side of the cluster (towards the default camera)
+      const angle = Math.PI / 2 + (col / (PARK_PER_ROW - 1) - 0.5) * Math.PI * 0.8;
+      const radiusKm = (anchor.clusterR + 0.42 + 0.56 * row) / SCALE;
+      const node = this.net.siteNode(site, 'road');
+      return {
+        x: world.sites[site].x + Math.cos(angle) * radiusKm,
+        y: world.sites[site].y + Math.sin(angle) * radiusKm,
+        net: node >= 0 ? { kind: 'node', node } : null,
+        dir,
+        restDir: [Math.cos(angle), Math.sin(angle)],
+        // leave the road where the cluster begins and pull over to the row
+        standoffKm: (anchor.clusterR + 0.3) / SCALE,
+      };
+    }
+    const berth = this.berths.get(`${site}:${mode}`);
+    if (berth === undefined) return null; // no wet lane ends here: leave the engine pose
+    const span = this.routeSpans[berth.route];
+    if (span === null) return null;
+    // half a hull out from the water's edge so the bow is not on the bank,
+    // then one hull and a gap per vessel already moored here
+    const hullKm = VEHICLE_CLASSES[cls]?.sceneLength ?? 12;
+    const offsetKm = hullKm / 2 + 4 + slot * (hullKm + 4);
+    const s = Math.min(span.s1, Math.max(span.s0, berth.s + berth.away * offsetKm));
+    const at = this.net.pointAt(berth.route, s);
+    return {
+      x: at.x,
+      y: at.y,
+      net: { kind: 'route', route: berth.route, s },
+      dir,
+      // bow towards the site
+      restDir: [-berth.away * at.dirX, -berth.away * at.dirY],
+      standoffKm: 0,
+    };
   }
 
   private syncRing(selection: Selection, poses: { x: number; y: number }[]): void {
