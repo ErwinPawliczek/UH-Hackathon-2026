@@ -62,8 +62,13 @@
 }
 
 :root {
+  --mask-visible: oklch(1 0 0);
+  --mask-hidden: oklch(0 0 0);
   --radius: 0.625rem;
   --grid-line: oklch(0.86 0.008 250);
+  --video-surface: oklch(0.19 0 0);
+  --video-outline: oklch(0.35 0 0);
+  --video-ink: oklch(0.94 0 0);
   --row: 35.28px;
   --col: 40.7232px;
   --background: oklch(1 0 0);
@@ -101,6 +106,8 @@
 }
 
 .dark {
+  --mask-visible: oklch(1 0 0);
+  --mask-hidden: oklch(0 0 0);
   --background: oklch(0.129 0.042 264.695);
   --foreground: oklch(0.984 0.003 247.858);
   --card: oklch(0.208 0.042 265.755);
@@ -188,6 +195,20 @@
 .hex-scroll { position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; }
 .hex-scene { display: block; width: 100%; height: 100%; }
 .identity-wordmark { font-family: "Archivo", sans-serif; font-stretch: 125%; font-weight: 700; font-size: 24px; letter-spacing: 0; }
+mask .hx-label { fill: var(--mask-hidden); }
+
+.identity-video { min-height: max(100svh, 960px); }
+.hex-video-fill { fill: var(--video-surface); stroke: var(--video-surface); stroke-width: 1; }
+.hex-video-edge { fill: none; stroke: var(--video-outline); stroke-width: 1.5; }
+.hex-video-symbol { fill: none; stroke: var(--video-outline); stroke-width: 1.5; }
+.hex-video-play { fill: var(--video-ink); }
+.hex-video-label { fill: var(--video-ink); font-family: "Instrument Sans", sans-serif; font-size: 15px; letter-spacing: 0; }
+@media (max-width: 600px) {
+  .identity-video { min-height: 100svh; }
+  .identity-wordmark { font-size: 21px; }
+  .hex-video-symbol { stroke-width: 1.75; }
+  .hex-video-label { font-size: 14px; }
+}
 
 /* Hex content regions: text areas cut from the lattice itself */
 .hx-fill { fill: var(--background); fill-opacity: .88; stroke: none; }
@@ -218,6 +239,43 @@
 .hx-link { fill: var(--primary); fill-opacity: 0; animation: hx-flow 3.6s ease-in-out infinite; }
 @keyframes hx-flow { 0%, 100% { fill-opacity: 0; } 20%, 45% { fill-opacity: .55; } }
 @media (prefers-reduced-motion: reduce) { .hx-link { animation: none; fill-opacity: .3; } }
+
+.hex-scroll-pitch { position: relative; inset: auto; }
+.identity-pitch .hex-scene { overflow: visible; }
+/* Type scale per layout tier (set by the pitch layout engine via .hx-tier-*) */
+.hx-tier-phone .hx-h1, .hx-tier-tablet .hx-h1 { font-size: 28px; line-height: 1.18; }
+.hx-tier-tablet .hx-h1 { font-size: 32px; }
+.hx-tier-phone .hx-h2, .hx-tier-tablet .hx-h2 { font-size: 24px; line-height: 1.25; }
+.hx-tier-phone .hx-body, .hx-tier-tablet .hx-body { font-size: 16px; line-height: 1.5; }
+.hx-tier-phone .hx-line, .hx-tier-tablet .hx-line { white-space: normal; font-size: 16px; line-height: 1.4; }
+.hx-tier-phone .hx-line b { display: block; margin-bottom: 2px; }
+.hx-tier-phone .hx-stat strong, .hx-tier-tablet .hx-stat strong { font-size: 30px; }
+.hx-tier-phone .hx-stat span, .hx-tier-tablet .hx-stat span { font-size: 12px; line-height: 1.35; }
+.hx-tier-phone .hx-stat em, .hx-tier-tablet .hx-stat em { font-size: 9.5px; letter-spacing: 0; }
+.hx-tier-phone .hx-label, .hx-tier-tablet .hx-label { font-size: 16px; }
+.hx-tier-phone .hx-eyebrow { letter-spacing: .06em; }
+.hx-tier-wide .hx-h1 { font-size: 42px; }
+.hx-tier-wide .hx-h2 { font-size: 30px; }
+.hx-tier-wide .hx-h3 { font-size: 22px; }
+.hx-tier-wide .hx-body, .hx-tier-wide .hx-line { font-size: 16px; }
+.hx-tier-wide .hx-stat strong { font-size: 40px; }
+.hx-tier-wide .hx-stat span { font-size: 14px; }
+.hx-tier-wide .hx-stat em { font-size: 11px; }
+.hx-tier-wide .hx-label { font-size: 13px; }
+.identity-pitch { padding-bottom: env(safe-area-inset-bottom); }
+.site-qr-link, .site-qr-item .inline-flex { min-height: 44px; }
+.site-qr { display: flex; flex-wrap: wrap; justify-content: center; gap: 48px; padding: 32px 24px 64px; border-top: 1px solid var(--grid-line); }
+.site-qr-item { display: flex; align-items: center; gap: 20px; }
+.site-qr-item img { width: 160px; height: 160px; background: var(--background); }
+.site-qr-info { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.site-qr-info h2 { font-family: "Archivo", sans-serif; font-size: 20px; margin: 0; }
+.site-qr-link { padding: 0; height: auto; }
+@media (max-width: 600px) {
+  .site-qr { gap: 32px; }
+  .site-qr-item { width: 100%; gap: 12px; }
+  .site-qr-item img { width: 112px; height: 112px; }
+  .site-qr-link { font-size: 12px; }
+}
 
 /* QR page: two codes side by side on the grid */
 .identity-qr { position: relative; min-height: 100svh; }

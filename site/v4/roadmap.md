@@ -1,5 +1,14 @@
 # Roadmap
+- [x] Add the approved QR page to the repository with a do-not-change context document — committed in PR #18 into fe/site-v4; awaiting merge.
+- [x] Fade only the main-page wordmark behind content on contact, preserving the moving logo — checked locally on phone and desktop; intentionally excluded from the QR-only PR.
+- [x] Restore the main pitch locally with a phone layout; keep the v5 video screen separately accessible at /video. Verified at 320, 390, 812 and 1280px without text overflow.
+- [x] Generate and verify two downloadable QR codes for https://petrogrid.xyz and https://demo.petrogrid.xyz. Both decoded to the exact URLs; download tested.
+- [ ] Repo sync of phone and wordmark changes — opened as a pull request into fe/site-v4; awaiting merge.
+- [ ] Demo animations (waiting on demo visuals from Erwin).
+- [ ] Grid-cut content layout: pick the text-area styles to keep across the whole page.
+- [x] V5: large lattice-cut video placeholder added as site/v5 in PR #14, preserving site/v4; checked at desktop/mobile widths.
+- [x] Preserve existing ethylene wording; no edits to pitch copy in either version.
 - [x] Pitch content on grid, transparent text areas, grid fade, logo halo
 - [x] Grid stays perfectly still (no movement/jitter)
-- [ ] Demo animations (waiting on demo visuals from Erwin)
-- [ ] Grid-cut content layout: first round of styles shown, awaiting Erwin's pick
+- [ ] Final video (waiting on Erwin's video; demo animations and pitch layout deferred for v5).
+- [x] QR page at /qr with uploaded Demo and Main Page codes
