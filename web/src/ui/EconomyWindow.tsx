@@ -8,41 +8,45 @@
 //   Disruption impact — what is broken right now will cost over the next 30
 //   days, itemised in plain words, what stops next and when, and how the 30
 //   days compare with the same days had nothing broken.
+//   Supply options — for each tank that buys its feed: how long its stock
+//   lasts, whether its usual supplier is down, and who else could deliver in
+//   time and at what price (EconomySupply.tsx).
 //
 // The data comes from the live session (see economyData.ts): the run so far
 // once per simulated day, the forecast also whenever something breaks or is
 // repaired; all of it is dropped when the run is replaced or taken back.
 
-import { useState } from 'react';
 import type { ForecastReply } from '../engine/api';
 import { useSim } from '../store/sim';
 import { DraggableWindow } from './DraggableWindow';
 import { SiteBadge } from './SiteIcon';
+import { EconomySupply } from './EconomySupply';
 import { EconomyProcurement, EconomyProduction } from './EconomyTabs';
+import { ECONOMY_WINDOW_AT, ECONOMY_WINDOW_ID, useEconomyView, type EconomyTab } from './economyView';
 import { costParts, countdownSentence, fmtMoney, fmtTonnes, nothingBroken, useForecast } from './economyData';
 import { fmtClock } from './format';
 import { useWindows } from './windows';
 
-export const ECONOMY_WINDOW_ID = 'economy';
-/** Where the window first appears: under the top bar, to the right, clear of the Scenario menu. */
-export const ECONOMY_WINDOW_AT = { x: 630, y: 68 };
+export { ECONOMY_WINDOW_AT, ECONOMY_WINDOW_ID, openSupplyOptions } from './economyView';
 const WIDTH = 720;
 /** Days the disruption forecast looks ahead. */
 export const FORECAST_DAYS = 30;
 
-type TabKey = 'procurement' | 'production' | 'impact';
-const TABS: { key: TabKey; label: string }[] = [
+const TABS: { key: EconomyTab; label: string }[] = [
   { key: 'procurement', label: 'Procurement' },
   { key: 'production', label: 'Production' },
   { key: 'impact', label: 'Disruption impact' },
+  { key: 'supply', label: 'Supply options' },
 ];
 
 export function EconomyWindow() {
   const open = useWindows((s) => s.windows[ECONOMY_WINDOW_ID]?.open === true);
-  const [tab, setTab] = useState<TabKey>('procurement');
+  const tab = useEconomyView((s) => s.tab);
+  const setTab = useEconomyView((s) => s.setTab);
   return (
     <DraggableWindow id={ECONOMY_WINDOW_ID} title="Economy" width={WIDTH} maxHeight="80vh" at={ECONOMY_WINDOW_AT}>
-      <div className="flex gap-1.5 border-b border-line px-3 py-2" role="tablist" aria-label="Economy views">
+      {/* the tabs stay put while a long tab scrolls under them */}
+      <div className="sticky top-0 z-10 flex gap-1.5 border-b border-line bg-panel px-3 py-2" role="tablist" aria-label="Economy views">
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -59,6 +63,7 @@ export function EconomyWindow() {
       {tab === 'procurement' && <EconomyProcurement open={open} />}
       {tab === 'production' && <EconomyProduction open={open} />}
       {tab === 'impact' && <ImpactTab open={open} />}
+      {tab === 'supply' && <EconomySupply open={open} />}
     </DraggableWindow>
   );
 }

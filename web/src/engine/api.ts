@@ -137,6 +137,84 @@ export interface EconomyReply {
   }[];
 }
 
+/** How a plant that sells a material is doing, as the sourcing calls report it. */
+export type SupplierState = 'running' | 'held' | 'restarting' | 'shut_down' | 'no_producer';
+
+/** One buying tank in GET /api/sim/{id}/sourcing: how long its stock lasts and who usually fills it. */
+export interface SourcingTank {
+  site: string;
+  site_index: number;
+  name: string;
+  material: string;
+  material_name: string;
+  fill: number;
+  /** hours of stock at the design draw; null when nothing draws from it */
+  cover_h: number | null;
+  draw_t_h: number;
+  inbound_t: number;
+  /** how many ways there are to supply it */
+  options: number;
+  /** site key of the seller that has delivered most so far */
+  usual: string | null;
+  usual_state: SupplierState | null;
+}
+
+export interface SourcingList {
+  tick: number;
+  tanks: SourcingTank[];
+}
+
+/** One way to supply a tank: a seller and a vehicle type, with what it would take and cost. */
+export interface SourcingOption {
+  seller: string;
+  seller_index: number;
+  seller_name: string;
+  seller_state: SupplierState;
+  stock_t: number;
+  /** stock not already promised to someone else */
+  free_t: number;
+  seller_fill: number;
+  cls: string;
+  mode: string;
+  vehicles: number;
+  idle_now: number;
+  km: number;
+  travel_h: number;
+  handling_h: number;
+  /** hours for the nearest free vehicle to reach the seller; null when none can */
+  pickup_h: number | null;
+  door_to_door_h: number;
+  lot_t: number;
+  ask_usd_t: number;
+  freight_usd_t: number;
+  time_usd_t: number;
+  switch_usd_t: number;
+  /** what the engine compares: ask + freight + time + switching */
+  landed_usd_t: number;
+  price_usd_t: number;
+  feasible_now: boolean;
+  blocked: null | 'no_vehicles' | 'seller_short' | 'unreachable' | 'export_fill' | string;
+  arrives_before_dry: boolean;
+  /** the next hourly ordering pass will book this one */
+  chosen: boolean;
+  /** this seller has delivered most so far */
+  usual: boolean;
+}
+
+/** GET /api/sim/{id}/sourcing?site=&material= — one buying tank and every way to supply it, cheapest first. */
+export interface SourcingDetail {
+  tick: number;
+  tank: {
+    site: string; site_index: number; name: string; material: string; material_name: string;
+    buys: boolean; piped_in: boolean; level_t: number; capacity_t: number; fill: number; target_t: number;
+    draw_t_h: number; cover_h: number | null; inbound_t: number; lead_time_h: number; urgency: number;
+    want_t: number; quoted_for_t: number;
+  };
+  next_pass: { tick: number; lots: { seller: string; cls: string; tonnes: number }[]; tonnes: number } | null;
+  usual: { site: string; site_index: number; name: string; delivered_t: number; state: SupplierState } | null;
+  options: SourcingOption[];
+}
+
 export interface SimBackend {
   readonly kind: BackendKind;
   /** POST /api/sim — create a session from config; reply { id }. */
@@ -161,6 +239,9 @@ export interface SimBackend {
   forecast?(id: string, days: number): Promise<ForecastReply>;
   /** GET /api/sim/{id}/economy?bucket_h= — orders, spend, freight and plant rates of the run so far, per bucket. (Optional, as above.) */
   economy?(id: string, bucketH: number): Promise<EconomyReply>;
+  /** GET /api/sim/{id}/sourcing — every buying tank, or with `tank` one tank and its supply options. (Optional, as above.) */
+  sourcing?(id: string): Promise<SourcingList>;
+  sourcingTank?(id: string, site: string, material: string): Promise<SourcingDetail>;
   /**
    * POST /api/sim/{id}/rewind — make the session exactly what it was at
    * `tick` (commands issued at that tick or later are forgotten). Afterwards
