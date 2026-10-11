@@ -13,7 +13,7 @@
 import type { Snapshot } from '../engine/snapshot';
 import type { WorldSpec } from '../engine/world';
 import {
-  rateOf, tankLive, unitLive, type FlowTankNode, type FlowUnitNode, type Flowsheet,
+  rateOf, tankLive, tankSide, unitLive, type TankSide, type FlowTankNode, type FlowUnitNode, type Flowsheet,
 } from './flowsheet';
 
 import { blueRamp } from './charts/palette';
@@ -79,7 +79,10 @@ export function weightedSum(parts: { series: Series; weight: number }[]): Series
   };
 }
 
-export type RowGroup = 'in' | 'out' | 'level' | 'unit';
+/** Tank levels come in three groups: input tanks, output tanks, and stock held on site. */
+export type LevelGroup = 'level-in' | 'level-out' | 'level-held';
+export type RowGroup = 'in' | 'out' | LevelGroup | 'unit';
+export const isLevel = (g: RowGroup): g is LevelGroup => g.startsWith('level');
 
 /** One line of the analytics: a named quantity, its value now, its design value, and its history. */
 export interface AnalyticsRow {
@@ -97,6 +100,8 @@ export interface AnalyticsRow {
   node?: FlowUnitNode;
   /** tank rows: the tank's block */
   tank?: FlowTankNode;
+  /** level rows: hours of cover left (input, held) or of room left (output); null when nothing draws or fills */
+  hoursLeft?: number | null;
 }
 
 /** Fetched histories by key: `p<process index>` (rate / design) and `t<tank index>` (fill). */
@@ -137,10 +142,17 @@ export function plantRows(sheet: Flowsheet, world: WorldSpec, snap: Snapshot, hi
   for (const t of tanks) {
     if (seen.has(t.tank)) continue; // a tank drawn at both ends is still one tank
     seen.add(t.tank);
-    const fill = tankLive(world, snap, t).fill;
+    const side = tankSide(sheet, t.tank);
+    // a tank drawn at both ends: its draw is on one node and its make on the other
+    const nodes = tanks.filter((n) => n.tank === t.tank);
+    const lives = nodes.map((n) => tankLive(world, snap, n));
+    const fill = lives[0].fill;
+    const least = (xs: (number | null)[]) => xs.reduce<number | null>((a, b) => (b === null ? a : a === null ? b : Math.min(a, b)), null);
+    const live = { roomH: least(lives.map((l) => l.roomH)), coverH: least(lives.map((l) => l.coverH)) };
     const s = toSeries(hist.get(`t${t.tank}`));
     rows.push({
-      id: `level-${t.tank}`, group: 'level', label: `${materialLabel(t.material)} tank`, unit: '%', now: fill * 100, design: null,
+      id: `level-${t.tank}`, group: LEVEL_GROUP[tankSide(sheet, t.tank)], label: materialLabel(t.material), unit: '%', now: fill * 100, design: null,
+      capacity: world.tanks[t.tank]?.capacityT ?? 0, hoursLeft: side === 'output' ? live.roomH : live.coverH,
       series: withNow({ ticks: s.ticks, values: s.values.map((v) => v * 100) }, now, fill * 100), tank: t,
     });
   }
@@ -161,6 +173,20 @@ export function unitRows(sheet: Flowsheet, snap: Snapshot, hist: Histories): Ana
         series: withNow({ ticks: rate.ticks, values: rate.values.map((v) => v * u.inletTph) }, now, live.inletTph),
       };
     });
+}
+
+const LEVEL_GROUP: Record<TankSide, LevelGroup> = { input: 'level-in', output: 'level-out', held: 'level-held' };
+
+/**
+ * The lines of a tank-level chart for one group: each tank's fill in % over
+ * time, in shades of blue with the biggest tank darkest.
+ */
+export function levelLines(rows: AnalyticsRow[]): FlowLine[] {
+  const ordered = [...rows].sort((a, b) => (b.capacity ?? 0) - (a.capacity ?? 0) || a.label.localeCompare(b.label));
+  const shades = blueRamp(ordered.length);
+  return ordered.map((r, i) => ({
+    label: r.label, color: shades[ordered.length - 1 - i], width: 2, series: r.series, now: r.now, design: 0, sum: false,
+  }));
 }
 
 /** One line of a "Into the plant" / "Out of the plant" chart. */

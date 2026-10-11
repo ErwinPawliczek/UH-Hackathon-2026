@@ -17,7 +17,7 @@ import type { Snapshot } from '../engine/snapshot';
 import type { WorldSpec } from '../engine/world';
 import {
   LABEL_CHAR_PX, edgePath, fmtHours, fmtTph, rateOf, streamLabel, tankLive, unitLive,
-  type FlowNote, type FlowTankNode, type FlowUnitNode, type Flowsheet,
+  TANK_SIDE_WORDS, tankSide, type FlowNote, type FlowTankNode, type FlowUnitNode, type Flowsheet, type TankSide,
 } from './flowsheet';
 import { materialName } from './materials';
 
@@ -31,9 +31,11 @@ function noteText(n: FlowNote, rate: number): string {
 }
 
 function TankBlock({
-  node, world, snap, onSupplyOptions,
+  node, world, snap, side, onSupplyOptions,
 }: {
   node: FlowTankNode;
+  /** input, output or held on site: the same words the analytics lists use */
+  side: TankSide;
   world: WorldSpec;
   snap: Snapshot;
   onSupplyOptions: ((tank: number) => void) | null;
@@ -52,7 +54,7 @@ function TankBlock({
         left: node.x, top: node.y, width: node.w, height: node.h,
         ...css({ '--cut': '5px', '--chamfer-fill': 'var(--white)', '--chamfer-line': low || full ? 'var(--alarm)' : 'var(--line-2)' }),
       }}
-      title={`${streamLabel(node.material)} tank — ${Math.round(live.fill * 100)}% full of ${Math.round(world.tanks[node.tank]?.capacityT ?? 0).toLocaleString('en-US')} t`}
+      title={`${streamLabel(node.material)}, ${TANK_SIDE_WORDS[side]} — ${Math.round(live.fill * 100)}% full of ${Math.round(world.tanks[node.tank]?.capacityT ?? 0).toLocaleString('en-US')} t`}
       data-testid={`pfd-tank-${node.id}`}
     >
       <div className="truncate text-[11px] font-semibold leading-tight text-ink">{streamLabel(node.material)}</div>
@@ -62,7 +64,7 @@ function TankBlock({
         </div>
         <span className="font-mono text-[10px] leading-none tabular-nums text-ink">{Math.round(live.fill * 100)}%</span>
       </div>
-      <div className="mt-0.5 text-[10px] leading-tight text-muted">{line}</div>
+      <div className="mt-0.5 truncate text-[10px] leading-tight text-muted" data-side={side}>{TANK_SIDE_WORDS[side].replace(' tank', '')} · {line}</div>
       {node.buys && onSupplyOptions !== null && (
         <button
           type="button"
@@ -290,7 +292,7 @@ export function FlowsheetView({
       </svg>
 
       {sheet.nodes.map((n) => (n.kind === 'tank'
-        ? <TankBlock key={n.id} node={n} world={world} snap={snap} onSupplyOptions={onSupplyOptions} />
+        ? <TankBlock key={n.id} node={n} world={world} snap={snap} side={tankSide(sheet, n.tank)} onSupplyOptions={onSupplyOptions} />
         : (
           <UnitBlock
             key={n.id}
