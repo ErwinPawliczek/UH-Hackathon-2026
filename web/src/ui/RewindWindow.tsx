@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { SimEvent } from '../engine/events';
 import { TICKS_PER_DAY, useSim } from '../store/sim';
 import { DraggableWindow } from './DraggableWindow';
-import { CRITICAL_EVENTS, notableEvents } from './eventKinds';
+import { eventLabel, eventMark, notableEvents } from './eventKinds';
 import { fmtClock } from './format';
 import { useWindows } from './windows';
 
@@ -132,17 +132,22 @@ export function RewindWindow() {
 
         <div className="relative pt-3">
           {/* event markers above the track, at their place between day 1 and now */}
-          {marks.map((e) => (
-            <span
-              key={e.seq}
-              title={`${fmtClock(e.tick)} — ${e.text}`}
-              className="absolute top-0 h-2.5 w-1 -translate-x-1/2 rounded-sm"
-              style={{
-                left: `${latest > 0 ? Math.min(100, (e.tick * 100) / latest) : 0}%`,
-                backgroundColor: CRITICAL_EVENTS.has(e.type) ? 'var(--alarm)' : 'var(--blue)',
-              }}
-            />
-          ))}
+          {marks.map((e) => {
+            const mark = eventMark(e);
+            return (
+              <span
+                key={e.seq}
+                title={`${fmtClock(e.tick)} — ${e.text}`}
+                className={mark.shape === 'diamond'
+                  ? 'absolute top-0.5 h-2 w-2 -translate-x-1/2 rotate-45'
+                  : 'absolute top-0 h-2.5 w-1 -translate-x-1/2 rounded-sm'}
+                style={{
+                  left: `${latest > 0 ? Math.min(100, (e.tick * 100) / latest) : 0}%`,
+                  backgroundColor: mark.color,
+                }}
+              />
+            );
+          })}
           <input
             id="rewind-scrubber"
             name="rewind-scrubber"
@@ -195,8 +200,11 @@ export function RewindWindow() {
                   onClick={() => setPick(momentBefore(e))}
                 >
                   <span className="w-20 shrink-0 text-muted">{fmtClock(e.tick)}</span>
-                  <span className="label w-32 shrink-0" style={CRITICAL_EVENTS.has(e.type) ? { color: 'var(--alarm)' } : undefined}>
-                    {e.type.replace(/_/g, ' ')}
+                  <span className="label flex w-32 shrink-0 items-center gap-1.5" style={{ color: eventMark(e).color === 'var(--alarm)' ? 'var(--alarm)' : undefined }}>
+                    {eventMark(e).shape === 'diamond' && (
+                      <span aria-hidden="true" className="inline-block h-2 w-2 shrink-0 rotate-45" style={{ backgroundColor: eventMark(e).color }} />
+                    )}
+                    {eventLabel(e)}
                   </span>
                   <span className="min-w-0 flex-1 break-words">{e.text}</span>
                 </button>

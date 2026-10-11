@@ -9,7 +9,7 @@ import type { SimEvent } from '../engine/events';
 import { useSim } from '../store/sim';
 import { DraggableWindow } from './DraggableWindow';
 import { fmtClock } from './format';
-import { CRITICAL_EVENTS, isRoutineEvent } from './eventKinds';
+import { eventLabel, eventMark, isRoutineEvent } from './eventKinds';
 
 export const LOG_WINDOW_ID = 'log';
 /** Where the log first appears: under the top bar, left edge. */
@@ -65,8 +65,11 @@ export function EventLog() {
               onClick={() => e.site !== undefined && select({ kind: 'site', index: e.site })}
             >
               <span className="w-20 shrink-0 text-muted">{fmtClock(e.tick)}</span>
-              <span className="label w-36 shrink-0" style={CRITICAL_EVENTS.has(e.type) ? { color: 'var(--alarm)' } : undefined}>
-                {e.type.replace(/_/g, ' ')}
+              <span className="label flex w-36 shrink-0 items-center gap-1.5" style={{ color: eventMark(e).color === 'var(--alarm)' ? 'var(--alarm)' : undefined }}>
+                {eventMark(e).shape === 'diamond' && (
+                  <span aria-hidden="true" className="inline-block h-2 w-2 shrink-0 rotate-45" style={{ backgroundColor: eventMark(e).color }} />
+                )}
+                {eventLabel(e)}
               </span>
               <span className="min-w-0 flex-1 break-words">{e.text}</span>
             </button>

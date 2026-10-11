@@ -17,3 +17,28 @@ export function isRoutineEvent(e: SimEvent): boolean {
 export function notableEvents(events: SimEvent[], tick: number): SimEvent[] {
   return events.filter((e) => e.tick <= tick && !isRoutineEvent(e));
 }
+
+/** Route closures and reopenings: about a lane, not a plant. */
+const ROUTE_EVENTS = new Set(['route_break', 'route_reopened']);
+
+export function isRouteEvent(e: SimEvent): boolean {
+  return ROUTE_EVENTS.has(e.type);
+}
+
+/**
+ * How an event is marked in the log and on the Back in time scrubber: alarm
+ * red for bad states, blue for the rest; route events are set apart by
+ * shape (a diamond, where plant events are a bar) so a closed lane reads
+ * differently from a failed unit at a glance.
+ */
+export function eventMark(e: SimEvent): { color: string; shape: 'bar' | 'diamond' } {
+  return {
+    color: CRITICAL_EVENTS.has(e.type) ? 'var(--alarm)' : 'var(--blue)',
+    shape: isRouteEvent(e) ? 'diamond' : 'bar',
+  };
+}
+
+/** An event type as a label: "route reopened", "unit failed". */
+export function eventLabel(e: SimEvent): string {
+  return e.type.replace(/_/g, ' ');
+}

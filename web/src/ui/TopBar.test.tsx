@@ -7,8 +7,8 @@ import { CHAIN_DEPTH, CHAIN_PERIOD, TopBar, scenarioButtonLabel } from './TopBar
 
 describe('scenarioButtonLabel', () => {
   const scenarios = [
-    { key: 'a', label: 'Cracker trip (5 days)', site: 'X', command: {} },
-    { key: 'b', label: 'Refinery down (7 days)', site: 'Y', command: {} },
+    { key: 'a', label: 'Cracker trip (5 days)', group: 'plants' as const, site: 'X', command: {} },
+    { key: 'b', label: 'Refinery down (7 days)', group: 'plants' as const, site: 'Y', command: {} },
   ];
   it('is the control\'s own name until something is triggered', () => {
     expect(scenarioButtonLabel(scenarios, [])).toBe('Scenario');
