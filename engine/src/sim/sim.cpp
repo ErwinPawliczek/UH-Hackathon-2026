@@ -86,6 +86,9 @@ std::unique_ptr<Sim> Sim::createOn(std::shared_ptr<World> world, uint64_t seed) 
   sim->state_.ask_floor.assign(w.tanks.size(), 0.0);
   sim->state_.margin_signal.assign(w.processes.size(), 1.0);
   sim->state_.proc_margin.assign(w.processes.size(), 0.0);
+  sim->state_.proc_revenue.assign(w.processes.size(), 0.0);
+  sim->state_.proc_feed_cost.assign(w.processes.size(), 0.0);
+  sim->state_.proc_energy.assign(w.processes.size(), 0.0);
   sim->state_.mat_bought_t.assign(w.catalog.materials.size(), 0.0);
   sim->state_.mat_bought_usd.assign(w.catalog.materials.size(), 0.0);
   // M2 logistics (§4.4): all edges open, market index at par, the fleet at

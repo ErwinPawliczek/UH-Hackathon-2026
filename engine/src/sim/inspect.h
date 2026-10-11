@@ -69,6 +69,11 @@ std::string partnersJson(const World& world, const State& state, uint32_t site);
 // tonnes consumed at a customer. Reads state only, so it works on a muted run.
 std::string summaryJson(const World& world, const State& state);
 
+// The market as it stands, for the market panel: which rules are on, what
+// each material costs against its base price, each customer line's appetite
+// and losses, each plant's rate and margin. See api.h crx_market for the shape.
+std::string marketJson(const Sim& sim);
+
 std::string economyJson(const World& world, const State& state, const Recorder& rec,
                         uint32_t bucket_h);
 
