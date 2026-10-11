@@ -1,10 +1,10 @@
-# PetroChain Design System
+# PetroGrid Design System
 
 Oct 10, 2026 · @Erwin
 
 ## Overview
 
-PetroChain AI is black, blue and white: black ink on a white page, with PetroChain Blue `#1764d6` as the only brand color. Every product surface (the website, the demo, slides) uses the tokens in this document and no others.
+PetroGrid is black, blue and white: black ink on a white page, with PetroGrid Blue `#1764d6` as the only brand color. Every product surface (the website, the demo, slides) uses the tokens in this document and no others.
 
 ## Color
 
@@ -12,7 +12,7 @@ Blue is the one brand color. Red appears only to mark a state (closed route, tri
 
 | Token | Hex | Use |
 | --- | --- | --- |
-| `blue` | `#1764d6` | PetroChain Blue: primary buttons, links, active states, logo tail, key data. 5.3:1 on white. |
+| `blue` | `#1764d6` | PetroGrid Blue: primary buttons, links, active states, logo tail, key data. 5.3:1 on white. |
 | `blue-strong` | `#0f54ba` | Hover and pressed state of anything blue. |
 | `blue-light` | `#79aef2` | Secondary data series and map flows. Never text. |
 | `blue-soft` | `#e8f0fc` | Tint behind selected or active items. |
@@ -78,12 +78,12 @@ Two radii, no others.
 
 The mark is a hexagonal node ring with one blue tail: the network, plus the route out of it.
 
-&#91;image: PetroChain mark\]
+&#91;image: PetroGrid mark\]
 
 - **Ring:** flat-sided hexagon, radius 14 in a 48-unit grid, stroke 2.6, `ink`.
 - **Nodes:** five open nodes (white fill, `ink` stroke 2.2, r 2.8) and one filled `ink` node where the tail leaves.
 - **Tail:** `blue`, stroke 2.6, leaving its vertex radially at 30° above horizontal, so it makes 120° with both adjacent edges. Ends in a filled `blue` node, r 3.6.
-- **Wordmark:** "PetroChain **AI**" in Archivo expanded 700, "AI" in `blue`, set to the right of the mark at about half the mark's height.
+- **Wordmark:** "Petro**Grid**" in Archivo expanded 700, "Grid" in `blue`, set to the right of the mark at about half the mark's height.
 - **Use:** on white. Keep clear space of one node-width around the mark. Do not rotate, recolor or change the tail angle.
 - **Minimum size:** 16px (favicon).
 

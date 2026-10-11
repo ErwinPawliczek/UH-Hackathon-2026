@@ -1,9 +1,9 @@
 # Deploying the PetroGrid demo
 
 How the `crx-server` binary is packaged and how the demo gets a public URL
-under the custom domain. Nothing here is deployed automatically yet: there is
-no `FLY_API_TOKEN` in CI (§15.3), so all deploys below are manual until Erwin
-adds the token.
+under the custom domains. Deploys are deliberate: run `fly deploy` by hand, or
+start the Deploy workflow in GitHub Actions. A deploy replaces the running
+machine, so sessions and shared rooms in memory end with it.
 
 ## What is here
 
@@ -55,16 +55,18 @@ fly status && fly logs
 Check the app responds: `https://<app>.fly.dev` serves the front end and
 `https://<app>.fly.dev/api/sim` (POST) opens sessions.
 
-**CI/CD later (§15.3):** create a deploy token with `fly tokens deploy` and
-store it as the `FLY_API_TOKEN` GitHub secret; the deploy step then runs
-`fly deploy --access-token "$FLY_API_TOKEN" ...` on every push to `main`.
-Railway is the documented fallback host — any Docker host runs the same
-image; only the DNS target changes.
+**From GitHub:** the Deploy workflow (`.github/workflows/deploy.yml`) runs
+the same command when started by hand; it needs the `FLY_API_TOKEN` secret.
+Any Docker host runs the same image; only the DNS target changes.
+
+**Host password:** opening a shared room needs the password held in the
+`CRX_HOST_PASSWORD` secret (`fly secrets set CRX_HOST_PASSWORD=... -a petrogrid`).
+With no secret set, anyone can open a room.
 
 ## Custom domain — DNS records
 
-The demo lives at **demo.petrogrid.xyz** (decided 2026-10-10; corrected from
-an earlier typo). The apex
+The demo lives at **demo.petrogrid.xyz**, and **multiplayer.petrogrid.xyz**
+points at the same app. The apex
 `petrogrid.xyz` and `www` belong to the main website — keep them pointed
 wherever the site is hosted, never at Fly. The demo subdomain uses direct
 A/AAAA records at the registrar pointing at the `petrogrid` Fly app — **no

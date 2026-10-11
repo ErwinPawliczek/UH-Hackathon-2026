@@ -1,15 +1,58 @@
 # PetroGrid
 
-A live simulation of a petrochemical supply chain: 22 sites (oil and gas fields, a refinery, two steam
-crackers, chlor-alkali, four polymer plants, and their customers) joined by pipelines, roads, river lanes and
-sea lanes, with trucks, barges and ships moving product between them. Break a unit, close a route or lose a
-supplier, and watch what stops next, what it costs, and who else can supply in time.
+A live simulation of a chemical supply chain. When something fails, PetroGrid shows what fails next, when,
+and what it costs.
 
-Every plant is modelled down to its process units with real mass and energy balances. Each tank decides
-when to order and each plant how fast to run from three simple signals, so the network reacts to an upset
-on its own rather than following a script.
+The network is a typical Gulf-Coast-style chain: 22 sites (oil and gas fields, a salt mine, a gas plant, a
+refinery, two steam crackers, chlor-alkali, four polymer plants, and their customers and ports) joined by
+pipelines, roads, river lanes and sea lanes, with 82 trucks, barges and ships. Every plant is modelled down to
+its process units with mass and energy balances. Nothing is scripted: each tank decides when to order and each
+plant how fast to run from a few simple signals, so the network reacts to an upset on its own.
 
-Live demo: <https://demo.petrogrid.xyz> · Project site: <https://petrogrid.xyz>
+| | |
+|---|---|
+| Project site | <https://petrogrid.xyz> |
+| Live demo | <https://demo.petrogrid.xyz> |
+| Map builder | <https://demo.petrogrid.xyz/editor/> |
+| Shared session (host) | <https://multiplayer.petrogrid.xyz/host/> |
+
+## What it does
+
+- **Break something and watch it spread.** Trip a cracker compressor, take down the refinery's crude unit,
+  halve the gas field, close a river lane, a sea lane or a road, or send a hurricane or a water restriction
+  across the whole network. The plant or route turns red and the consequences follow.
+- **See inside any plant.** Click a site for its process flow diagram with every stream's live flow, each
+  unit's trains and load, and its tanks. The Economics tab draws the model's rules as curves and marks where
+  that site sits on each one.
+- **Follow a vehicle.** Click a truck, barge or ship to see what it carries, from where to where, and its
+  route.
+- **Put a number on it.** The Economy window runs the next 30 days twice, once as things are and once as if
+  nothing had broken, and prices the difference. It lists what stops next and when, and for any tank that has
+  lost its supplier, who else can deliver and at what price.
+- **Switch the market on.** With Market on, prices come from how full tanks are and everything reacts to
+  them: buyers stock up when a chemical is cheap and wait when it is dear, customers buy less as prices rise,
+  and plants pass feed costs down the chain.
+- **Go back in time.** Runs are exactly repeatable, so the whole simulation can jump back to any earlier
+  moment.
+- **Redraw the map.** The map builder moves sites and redraws roads, lanes, pipelines and water, then runs
+  the result.
+- **Run it together.** A host opens a session and shows a QR code. Everyone joins on a phone, takes a plant,
+  and cuts its rate, takes units down or stops trading with a neighbour. At the end, a damage summary compares
+  the session with the same run in which nothing was changed: what broke, which prices moved, and who caused
+  what.
+
+## How it is built
+
+| Part | Where | What it is |
+|---|---|---|
+| Engine | `engine/` | A C++20 simulation in 15-minute steps: tank signals, plant control, production, ordering, dispatch, transport, pipelines and the market rules. The same inputs give the same run, bit for bit. |
+| Catalog | `engine/data/catalog/` | Materials, 13 plant processes with 36 units, customers and sources, vehicle types. |
+| Worlds | `engine/data/worlds/` | `erwin-world-v1` is the standard world; `erwin-market-v1` is the same map with the market rules on. Both are built from the hand-drawn map in `design/worlds/` by `tools/worlds/build_erwin_world.py`. |
+| Server | `apps/server/` | The engine behind an HTTP API: private sessions for the demo and shared rooms for group sessions. It also serves the web app. |
+| Web app | `web/` | TypeScript, React and three.js: the 3D map, the windows and charts, the host screen (`/host/`) and the phone screen (`/play/`). |
+| Map builder | `web/public/editor/` | A static page with no build step. |
+| Project site | `site/` | The page at petrogrid.xyz. |
+| Deployment | `deploy/` | The Docker image and the Fly.io setup. |
 
 ## Run it locally
 
@@ -18,61 +61,42 @@ Needs a C++20 compiler, CMake 3.23 or newer with Ninja, and Node 20 or newer.
 ```sh
 cmake --preset native-release
 cmake --build --preset native-release
-ctest --preset native-release          # engine, server and the 60-day gate for the default world
+ctest --preset native-release          # engine, server and the 60-day checks
 
 cd web && npm ci && npm run build && cd ..
 
 ./build/native-release/crx-server --port 8080 --web-dir web/dist
 ```
 
-Open <http://localhost:8080> and press **Start simulation**.
+Open <http://localhost:8080> and press **Start simulation**. The host screen is at `/host/` and the map builder
+at `/editor/`.
 
-## What to try
-
-- **Speed.** One editable number: 1 is one simulated hour per second. Try 0.3 to follow single trucks, 16
-  to skip ahead.
-- **Scenario.** Trip a cracker compressor, take down the refinery's crude unit, halve the gas field, or close
-  a river lane, a sea lane or a road. The plant or route turns red and the consequences spread from there.
-- **Click a plant.** Its window shows a process flow diagram with every stream's live flow, each unit's
-  trains and load, and tank levels, then charts for the plant as a whole or for the units inside it. Each
-  unit has a Fail unit button.
-- **Click a truck, barge or ship.** See what it carries, from where to where, how far it has left, and its
-  route on the map.
-- **Economy.** Four views of the whole network: money and tonnes ordered per chemical over time, every
-  plant's running rate day by day, what the current disruption will cost over the next 30 days with a
-  countdown of what stops next, and, for any tank that buys material, who else can supply it, at what
-  delivered price, and whether it arrives before the tank runs dry. You can place an order with an
-  alternative supplier and watch the vehicle go.
-- **Back in time.** Jump the whole simulation back to any earlier moment; runs are exactly repeatable.
-- **Log.** What you changed, and optionally what followed.
-
-## How it is built
-
-| Part | Where | What it is |
-|---|---|---|
-| Engine | `engine/` | Deterministic C++20 simulation in 15-minute steps: tank signals, plant control, production, ordering, dispatch and transport, pipelines, learning. Same inputs give byte-identical runs. |
-| Catalog | `engine/data/catalog/` | Materials, 13 plant processes with 36 units, customers and sources, vehicle types. |
-| Default world | `engine/data/worlds/erwin-world-v1.json` | The hand-drawn map with plant sizes, tanks, berths and an 82-vehicle fleet. Built from `design/worlds/erwin-world-v1.json` by `tools/worlds/build_erwin_world.py`. |
-| Server | `apps/server/` | One engine per browser session behind a small HTTP API: step, command, world, events, history, vehicle, economy, forecast, sourcing, rewind. |
-| Web app | `web/` | React and three.js. The map, the windows and the charts. |
-| Project site | `site/` | The presentation site at petrogrid.xyz. |
-
-Two tools help when changing the world:
+Two tools help when changing a world:
 
 ```sh
-python3 tools/worlds/build_erwin_world.py      # re-size plants, tanks and fleet; writes the world file
+python3 tools/worlds/build_erwin_world.py            # size plants, tanks and fleet; writes the standard world
+python3 tools/worlds/build_erwin_world.py --market   # the same, with the market rules on
 ./build/native-release/crx-report --config '{"seed":42,"world":"erwin-world-v1"}' --days 60
 ```
 
-`crx-report` runs the world for a number of days and prints customers, plants (with the tank that limits
-each), tanks, orders, lanes and fleet use. Its exit code is the verdict that `ctest -R mapworld_60d` checks:
-service at or above 95% at days 7, 30 and 60, every customer above 90%, and no plant starved of feed.
+`crx-report` runs a world for a number of days and prints customers, plants, tanks, orders, lanes and fleet use.
+Its verdict is what the tests check: service at or above 95% at days 7, 30 and 60, every customer above 90%, and
+no plant starved of feed.
 
-## Deployment
+## What the model is, and is not
 
-`deploy/README.md` covers the Docker image and Fly.io. The demo runs as one always-on machine.
+The physical side is the strong part: tonnes are tracked through recipes, tanks, pipelines and vehicles, so what
+stops, in what order and after how long follows from capacities and stock. The dollar figures price that at
+each chemical's base price.
 
-## Background
+It is not a model of a real company's network. The plants are typical ones sized so the network balances, and
+the prices and response sizes are realistic in scale, not fitted to data. The market is closed (no imports or
+exports) and every trade is a spot trade. Loading real plant data and prices is the next step; the engine is
+the same.
 
-`docs/OUTLINE.md` is the original technical outline. The engine's rules follow it closely; the user interface
-and the default world have moved on from what it describes.
+## More
+
+- `deploy/README.md`: the Docker image, Fly.io and the domains.
+- `design/`: the design system and the hand-drawn map.
+- `docs/OUTLINE.md`: the original technical outline. The engine's rules follow it; the interface and the
+  default world have moved on from what it describes.
