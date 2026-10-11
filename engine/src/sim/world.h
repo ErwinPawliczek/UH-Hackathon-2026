@@ -161,6 +161,15 @@ struct World {
   uint32_t water_cols = 0, water_rows = 0;
   std::vector<uint8_t> water;  // rows x cols, row-major, 1 = water
 
+  // Per-world market settings (§5.6, procurement.h MarketParams): a world
+  // file may override any of them; negative leaves the engine default.
+  struct Market {
+    double value_of_time_usd_t_h = -1, switch_cost_frac = -1, beta = -1;
+    double min_lot_cap_frac = -1, min_lot_target_frac = -1;
+    double max_lots_per_tank = -1;
+  };
+  Market market;
+
   int findSite(const std::string& key) const;
   int findTank(const std::string& key) const;
 };
@@ -173,6 +182,10 @@ struct TankSpec {
   TankRole role;
   double cover_days;
   double target_frac;
+  double init_frac = -1.0;  // initial fill share of capacity; negative = target_frac
+  // §5.8 starting points for the learned lead time and pickup gap; zero or
+  // negative keeps the defaults (24 h and 4 h).
+  double lead_time_h = -1.0, pickup_gap_h = -1.0;
 };
 
 struct ProcSpec {
@@ -187,6 +200,9 @@ struct SiteSpec {
   double x_km, y_km;
   std::vector<ProcSpec> procs;
   std::vector<TankSpec> tanks;
+  const char* preset = nullptr;  // catalog site preset key (Site::preset), optional
+  // Bays per mode (road, river, sea); negative takes the WorldSpec default.
+  std::array<int, kModeCount> bays{-1, -1, -1};
 };
 
 struct PipeSpec {
@@ -194,6 +210,9 @@ struct PipeSpec {
   const char* from;  // tank key "SITE/MATERIAL"
   const char* to;
   double cap_t_h;
+  // Drawn display path as flat x,y km pairs (Pipeline::polyline); empty
+  // leaves the pipeline a straight line between its two sites.
+  std::vector<double> points_xy = {};
 };
 
 // M2 logistics specs. Roads connect two sites' road nodes with a straight

@@ -28,6 +28,13 @@ struct MarketParams {
   double export_seller_fill = 0.7;     // port export tanks buy only above this
   double export_urgency = 0.1;         // fixed low urgency for export tanks
   uint32_t max_lots_per_tank = 64;     // bounds one run's matching loop
+  // Minimum lot: a buyer places nothing this hour when the lot it could
+  // place is smaller than both fractions allow — min(cap_frac x the chosen
+  // class's capacity, target_frac x the buyer tank's target stock). Stops
+  // a tank with a long learned lead time from ordering an hour's draw at a
+  // time. Off unless both are > 0.
+  double min_lot_cap_frac = 0.0;
+  double min_lot_target_frac = 0.0;
 };
 
 struct ProcurementStats {

@@ -42,8 +42,14 @@ class Sim {
   // state. Returns nullptr with `error` set on failure.
   static std::unique_ptr<Sim> create(uint64_t seed, std::string& error);
 
-  // Config JSON: {"seed": N} (six-site world) — the §7.1 contract also names
-  // {"gen":{..}} (M3 worldgen) and {"world":{..}} (later); unknown keys are
+  // The same around a named world: "sixsite" (or empty) is the six-site
+  // world, anything else a world file from engine/data/worlds (worldfile.h).
+  static std::unique_ptr<Sim> createNamed(const std::string& world_name, uint64_t seed,
+                                          std::string& error);
+
+  // Config JSON: {"seed": N, "adaptation": bool, "world": "<name>"} — no
+  // "world" (or "sixsite") is the six-site world. The §7.1 contract also
+  // names {"gen":{..}} (M3 worldgen, not a surface yet); unknown keys are
   // rejected so typos do not silently default.
   static std::unique_ptr<Sim> createFromConfig(const char* config_json, std::string& error);
 

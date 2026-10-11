@@ -51,6 +51,11 @@ bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, Wo
     site.name = ss.name;
     site.x_km = ss.x_km;
     site.y_km = ss.y_km;
+    if (ss.preset != nullptr) {
+      site.preset = catalog.findPreset(ss.preset);
+      if (site.preset < 0)
+        return fail("site " + site.key + ": unknown preset " + std::string(ss.preset));
+    }
     site.tanks.begin = static_cast<uint32_t>(out.tanks.size());
     site.processes.begin = static_cast<uint32_t>(out.processes.size());
     const SiteId sid{static_cast<uint32_t>(out.sites.size() - 1)};
@@ -65,6 +70,8 @@ bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, Wo
       if (ts.cover_days <= 0 || ts.target_frac < 0 || ts.target_frac > 1)
         return fail("site " + site.key + ": tank " + ts.material +
                     " needs cover_days > 0 and target_frac in [0,1]");
+      if (ts.init_frac > 1)
+        return fail("site " + site.key + ": tank " + ts.material + " init_frac is over 1");
       Tank& t = out.tanks.emplace_back();
       t.key = site.key + "/" + ts.material;
       t.site = sid;
@@ -72,6 +79,9 @@ bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, Wo
       t.role = ts.role;
       t.cover_days = ts.cover_days;
       t.target_frac = ts.target_frac;
+      t.init_frac = ts.init_frac;
+      if (ts.lead_time_h > 0) t.init_lead_time_h = ts.lead_time_h;
+      if (ts.pickup_gap_h > 0) t.init_pickup_gap_h = ts.pickup_gap_h;
     }
 
     site.tanks.count = static_cast<uint32_t>(out.tanks.size()) - site.tanks.begin;
@@ -216,6 +226,11 @@ bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, Wo
     pl.to = TankId{static_cast<uint32_t>(to)};
     pl.material = static_cast<uint16_t>(mid);
     pl.cap_t_h = ps.cap_t_h;
+    if (ps.points_xy.size() >= 4 && ps.points_xy.size() % 2 == 0) {
+      pl.polyline = Range<uint32_t>{static_cast<uint32_t>(out.polyline_xy.size() / 2),
+                                    static_cast<uint32_t>(ps.points_xy.size() / 2)};
+      out.polyline_xy.insert(out.polyline_xy.end(), ps.points_xy.begin(), ps.points_xy.end());
+    }
   }
 
   // Pass 4 — route graph (§4.3/§5.7): one road node per site, straight
@@ -232,10 +247,14 @@ bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, Wo
     s.node[modeIndex(crx::Mode::Road)] = static_cast<uint32_t>(out.nodes.size());
     out.nodes.push_back(n);
   }
-  for (Site& s : out.sites) {
-    s.bays[modeIndex(crx::Mode::Road)] = static_cast<uint8_t>(spec.road_bays);
-    s.bays[modeIndex(crx::Mode::River)] = static_cast<uint8_t>(spec.river_bays);
-    s.bays[modeIndex(crx::Mode::Sea)] = static_cast<uint8_t>(spec.sea_bays);
+  for (size_t i = 0; i < out.sites.size(); ++i) {
+    Site& s = out.sites[i];
+    const unsigned defaults[kModeCount] = {spec.road_bays, spec.river_bays, spec.sea_bays};
+    for (int m = 0; m < kModeCount; ++m) {
+      const int own = spec.sites[i].bays[static_cast<size_t>(m)];
+      s.bays[static_cast<size_t>(m)] =
+          static_cast<uint8_t>(own >= 0 ? std::min(own, 255) : static_cast<int>(defaults[m]));
+    }
   }
   for (const RoadSpec& rs : spec.roads) {
     const int a = out.findSite(rs.from), b = out.findSite(rs.to);

@@ -113,8 +113,34 @@ void stepDispatch(const World& world, State& state, PathCache& paths, Recorder& 
   for (uint32_t oi : open) {
     Order& o = state.order[oi];
     const VehicleClass& vc = world.catalog.vehicle_classes[o.cls];
-    const uint32_t pickup = world.sites[world.tanks[o.from].site.v].node[modeIndex(vc.mode)];
-    if (pickup == kNoNode) continue;
+    const int m = modeIndex(vc.mode);
+    const uint32_t pickup = m < kModeCount ? world.sites[world.tanks[o.from].site.v].node[m] : kNoNode;
+    const uint32_t drop = m < kModeCount ? world.sites[world.tanks[o.to].site.v].node[m] : kNoNode;
+
+    // An order nothing can carry — no vehicle of its class on a stretch of
+    // network that reaches the pickup, or no way from pickup to drop — is
+    // cancelled, releasing the seller's reservation and the buyer's inbound
+    // so procurement can place the lot again by another class or seller.
+    // (Before: it stayed Open forever and the buyer never re-ordered.)
+    bool carriable = pickup != kNoNode && drop != kNoNode &&
+                     std::isfinite(travelHours(world, paths, vc.mode, pickup, drop));
+    if (carriable) {
+      carriable = false;
+      for (uint32_t v = 0; v < state.vehicle.size() && !carriable; ++v)
+        carriable = world.fleet[v].cls == o.cls &&
+                    std::isfinite(travelHours(world, paths, vc.mode, state.vehicle[v].at_node, pickup));
+    }
+    if (!carriable) {
+      o.status = OrdStatus::Cancelled;
+      TankState& seller = state.tank[o.from];
+      TankState& buyer = state.tank[o.to];
+      seller.reserved_out_t = std::max(0.0, seller.reserved_out_t - o.qty_t);
+      buyer.inbound_t = std::max(0.0, buyer.inbound_t - o.qty_t);
+      logEvent(rec, state.tick, "order_cancelled", world.tanks[o.to].key, vc.key,
+               "order " + std::to_string(oi) + " (" + world.catalog.materials[o.material].key +
+                   " " + fmtQty(o.qty_t) + " t): no " + vc.key + " can carry it");
+      continue;
+    }
 
     // The idle vehicle of the right class that reaches the pickup soonest
     // (§5.7). Ties break to the lower vehicle id (strict improvement only).

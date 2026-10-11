@@ -29,7 +29,8 @@ add_library(crx_engine STATIC
   engine/src/sim/sim.cpp
   engine/src/sim/sixsite.cpp
   engine/src/sim/validate.cpp
-  engine/src/sim/world.cpp)
+  engine/src/sim/world.cpp
+  engine/src/sim/worldfile.cpp)
 target_include_directories(crx_engine PUBLIC engine/include engine/src)
 target_compile_definitions(crx_engine PRIVATE
   CRX_DATA_DIR="${CMAKE_SOURCE_DIR}/engine/data/catalog")
@@ -52,6 +53,12 @@ add_test(NAME sim COMMAND crx_sim_tests)
 add_executable(crx_logistics_tests engine/tests/test_logistics.cpp)
 target_link_libraries(crx_logistics_tests PRIVATE crx_engine doctest::doctest)
 add_test(NAME logistics COMMAND crx_logistics_tests)
+
+add_executable(crx_mapworld_tests engine/tests/test_mapworld.cpp)
+target_link_libraries(crx_mapworld_tests PRIVATE crx_engine doctest::doctest)
+target_compile_definitions(crx_mapworld_tests PRIVATE
+  CRX_WORLDS_DIR="${CMAKE_SOURCE_DIR}/engine/data/worlds")
+add_test(NAME mapworld COMMAND crx_mapworld_tests)
 
 # ---- crx-server: HTTP host over the C ABI (§7.4) ----
 FetchContent_Declare(httplib

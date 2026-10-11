@@ -2,6 +2,7 @@
 #include "sim/sim.h"
 
 #include "sim/sixsite.h"
+#include "sim/worldfile.h"
 
 #include <nlohmann/json.hpp>
 
@@ -14,8 +15,17 @@ namespace crx {
 namespace sim {
 
 std::unique_ptr<Sim> Sim::create(uint64_t seed, std::string& error) {
+  return createNamed("sixsite", seed, error);
+}
+
+std::unique_ptr<Sim> Sim::createNamed(const std::string& world_name, uint64_t seed,
+                                      std::string& error) {
   auto world = std::make_shared<World>();
-  if (!buildSixSiteWorld(seed, *world, error)) return nullptr;
+  if (world_name.empty() || world_name == "sixsite") {
+    if (!buildSixSiteWorld(seed, *world, error)) return nullptr;
+  } else if (!buildNamedWorld(world_name, seed, *world, error)) {
+    return nullptr;
+  }
 
   auto sim = std::unique_ptr<Sim>(new Sim());
   world->seed = seed;  // stamped through the non-const pointer before the move
@@ -29,11 +39,13 @@ std::unique_ptr<Sim> Sim::create(uint64_t seed, std::string& error) {
   sim->state_.tank.resize(w.tanks.size());
   for (size_t t = 0; t < w.tanks.size(); ++t) {
     TankState& ts = sim->state_.tank[t];
-    ts.level_t = w.tanks[t].target_frac * w.tanks[t].capacity_t;
+    const double fill =
+        w.tanks[t].init_frac >= 0 ? std::min(w.tanks[t].init_frac, 1.0) : w.tanks[t].target_frac;
+    ts.level_t = fill * w.tanks[t].capacity_t;
     ts.inbound_t = 0;
     ts.reserved_out_t = 0;
-    ts.lead_time_h = 24;
-    ts.pickup_gap_h = 4;
+    ts.lead_time_h = w.tanks[t].init_lead_time_h;
+    ts.pickup_gap_h = w.tanks[t].init_pickup_gap_h;
     ts.caution = 1;
   }
   sim->state_.proc.resize(w.processes.size());
@@ -58,6 +70,16 @@ std::unique_ptr<Sim> Sim::create(uint64_t seed, std::string& error) {
       vs.y_km = w.nodes[vs.at_node].y_km;
     }
   }
+  // Per-world market settings override the engine defaults.
+  const World::Market& mk = w.market;
+  MarketParams& mp = sim->market_params_;
+  if (mk.value_of_time_usd_t_h >= 0) mp.value_of_time_usd_t_h = mk.value_of_time_usd_t_h;
+  if (mk.switch_cost_frac >= 0) mp.switch_cost_frac = mk.switch_cost_frac;
+  if (mk.beta >= 0) mp.beta = mk.beta;
+  if (mk.min_lot_cap_frac >= 0) mp.min_lot_cap_frac = mk.min_lot_cap_frac;
+  if (mk.min_lot_target_frac >= 0) mp.min_lot_target_frac = mk.min_lot_target_frac;
+  if (mk.max_lots_per_tank >= 1)
+    mp.max_lots_per_tank = static_cast<uint32_t>(std::min(mk.max_lots_per_tank, 100000.0));
   sim->signals.assign(w.tanks.size(), TankSignals{});
   sim->rec_.tank_fill.resize(w.tanks.size());
   sim->rec_.proc_rate.resize(w.processes.size());
@@ -67,6 +89,7 @@ std::unique_ptr<Sim> Sim::create(uint64_t seed, std::string& error) {
 std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string& error) {
   uint64_t seed = 42;  // §7.1: NULL or missing seed = defaults
   bool adaptation_override = true;
+  std::string world_name = "sixsite";
   if (config_json != nullptr && config_json[0] != '\0') {
     try {
       const json cfg = json::parse(config_json);
@@ -89,10 +112,20 @@ std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string&
           adaptation_override = it.value().get<bool>();
           continue;
         }
-        // §7.1 names "gen" (M3 worldgen) and "world" (custom); neither is a
-        // surface yet — reject instead of silently ignoring.
-        error = "config key \"" + it.key() + "\" is not supported (only \"seed\" and "
-                "\"adaptation\")";
+        if (it.key() == "world") {
+          // A named world from engine/data/worlds (worldfile.h); "sixsite"
+          // or no key at all is the hand-written six-site world.
+          if (!it.value().is_string()) {
+            error = "config world must be a world name (a string)";
+            return nullptr;
+          }
+          world_name = it.value().get<std::string>();
+          continue;
+        }
+        // §7.1 also names "gen" (M3 worldgen); it is not a surface yet —
+        // reject instead of silently ignoring.
+        error = "config key \"" + it.key() + "\" is not supported (only \"seed\", "
+                "\"adaptation\" and \"world\")";
         return nullptr;
       }
     } catch (const json::exception& e) {
@@ -100,7 +133,7 @@ std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string&
       return nullptr;
     }
   }
-  auto sim = create(seed, error);
+  auto sim = createNamed(world_name, seed, error);
   if (sim) sim->state().adaptation = adaptation_override;
   return sim;
 }

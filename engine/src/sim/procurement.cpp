@@ -23,6 +23,23 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
                      ProcurementStats& out, Recorder& rec) {
   const Catalog& catalog = world.catalog;
 
+  // Where each class's vehicles are right now. A class is a candidate for a
+  // seller only when one of its vehicles can reach that seller's node — no
+  // vehicles, or none on the same stretch of network, and the order would
+  // wait forever.
+  std::vector<std::vector<uint32_t>> class_nodes(catalog.vehicle_classes.size());
+  for (size_t v = 0; v < world.fleet.size() && v < state.vehicle.size(); ++v) {
+    const uint32_t at = state.vehicle[v].at_node;
+    if (at == kNoNode) continue;
+    std::vector<uint32_t>& nodes = class_nodes[world.fleet[v].cls];
+    if (std::find(nodes.begin(), nodes.end(), at) == nodes.end()) nodes.push_back(at);
+  }
+  auto classReaches = [&](size_t cls, crx::Mode mode, uint32_t node) {
+    for (const uint32_t at : class_nodes[cls])
+      if (std::isfinite(travelHours(world, paths, mode, at, node))) return true;
+    return false;
+  };
+
   // Collect buy-side requests: externally fed tanks with a consumer draw and
   // positive urgency (§5.6). Export tanks (§5.6 port rule) order at a fixed
   // low urgency and only match sellers above the 70% fill line.
@@ -85,6 +102,7 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
           if (!(mat.modes & (1u << static_cast<uint8_t>(vc.mode)))) continue;
           if (vc.carries != mat.phase) continue;
           if (vc.capacity_t <= 0.0 || vc.speed_kmh <= 0.0) continue;
+          if (class_nodes[cls].empty()) continue;  // the world has no such vehicle
 
           // One lot = one vehicle load, clamped to what is wanted.
           const double lot_t = std::min(vc.capacity_t, want);
@@ -105,6 +123,7 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
           const double eta_h = travelHours(world, paths, vc.mode, from, to);
           const double km = travelKm(world, paths, vc.mode, from, to);
           if (!std::isfinite(eta_h) || !std::isfinite(km)) continue;
+          if (!classReaches(cls, vc.mode, from)) continue;
 
           // §5.6 price formation and cost, all per tonne.
           const double base = mat.base_price;
@@ -135,6 +154,14 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
       // Book the order: cheapest candidate wins; reserve the seller's stock
       // and raise the buyer's inbound (§5.6).
       const double lot_t = std::min(catalog.vehicle_classes[best.cls].capacity_t, want);
+      // Minimum lot (MarketParams): too small a lot waits for a later hour.
+      // Not a failed match, so neither the count nor the price index moves.
+      if (params.min_lot_cap_frac > 0.0 && params.min_lot_target_frac > 0.0) {
+        const double min_lot =
+            std::min(params.min_lot_cap_frac * catalog.vehicle_classes[best.cls].capacity_t,
+                     params.min_lot_target_frac * buyer.target_frac * buyer.capacity_t);
+        if (lot_t < min_lot - 1e-9) break;
+      }
       Order o;
       o.from = best.seller_tank;
       o.to = req.tank;

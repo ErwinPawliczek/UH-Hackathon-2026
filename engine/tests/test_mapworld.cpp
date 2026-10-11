@@ -1,0 +1,352 @@
+// Chain Reaction — named map worlds (sim/worldfile.h) over the hand-drawn
+// default world, engine/data/worlds/erwin-world-v1.json.
+//
+//   M1 the file loads with the drawn layout: sites, presets, pipelines,
+//      one connected road network, river and sea access where the bays say
+//   M2 two days step clean: finite, in bounds, mass conserved every tick
+//   M3 determinism: same seed, same state hash
+//   M4 a bad name or a malformed file is an error, never a crash
+//   M5 market settings and per-tank lead times come through from the file
+//   M6 no "world" key still means the six-site world, unchanged
+//
+// The 60-day service gate is deliberately not here: it belongs with the
+// tuned rates, not with the loader.
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+
+#include <doctest/doctest.h>
+
+#include "sim/routes.h"
+#include "sim/sim.h"
+#include "sim/worldfile.h"
+
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <fstream>
+#include <memory>
+#include <set>
+#include <sstream>
+#include <string>
+
+using namespace crx;
+using namespace crx::sim;
+using json = nlohmann::json;
+
+namespace {
+
+constexpr double kTol = 1e-9;
+const char* const kWorld = "erwin-world-v1";
+const char* const kModes[kModeCount] = {"road", "river", "sea"};
+
+std::string readWorldFile() {
+  std::ifstream in(std::string(CRX_WORLDS_DIR) + "/" + kWorld + ".json", std::ios::binary);
+  REQUIRE_MESSAGE(static_cast<bool>(in), "cannot open the world file");
+  std::ostringstream buf;
+  buf << in.rdbuf();
+  return buf.str();
+}
+
+std::unique_ptr<Sim> makeMapSim(uint64_t seed = 42) {
+  std::string error;
+  const std::string cfg =
+      json{{"seed", seed}, {"world", kWorld}}.dump();
+  auto sim = Sim::createFromConfig(cfg.c_str(), error);
+  REQUIRE_MESSAGE(sim != nullptr, "createFromConfig failed: " << error);
+  return sim;
+}
+
+// Stock on hand: tanks plus whatever the vehicles are carrying.
+double stockSum(const State& st) {
+  double s = 0;
+  for (const TankState& t : st.tank) s += t.level_t;
+  for (const VehicleState& v : st.vehicle) s += v.cargo_t;
+  return s;
+}
+
+double conservationScale(const State& st) {
+  return std::max({1.0, stockSum(st), st.cum_supplied_t, st.cum_consumed_t, st.cum_loss_t});
+}
+
+bool loadsFromText(const std::string& text, std::string& error) {
+  World w;
+  return buildWorldFromJson("test-world", text, 42, w, error);
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
+TEST_CASE("M1: the drawn world loads — sites, presets, pipelines, networks") {
+  World w;
+  std::string error;
+  REQUIRE_MESSAGE(buildNamedWorld(kWorld, 42, w, error), error);
+  const json file = json::parse(readWorldFile(), nullptr, true, true);
+
+  CHECK(w.name == kWorld);
+  CHECK(w.w_km == doctest::Approx(600));
+  CHECK(w.h_km == doctest::Approx(400));
+  REQUIRE(w.sites.size() == 22);
+
+  // Every plant preset is on the map (the steam cracker in both variants).
+  std::set<std::string> presets;
+  for (const Site& s : w.sites) {
+    REQUIRE_MESSAGE(s.preset >= 0, s.key << " has no preset");
+    presets.insert(w.catalog.site_presets[static_cast<size_t>(s.preset)].key);
+  }
+  for (const char* p : {"GAS_PLANT", "REFINERY", "STEAM_CRACKER_GAS", "STEAM_CRACKER_FLEX",
+                        "CHLOR_ALKALI", "POLYETHYLENE", "POLYPROPYLENE", "VINYLS", "STYRENICS"})
+    CHECK_MESSAGE(presets.count(p) == 1, "preset " << p << " is missing");
+
+  // Nine pipelines, each along its drawn path.
+  REQUIRE(w.pipelines.size() == 9);
+  for (const Pipeline& pl : w.pipelines) {
+    CHECK(pl.polyline.count >= 2);
+    CHECK(rangeEnd(pl.polyline) * 2 <= w.polyline_xy.size());
+  }
+
+  // Water mask: the drawn cells, on the file's grid.
+  CHECK(w.water_cell_km == doctest::Approx(10));
+  CHECK(w.water.size() == static_cast<size_t>(w.water_cols) * w.water_rows);
+  CHECK(static_cast<size_t>(std::count(w.water.begin(), w.water.end(), 1)) ==
+        file.at("water").size());
+
+  // The graph is small and well formed.
+  CHECK(w.nodes.size() < 400);
+  std::set<std::tuple<int, uint32_t, uint32_t>> pairs;
+  for (const RouteEdge& e : w.edges) {
+    REQUIRE(e.a < w.nodes.size());
+    REQUIRE(e.b < w.nodes.size());
+    CHECK(e.a != e.b);
+    CHECK(e.speed_kmh > 0);
+    CHECK(e.polyline.count >= 2);
+    const double straight = std::hypot(w.nodes[e.a].x_km - w.nodes[e.b].x_km,
+                                       w.nodes[e.a].y_km - w.nodes[e.b].y_km);
+    CHECK(e.length_km >= straight - 1e-6);
+    CHECK_MESSAGE(pairs.insert({modeIndex(e.mode), std::min(e.a, e.b), std::max(e.a, e.b)}).second,
+                  "two edges join nodes " << e.a << " and " << e.b);
+  }
+
+  // Access: a node per mode exactly where the file gives the site bays.
+  for (size_t s = 0; s < w.sites.size(); ++s) {
+    const Site& site = w.sites[s];
+    const json& bays = file.at("sites").at(s).at("bays");
+    for (int m = 0; m < kModeCount; ++m) {
+      const bool wanted = bays.value(kModes[m], 0) > 0;
+      const uint32_t node = site.node[static_cast<size_t>(m)];
+      CHECK_MESSAGE((node != kNoNode) == wanted, site.key << " " << kModes[m] << " access");
+      CHECK(site.bays[static_cast<size_t>(m)] == bays.value(kModes[m], 0));
+      if (node != kNoNode) {
+        REQUIRE(node < w.nodes.size());
+        CHECK(w.nodes[node].site == static_cast<int>(s));
+      }
+    }
+    // Every site is on at least one network (water-only terminals have no road).
+    CHECK_MESSAGE((site.node[0] != kNoNode || site.node[1] != kNoNode || site.node[2] != kNoNode),
+                  site.key << " is on no network");
+  }
+
+  // One network per mode: the sites sharing a mode all reach each other in
+  // it, and each mode serves more than one site.
+  State st;
+  st.edge_open.assign(w.edges.size(), 1);
+  PathCache paths;
+  refreshPaths(w, st, paths);
+  const Mode modes[kModeCount] = {Mode::Road, Mode::River, Mode::Sea};
+  for (int m = 0; m < kModeCount; ++m) {
+    int on_mode = 0;
+    for (const Site& a : w.sites) {
+      if (a.node[static_cast<size_t>(m)] == kNoNode) continue;
+      ++on_mode;
+      for (const Site& b : w.sites) {
+        if (b.node[static_cast<size_t>(m)] == kNoNode) continue;
+        const double h = travelHours(w, paths, modes[m], a.node[static_cast<size_t>(m)],
+                                     b.node[static_cast<size_t>(m)]);
+        CHECK_MESSAGE(std::isfinite(h), "no " << kModes[m] << " route from " << a.key << " to " << b.key);
+      }
+    }
+    CHECK_MESSAGE(on_mode >= 2, kModes[m] << " serves " << on_mode << " site(s)");
+  }
+
+  // The fleet starts on real nodes at its home sites.
+  auto sim = makeMapSim();
+  const World& sw = sim->world();
+  REQUIRE(sim->state().vehicle.size() == sw.fleet.size());
+  CHECK(sw.fleet.size() > 0);
+  for (size_t v = 0; v < sw.fleet.size(); ++v) {
+    const uint32_t at = sim->state().vehicle[v].at_node;
+    REQUIRE(at < sw.nodes.size());
+    CHECK(sw.nodes[at].site == static_cast<int>(sw.fleet[v].home.v));
+  }
+}
+
+// ---------------------------------------------------------------------------
+TEST_CASE("M2: two days step clean — finite, in bounds, mass conserved") {
+  auto sim = makeMapSim();
+  const World& w = sim->world();
+
+  const double initial_stock = stockSum(sim->state());
+  double prev_stock = initial_stock, prev_supplied = 0, prev_consumed = 0, prev_loss = 0;
+  for (uint32_t tick = 0; tick < 2 * 96; ++tick) {
+    sim->step(1);
+    const State& st = sim->state();
+    const double stock = stockSum(st);
+    const double residual = (stock - prev_stock) - ((st.cum_supplied_t - prev_supplied) -
+                                                    (st.cum_consumed_t - prev_consumed) -
+                                                    (st.cum_loss_t - prev_loss));
+    CHECK_MESSAGE(std::fabs(residual) <= kTol * conservationScale(st),
+                  "tick " << tick << ": conservation residual " << residual << " t");
+    prev_stock = stock;
+    prev_supplied = st.cum_supplied_t;
+    prev_consumed = st.cum_consumed_t;
+    prev_loss = st.cum_loss_t;
+  }
+
+  const State& st = sim->state();
+  for (size_t t = 0; t < w.tanks.size(); ++t) {
+    const double level = st.tank[t].level_t;
+    REQUIRE_MESSAGE(std::isfinite(level), w.tanks[t].key << " level is not finite");
+    CHECK_MESSAGE(level >= -kTol, w.tanks[t].key << " level " << level << " below zero");
+    CHECK_MESSAGE(level <= w.tanks[t].capacity_t + kTol, w.tanks[t].key << " over capacity");
+    CHECK(st.tank[t].reserved_out_t >= -kTol);
+    CHECK(st.tank[t].inbound_t >= -kTol);
+  }
+  for (size_t p = 0; p < w.processes.size(); ++p) {
+    const double rate = st.proc[p].rate_t_h;
+    REQUIRE(std::isfinite(rate));
+    CHECK(rate >= -kTol);
+    CHECK(rate <= w.processes[p].design_rate_t_h + kTol);
+  }
+  for (const VehicleState& v : st.vehicle) {
+    CHECK(std::isfinite(v.x_km));
+    CHECK(std::isfinite(v.y_km));
+    CHECK(v.cargo_t >= -kTol);
+  }
+  std::vector<double> kpis;
+  sim->computeKpis(kpis);
+  for (const double k : kpis) CHECK(std::isfinite(k));
+  const double net =
+      initial_stock + st.cum_supplied_t - st.cum_consumed_t - st.cum_loss_t - stockSum(st);
+  CHECK(std::fabs(net) <= kTol * conservationScale(st));
+}
+
+// ---------------------------------------------------------------------------
+TEST_CASE("M3: determinism — the same seed gives the same state hash") {
+  auto a = makeMapSim(7);
+  auto b = makeMapSim(7);
+  a->step(2 * 96);
+  b->step(96);
+  b->step(96);
+  CHECK(a->stateHash() == b->stateHash());
+  // A fork stepped alongside its parent stays identical too.
+  Sim fork(*a);
+  a->step(48);
+  fork.step(48);
+  CHECK(a->stateHash() == fork.stateHash());
+}
+
+// ---------------------------------------------------------------------------
+TEST_CASE("M4: bad names and malformed files are errors, not crashes") {
+  World w;
+  std::string error;
+  for (const char* name : {"", "../catalog/materials", "Erwin-World", "a/b", "no-such-world",
+                           "erwin world", "x.json"}) {
+    error.clear();
+    CHECK_FALSE(buildNamedWorld(name, 42, w, error));
+    CHECK_MESSAGE(!error.empty(), "no message for name '" << name << "'");
+    CHECK(w.sites.empty());
+  }
+
+  for (const char* text : {"", "not json", "[1,2,3]", "{}", "{\"sites\":[]}", "{\"sites\":7}",
+                           "{\"sites\":[{\"key\":\"A\"}]}", "{\"sites\":[{\"key\":\"bad key\"}]}",
+                           "{\"format\":2,\"sites\":[]}"}) {
+    error.clear();
+    CHECK_FALSE(loadsFromText(text, error));
+    CHECK_MESSAGE(!error.empty(), "no message for " << text);
+  }
+  const std::string good = readWorldFile();
+  CHECK_FALSE(loadsFromText(good.substr(0, good.size() / 2), error));  // truncated
+
+  // The real file with one thing broken at a time.
+  auto broken = [&](const char* what, void (*edit)(json&)) {
+    json doc = json::parse(good, nullptr, true, true);
+    edit(doc);
+    std::string err;
+    CHECK_MESSAGE(!loadsFromText(doc.dump(), err), what << " was accepted");
+    CHECK_MESSAGE(!err.empty(), what << " gave no message");
+  };
+  REQUIRE(loadsFromText(good, error));
+  broken("unknown process", [](json& d) { d["sites"][0]["processes"][0]["type"] = "NOPE"; });
+  broken("unknown material", [](json& d) { d["sites"][0]["tanks"][0]["material"] = "NOPE"; });
+  broken("unknown preset", [](json& d) { d["sites"][0]["preset"] = "NOPE"; });
+  broken("bad role", [](json& d) { d["sites"][0]["tanks"][0]["role"] = "sideways"; });
+  broken("negative rate", [](json& d) { d["sites"][0]["processes"][0]["design_t_h"] = -1; });
+  broken("duplicate site", [](json& d) { d["sites"].push_back(d["sites"][0]); });
+  broken("pipeline to nowhere", [](json& d) { d["pipelines"][0]["to"] = "NOWHERE"; });
+  broken("bad point", [](json& d) { d["network"][0]["points"][0] = "x"; });
+  broken("unknown mode", [](json& d) { d["network"][0]["mode"] = "hyperloop"; });
+  broken("unknown vehicle", [](json& d) { d["fleet"][0]["class"] = "ZEPPELIN"; });
+  broken("unknown home", [](json& d) { d["fleet"][0]["home"] = "NOWHERE"; });
+  broken("unknown market key", [](json& d) { d["market"] = {{"betta", 0.5}}; });
+  // Bays with no strip in reach, and a vehicle based where its mode has no access.
+  broken("river bays off the river", [](json& d) {
+    for (json& s : d["sites"])
+      if (s["key"] == "OIL_FIELD") s["bays"]["river"] = 1;
+  });
+  broken("barge based off the river", [](json& d) {
+    d["fleet"].push_back({{"class", "BARGE_TANK"}, {"home", "OIL_FIELD"}, {"count", 1}});
+  });
+
+  // Through the session config as well.
+  CHECK(Sim::createFromConfig("{\"world\":\"no-such-world\"}", error) == nullptr);
+  CHECK(!error.empty());
+  CHECK(Sim::createFromConfig("{\"world\":5}", error) == nullptr);
+  CHECK(Sim::createFromConfig("{\"world\":\"../x\"}", error) == nullptr);
+}
+
+// ---------------------------------------------------------------------------
+TEST_CASE("M5: market settings and tank lead times come from the file") {
+  json doc = json::parse(readWorldFile(), nullptr, true, true);
+  doc["market"] = {{"min_lot_cap_frac", 0.8}, {"min_lot_target_frac", 0.4}, {"beta", 0.25},
+                   {"value_of_time_usd_t_h", 1.5}, {"switch_cost_frac", 0.0},
+                   {"max_lots_per_tank", 8}};
+  doc["sites"][0]["tanks"][0]["lead_time_h"] = 36.0;
+  doc["sites"][0]["tanks"][0]["pickup_gap_h"] = 9.0;
+  doc["sites"][0]["tanks"][0]["init_frac"] = 0.25;
+  // The last tank of the last site states neither: it must get the defaults.
+  json& plain = doc["sites"].back()["tanks"].back();
+  plain.erase("lead_time_h");
+  plain.erase("pickup_gap_h");
+  World w;
+  std::string error;
+  REQUIRE_MESSAGE(buildWorldFromJson("test-world", doc.dump(), 42, w, error), error);
+  CHECK(w.market.min_lot_cap_frac == doctest::Approx(0.8));
+  CHECK(w.market.min_lot_target_frac == doctest::Approx(0.4));
+  CHECK(w.market.beta == doctest::Approx(0.25));
+  CHECK(w.market.value_of_time_usd_t_h == doctest::Approx(1.5));
+  CHECK(w.market.switch_cost_frac == doctest::Approx(0.0));
+  CHECK(w.market.max_lots_per_tank == doctest::Approx(8));
+  CHECK(w.tanks[0].init_lead_time_h == doctest::Approx(36.0));
+  CHECK(w.tanks[0].init_pickup_gap_h == doctest::Approx(9.0));
+  CHECK(w.tanks[0].init_frac == doctest::Approx(0.25));
+  // Untouched tanks keep the defaults.
+  CHECK(w.tanks.back().init_lead_time_h == doctest::Approx(24.0));
+  CHECK(w.tanks.back().init_pickup_gap_h == doctest::Approx(4.0));
+}
+
+// ---------------------------------------------------------------------------
+TEST_CASE("M6: no world key is still the six-site world") {
+  std::string error;
+  auto plain = Sim::create(42, error);
+  REQUIRE(plain != nullptr);
+  auto cfg = Sim::createFromConfig("{\"seed\":42}", error);
+  REQUIRE(cfg != nullptr);
+  auto named = Sim::createFromConfig("{\"seed\":42,\"world\":\"sixsite\"}", error);
+  REQUIRE(named != nullptr);
+  CHECK(cfg->world().name == "sixsite");
+  CHECK(cfg->world().sites.size() == 6);
+  plain->step(96);
+  cfg->step(96);
+  named->step(96);
+  CHECK(plain->stateHash() == cfg->stateHash());
+  CHECK(plain->stateHash() == named->stateHash());
+}
