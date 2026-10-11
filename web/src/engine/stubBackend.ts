@@ -7,7 +7,7 @@ import { decode, type Snapshot } from './snapshot';
 import { encodeStub, stubVehicleState, type StubOutage } from './stub';
 import { stubEvents } from './events';
 import { VEHICLE_CLASSES, routeLength, stubWorld, type WorldSpec } from './world';
-import type { SimBackend, SimConfig, SimEvent, SiteRef, VehicleDetail } from './api';
+import type { EconomyReply, ForecastReply, SimBackend, SimConfig, SimEvent, SiteRef, VehicleDetail } from './api';
 
 /** Ticks per hour: 96 ticks/day (§9) — outage durations arrive in hours. */
 const TICKS_PER_HOUR = 4;
@@ -204,6 +204,19 @@ export class StubBackend implements SimBackend {
       remainingKm: (1 - st.legProgress) * tripKm,
       tripKm,
     };
+  }
+
+  /** The stub keeps no books and cannot look ahead: the economy views need the hosted engine. */
+  async forecast(id: string, days: number): Promise<ForecastReply> {
+    this.session(id);
+    void days;
+    throw new Error('forecast needs the hosted engine');
+  }
+
+  async economy(id: string, bucketH: number): Promise<EconomyReply> {
+    this.session(id);
+    void bucketH;
+    throw new Error('economy needs the hosted engine');
   }
 
   /**
