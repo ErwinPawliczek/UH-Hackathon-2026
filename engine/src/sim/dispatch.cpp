@@ -36,48 +36,63 @@ uint32_t openEdgeBetween(const World& world, const State& state, int mode, uint3
   return kNoEdge;
 }
 
-// One movement step for a vehicle under way: enter the next open edge
-// (re-planning when the route was cut, §5.7), advance it by one tick, and
-// queue at the destination on arrival. Returns after one tick of progress.
+// One tick of movement for a vehicle under way: enter the next open edge
+// (re-planning when the route was cut, §5.7), advance along it, and queue at
+// the destination on arrival. Time left in the tick after reaching a node
+// carries onto the next edge, so a route of many short edges takes the same
+// time as one long edge of the same length.
 void advanceTravel(const World& world, State& state, const PathCache& paths, uint32_t v,
                    const VehicleClass& vc) {
   VehicleState& vs = state.vehicle[v];
   const int m = modeIndex(vc.mode);
-  if (vs.leg + 1 >= vs.route_nodes.size()) {
-    // Already at the destination node — the common case of a home-based
-    // pickup, where the path is a single node. Queue for the bays.
+  auto arrive = [&]() {
     vs.status = vs.status == VehStatus::ToPickup ? VehStatus::QueueLoad
                                                  : VehStatus::QueueUnload;
     vs.queue_since_tick = state.tick;
-    return;
-  }
+  };
 
-  if (vs.edge == kNoEdge) {
-    const uint32_t from = vs.route_nodes[vs.leg];
-    const uint32_t to = vs.route_nodes[vs.leg + 1];
-    const uint32_t e = openEdgeBetween(world, state, m, from, to);
-    if (e == kNoEdge) {
-      // Route cut: re-plan from the current node, or wait if none exists.
-      const std::vector<uint32_t> replan =
-          buildPath(world, paths, vc.mode, from, vs.route_nodes.back());
-      if (replan.empty()) return;
-      vs.route_nodes = replan;
-      vs.leg = 0;
-      return;  // start moving on the new route next tick
+  double budget_h = kTickHours;
+  for (;;) {
+    if (vs.leg + 1 >= vs.route_nodes.size()) {
+      // Already at the destination node — the common case of a home-based
+      // pickup, where the path is a single node. Queue for the bays.
+      arrive();
+      return;
     }
-    vs.edge = e;
-    vs.edge_pos_km = 0;
-  }
 
-  // Advance along the current edge — committed: a closure mid-edge waits
-  // for the next node (§5.7).
-  const RouteEdge& edge = world.edges[vs.edge];
-  const double speed = std::min(edge.speed_kmh, vc.speed_kmh);
-  vs.edge_pos_km += speed * kTickHours;
-  const bool reverse = edge.b == vs.route_nodes[vs.leg];
-  edgePose(world, vs.edge, vs.edge_pos_km, reverse, vs.x_km, vs.y_km, vs.dir_x, vs.dir_y);
+    if (vs.edge == kNoEdge) {
+      const uint32_t from = vs.route_nodes[vs.leg];
+      const uint32_t to = vs.route_nodes[vs.leg + 1];
+      const uint32_t e = openEdgeBetween(world, state, m, from, to);
+      if (e == kNoEdge) {
+        // Route cut: re-plan from the current node, or wait if none exists.
+        const std::vector<uint32_t> replan =
+            buildPath(world, paths, vc.mode, from, vs.route_nodes.back());
+        if (replan.empty()) return;
+        vs.route_nodes = replan;
+        vs.leg = 0;
+        return;  // start moving on the new route next tick
+      }
+      vs.edge = e;
+      vs.edge_pos_km = 0;
+    }
 
-  if (vs.edge_pos_km >= edge.length_km - 1e-9) {
+    // Advance along the current edge — committed: a closure mid-edge waits
+    // for the next node (§5.7).
+    const RouteEdge& edge = world.edges[vs.edge];
+    const double speed = std::min(edge.speed_kmh, vc.speed_kmh);
+    if (speed <= 0.0) return;
+    const bool reverse = edge.b == vs.route_nodes[vs.leg];
+    const double left_km = std::max(0.0, edge.length_km - vs.edge_pos_km);
+    if (speed * budget_h < left_km - 1e-9) {
+      vs.edge_pos_km += speed * budget_h;
+      edgePose(world, vs.edge, vs.edge_pos_km, reverse, vs.x_km, vs.y_km, vs.dir_x, vs.dir_y);
+      return;
+    }
+
+    // Reached the edge's far node with time to spare (or exactly on it).
+    budget_h -= left_km / speed;
+    edgePose(world, vs.edge, edge.length_km, reverse, vs.x_km, vs.y_km, vs.dir_x, vs.dir_y);
     vs.leg += 1;
     vs.at_node = vs.route_nodes[vs.leg];
     vs.edge = kNoEdge;
@@ -85,10 +100,10 @@ void advanceTravel(const World& world, State& state, const PathCache& paths, uin
     vs.x_km = world.nodes[vs.at_node].x_km;
     vs.y_km = world.nodes[vs.at_node].y_km;
     if (vs.at_node == vs.route_nodes.back()) {
-      vs.status = vs.status == VehStatus::ToPickup ? VehStatus::QueueLoad
-                                                   : VehStatus::QueueUnload;
-      vs.queue_since_tick = state.tick;
+      arrive();
+      return;
     }
+    if (budget_h <= 1e-9) return;
   }
 }
 
