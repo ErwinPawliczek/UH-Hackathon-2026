@@ -175,6 +175,9 @@ struct State {
   std::vector<double> site_rate_share;
   std::vector<SiteTrade> site_trade;   // per site, cumulative (not hashed)
   std::vector<double> pipe_moved_t;    // per pipeline, cumulative tonnes (not hashed)
+  // Per material: tonnes and dollars of every lot booked since tick 0, at
+  // the price booked (summary view; not hashed).
+  std::vector<double> mat_bought_t, mat_bought_usd;
   // trade_block: pairs that do not trade, as seller site << 32 | buyer site,
   // kept sorted. Empty unless a player set one; hashed only when not empty.
   std::vector<uint64_t> trade_blocks;

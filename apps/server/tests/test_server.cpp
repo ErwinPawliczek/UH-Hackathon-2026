@@ -1671,6 +1671,32 @@ TEST_CASE("R10 room: the summary sets the run beside an untouched baseline and s
   CHECK(pb.at("tookDown").empty());
   CHECK(pb.at("damageUsd") == 0.0);
 
+  // Prices: the untouched room paid what its baseline paid; the played room
+  // paid clearly more for something, and the rows come largest change first.
+  REQUIRE(!quiet.at("prices").empty());
+  for (const json& p : quiet.at("prices")) {
+    CHECK(p.at("changePct") == 0.0);
+    CHECK(p.at("avgUsdPerT") == p.at("baselineAvgUsdPerT"));
+    CHECK(p.at("tonnes") == p.at("baselineTonnes"));
+    CHECK(p.at("tonnes").get<double>() > 0.0);
+    CHECK(p.at("name").is_string());
+  }
+  REQUIRE(!sum.at("prices").empty());
+  double top = 0.0, last = 1e300;
+  for (const json& p : sum.at("prices")) {
+    const double change = p.at("changePct").get<double>();
+    top = std::max(top, change);
+    CHECK(std::abs(change) <= last);
+    last = std::abs(change);
+    if (p.at("tonnes").get<double>() > 0.0 && p.at("baselineTonnes").get<double>() > 0.0)
+      CHECK(change == doctest::Approx((p.at("avgUsdPerT").get<double>() / p.at("baselineAvgUsdPerT").get<double>() - 1.0) * 100.0));
+  }
+  CHECK(top > 5.0);
+  // The played room's baseline prices are the untouched room's own.
+  for (const json& p : sum.at("prices"))
+    for (const json& q : quiet.at("prices"))
+      if (p.at("material") == q.at("material")) CHECK(p.at("baselineAvgUsdPerT") == q.at("avgUsdPerT"));
+
   // Still answers after the end.
   postJson(cli, a + "/host", {{"hostToken", madeA.at("hostToken")}, {"action", "end"}});
   CHECK(getJson(cli, a + "/summary").at("tick") == sum.at("tick"));

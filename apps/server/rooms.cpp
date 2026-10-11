@@ -674,6 +674,23 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
         row["broken"] = before > 1.0 && moved < 0.9 * before;
         pipes.push_back(std::move(row));
       }
+      // What was paid per tonne, material by material, against the baseline.
+      std::vector<json::json> priceRows;
+      for (size_t i = 0; i < actual["prices"].size(); ++i) {
+        const json::json& a = actual["prices"][i];
+        const json::json& b = base["prices"][i];
+        const double t = a.value("tonnes", 0.0), bt = b.value("tonnes", 0.0);
+        if (t <= 0.0 && bt <= 0.0) continue;
+        const double avg = a.value("avgUsdPerT", 0.0), bavg = b.value("avgUsdPerT", 0.0);
+        priceRows.push_back({{"material", a["material"]}, {"name", a["name"]},
+                             {"tonnes", t}, {"baselineTonnes", bt},
+                             {"avgUsdPerT", avg}, {"baselineAvgUsdPerT", bavg},
+                             // Nothing bought in one of the two runs: no price to compare.
+                             {"changePct", t > 0.0 && bt > 0.0 && bavg > 0.0 ? (avg / bavg - 1.0) * 100.0 : 0.0}});
+      }
+      std::stable_sort(priceRows.begin(), priceRows.end(), [](const json::json& x, const json::json& y) {
+        return std::abs(x.value("changePct", 0.0)) > std::abs(y.value("changePct", 0.0));
+      });
       const double lost = actual["economy"].value("lostSalesUsd", 0.0);
       json::json players = json::json::array();
       for (const RoomPlayer& p : r.players) {
@@ -700,6 +717,7 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
                             {"damageUsd", lost - base["economy"].value("lostSalesUsd", 0.0)}}},
                           {"sites", sites},
                           {"pipelines", pipes},
+                          {"prices", priceRows},
                           {"players", players}}
                    .dump());
     });

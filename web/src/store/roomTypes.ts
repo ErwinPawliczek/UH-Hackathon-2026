@@ -125,6 +125,7 @@ export interface SummarySite {
 }
 export interface SummaryPipeline { index: number; name: string; movedT: number; baselineMovedT: number; broken: boolean }
 export interface SummaryPlayer { id: string; name: string; site: number | null; damageUsd: number; tookDown: number[]; moves: number }
+export interface SummaryPrice { material: string; name: string; tonnes: number; baselineTonnes: number; avgUsdPerT: number; baselineAvgUsdPerT: number; changePct: number }
 /** GET /api/room/{code}/summary: the room against the same run with no changes at all. */
 export interface RoomSummary {
   tick: number;
@@ -132,4 +133,6 @@ export interface RoomSummary {
   sites: SummarySite[];
   pipelines: SummaryPipeline[];
   players: SummaryPlayer[];
+  /** average price paid per material, this session against nothing changed; absent on older servers */
+  prices?: SummaryPrice[];
 }

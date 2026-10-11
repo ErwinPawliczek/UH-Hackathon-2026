@@ -5,6 +5,7 @@
 import type { RoomInfo, RoomSummary, SummarySite } from '../store/roomTypes';
 import { ownedName, playerColor } from '../store/roomTypes';
 import { fmtMoney } from './economyData';
+import { materialName } from './materials';
 
 const fmtT = (t: number) => (t >= 999_500 ? `${(t / 1e6).toFixed(1)} Mt` : t >= 1000 ? `${Math.round(t / 1000)} kt` : `${Math.round(t)} t`);
 const fmtDays = (h: number) => (h >= 48 ? `${(h / 24).toFixed(1)} days` : `${Math.round(h)} h`);
@@ -37,6 +38,8 @@ export function DamageSummary({ summary, room, me }: { summary: RoomSummary; roo
   const players = [...summary.players].sort((a, b) => b.damageUsd - a.damageUsd);
   const nameOf = (site: number) => summary.sites.find((s) => s.site === site)?.name ?? `site ${site}`;
   const day = Math.floor(summary.tick / 96) + 1;
+  // the prices that moved by half a percent or more, biggest first
+  const prices = (summary.prices ?? []).filter((p) => Math.abs(p.changePct) >= 0.5).slice(0, 8);
   return (
     <div className="flex flex-col gap-5" data-testid="damage-summary">
       <div>
@@ -78,6 +81,33 @@ export function DamageSummary({ summary, room, me }: { summary: RoomSummary; roo
           ))}
         </ul>
       </div>
+
+      {prices.length > 0 && (
+        <div data-testid="damage-prices">
+          <div className="label mb-1">Prices that moved</div>
+          <table className="w-full border-collapse">
+            <thead>
+              <tr>
+                <th />
+                <th scope="col" className="label pb-1 pr-3 text-right">Nothing changed</th>
+                <th scope="col" className="label pb-1 pr-3 text-right">This session</th>
+                <th scope="col" className="label pb-1 text-right">Change</th>
+              </tr>
+            </thead>
+            <tbody>
+              {prices.map((p) => (
+                <tr key={p.material} className="border-t border-line">
+                  <th scope="row" className="py-1.5 pr-3 text-left text-sm font-medium text-ink">{materialName(p.material)}</th>
+                  <td className="data py-1.5 pr-3 text-right text-sm text-ink">${Math.round(p.baselineAvgUsdPerT)}/t</td>
+                  <td className="data py-1.5 pr-3 text-right text-sm text-ink">${Math.round(p.avgUsdPerT)}/t</td>
+                  <td className={`data py-1.5 text-right text-sm font-semibold ${p.changePct > 0 ? 'text-alarm' : 'text-blue-strong'}`}>{p.changePct > 0 ? '+' : ''}{p.changePct.toFixed(1)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-1 text-xs text-muted">Average price paid per tonne on booked loads. Short supply pushes prices up for every buyer.</p>
+        </div>
+      )}
 
       <div>
         <div className="label mb-1">Who did it</div>
