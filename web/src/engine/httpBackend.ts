@@ -16,12 +16,25 @@ export class HttpBackend implements SimBackend {
     private readonly fetchImpl: typeof fetch = (...args) => fetch(...args),
   ) {}
 
-  private async json<T>(path: string, init?: RequestInit): Promise<T> {
-    const res = await this.fetchImpl(this.base + path, init);
+  private async send(path: string, init?: RequestInit): Promise<Response> {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(this.base + path, init);
+    } catch (err) {
+      // Network-level failure (refused, DNS, offline): the engine is
+      // unreachable — say so plainly instead of leaking fetch internals.
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`Cannot reach the hosted engine (${reason})`);
+    }
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
       throw new Error(`${init?.method ?? 'GET'} ${path} -> ${res.status}${detail ? `: ${detail}` : ''}`);
     }
+    return res;
+  }
+
+  private async json<T>(path: string, init?: RequestInit): Promise<T> {
+    const res = await this.send(path, init);
     return (await res.json()) as T;
   }
 
@@ -43,15 +56,11 @@ export class HttpBackend implements SimBackend {
 
   async step(id: string, ticks: number): Promise<Snapshot> {
     const path = `/api/sim/${encodeURIComponent(id)}/step`;
-    const res = await this.fetchImpl(this.base + path, {
+    const res = await this.send(path, {
       method: 'POST',
       headers: JSON_HEADERS,
       body: JSON.stringify({ ticks }),
     });
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '');
-      throw new Error(`POST ${path} -> ${res.status}${detail ? `: ${detail}` : ''}`);
-    }
     return decode(await res.arrayBuffer());
   }
 

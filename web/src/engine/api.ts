@@ -1,7 +1,7 @@
-// The sim API client interface. Two backends implement it: StubBackend (the
-// in-page stub producer, default until M4) and HttpBackend (the §7.4
-// crx-server routes). The app only ever talks to this interface, so switching
-// to the hosted engine is a settings change, not a code change.
+// The sim API client interface. Two backends implement it: HttpBackend (the
+// §7.4 crx-server routes — the default for visitors) and StubBackend (the
+// in-page stub producer, for tests and local development, selected via the
+// ?engine= URL parameter). The app only ever talks to this interface.
 
 import type { Snapshot } from './snapshot';
 import type { WorldSpec } from './world';
@@ -46,7 +46,7 @@ export interface SimBackend {
   series(id: string, kind: number, refId: number): Promise<number[]>;
 }
 
-export function createBackend(kind: BackendKind, opts: { baseUrl?: string } = {}): SimBackend {
+export function createBackend(kind: BackendKind, baseUrl = ''): SimBackend {
   if (kind === 'stub') return new StubBackend();
-  return new HttpBackend(opts.baseUrl ?? '');
+  return new HttpBackend(baseUrl);
 }

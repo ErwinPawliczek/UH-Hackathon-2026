@@ -30,8 +30,12 @@ cd ..
 ./build/native-release/crx-server --port 8080 --web-dir web/dist
 ```
 
-Open **http://localhost:8080**. The app boots on the in-page stub engine; switch the
-**Engine** selector to **Hosted (HTTP)** to drive the real C++ simulation.
+Open **http://localhost:8080**. The app boots straight onto the hosted C++
+engine — no settings change needed. There is no engine UI: the in-page stub
+engine (used by the unit tests and for offline UI work) is selected with the
+`?engine=stub` URL parameter, e.g. <http://localhost:8080/?engine=stub>.
+If the hosted engine is unreachable, the app shows a retryable error instead
+of falling back to the stub.
 
 ## What to try
 

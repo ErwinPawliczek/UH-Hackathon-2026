@@ -1,5 +1,6 @@
-// Top bar: brand, sim clock, playback controls, seed and scenario pickers,
-// and the backend switch (stub ↔ HTTP). Settings here are the persisted ones.
+// Top bar: brand, sim clock, playback controls, and the seed/scenario
+// pickers. Engine choice has no UI — visitors run the hosted engine; the
+// in-page stub is selected only via ?engine= for tests and local development.
 
 import { useSim, SPEEDS, TICKS_PER_DAY } from '../store/sim';
 import { SCENARIOS } from '../engine/events';
@@ -10,12 +11,10 @@ export function TopBar() {
   const speed = useSim((s) => s.speed);
   const seed = useSim((s) => s.seed);
   const scenario = useSim((s) => s.scenario);
-  const backendKind = useSim((s) => s.backendKind);
-  const baseUrl = useSim((s) => s.baseUrl);
   const tick = useSim((s) => s.snap?.tick);
   const error = useSim((s) => s.error);
 
-  const { togglePlay, setSpeed, setSeed, setScenario, setBackendKind, setBaseUrl } = useSim.getState();
+  const { togglePlay, setSpeed, setSeed, setScenario } = useSim.getState();
 
   return (
     <header className="pointer-events-auto absolute inset-x-0 top-0 z-10 flex h-12 items-center gap-2 border-b border-line bg-panel px-4">
@@ -62,28 +61,6 @@ export function TopBar() {
           ))}
         </select>
       </label>
-
-      <label className="flex items-center gap-2">
-        <span className="label">Engine</span>
-        <select className="field" value={backendKind} onChange={(e) => setBackendKind(e.target.value as 'stub' | 'http')} data-testid="backend-select">
-          <option value="stub">In-page stub</option>
-          <option value="http">Hosted (HTTP)</option>
-        </select>
-      </label>
-
-      {backendKind === 'http' && (
-        <label className="flex items-center gap-2">
-          <span className="label">URL</span>
-          <input
-            type="text"
-            placeholder="https://…"
-            className="field w-40"
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-            data-testid="base-url-input"
-          />
-        </label>
-      )}
 
       <span className="data ml-auto text-muted">{Math.floor(Number(tick ?? 0) / TICKS_PER_DAY)}/60 d</span>
 
