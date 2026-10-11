@@ -50,7 +50,7 @@ MARKET = {"min_lot_cap_frac": 0.8, "min_lot_target_frac": 0.4, "max_lots_per_tan
 # The market world (--market): the same world with the engine's market
 # behaviour switched on. Written to erwin-market-v1.json; erwin-world-v1.json
 # never carries these keys.
-MARKET_SWITCHES = {"price_aware_buying": True, "demand_elasticity": 0.2}
+MARKET_SWITCHES = {"price_aware_buying": True, "demand_elasticity": 0.2, "margin_control": True}
 
 MERGE_KM = 4.0
 ATTACH_KM = 12.0

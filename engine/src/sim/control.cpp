@@ -166,7 +166,11 @@ void stepControl(const World& world, State& state, const std::vector<TankSignals
     const double r_max =
         cap >= 0.0 ? std::min(r_max_raw, cap) : r_max_raw;
     const double g = computeGovernor(views[p], signals);
-    const double desired = r_max * g;
+    // Margin control: a unit that earns nothing on what it makes turns down
+    // toward its minimum rate (never below it on this signal alone).
+    const double g_margin =
+        state.margin_control ? type.turndown + (1.0 - type.turndown) * state.margin_signal[p] : 1.0;
+    const double desired = r_max * std::min(g, g_margin);
     const double min_rate = type.turndown * proc.design_rate_t_h;
 
     if (r_max <= kRateEps || r_max < min_rate - kRateEps) {

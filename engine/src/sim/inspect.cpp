@@ -842,6 +842,15 @@ std::string summaryJson(const World& world, const State& state) {
     double factor = 1.0;
     for (size_t p = 0; p < world.processes.size(); ++p)
       if (world.processes[p].site.v == s) factor = std::min(factor, state.demand_factor[p]);
+    double margin = 0.0, margin_signal = 1.0;
+    bool first = true;
+    for (size_t p = 0; p < world.processes.size(); ++p) {
+      if (world.processes[p].site.v != s) continue;
+      if (world.catalog.process_types[world.processes[p].type].boundary != Boundary::None) continue;
+      margin = first ? state.proc_margin[p] : std::min(margin, state.proc_margin[p]);
+      margin_signal = std::min(margin_signal, state.margin_signal[p]);
+      first = false;
+    }
     sites.push_back({{"site", s},
                      {"key", world.sites[s].key},
                      {"name", world.sites[s].name},
@@ -855,7 +864,12 @@ std::string summaryJson(const World& world, const State& state) {
                      {"notServedUsd", state.site_trade[s].unmet_usd},
                      {"pricedOutUsd", state.site_trade[s].priced_out_usd},
                      {"pricedOutT", state.site_trade[s].priced_out_t},
-                     {"demandFactor", factor}});
+                     {"demandFactor", factor},
+                     // Margin control: the thinnest unit's margin as a share of
+                     // its base product value, and how hard it is held back
+                     // (1 = not at all, 0 = at minimum rate).
+                     {"margin", margin},
+                     {"marginSignal", margin_signal}});
   }
   json pipes = json::array();
   for (size_t i = 0; i < world.pipelines.size(); ++i) {

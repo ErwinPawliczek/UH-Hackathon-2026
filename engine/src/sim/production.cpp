@@ -1,6 +1,8 @@
 // Chain Reaction — §5.4 production, energy booking and sink accounting.
 #include "sim/production.h"
 
+#include "sim/market.h"
+
 #include "sim/words.h"
 
 #include <algorithm>
@@ -11,8 +13,8 @@ namespace sim {
 
 namespace {
 
-constexpr double kEnergyPriceGJ = 8.0;   // $/GJ purchased heat (§3.1 note)
-constexpr double kPowerPriceMWh = 80.0;  // $/MWh
+constexpr double kEnergyPriceGJ = kMarketHeatUsdGJ;     // $/GJ purchased heat (§3.1 note)
+constexpr double kPowerPriceMWh = kMarketPowerUsdMWh;  // $/MWh
 constexpr double kServedEps = 0.999;     // below this share a sink is starved
 
 // Design real output in t/h at the world's mode mix, for the production
