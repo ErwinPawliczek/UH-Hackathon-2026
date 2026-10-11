@@ -31,6 +31,8 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <array>
+#include <map>
 #include <memory>
 #include <set>
 #include <sstream>
@@ -583,4 +585,118 @@ TEST_CASE("M10: every vehicle on the map world can say where it is going") {
   CHECK(travelling > 100);
   CHECK(loaded > 50);
   CHECK(vehicleJson(w, sim->state(), static_cast<uint32_t>(w.fleet.size())).empty());
+}
+
+TEST_CASE("M11: the economy view adds up to the order book and the running totals") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  const World& w = sim->world();
+
+  // Nothing has happened yet: no buckets, no rows.
+  const json empty = json::parse(economyJson(w, sim->state(), sim->recorder(), 24));
+  CHECK(empty.at("buckets") == 0);
+  CHECK(empty.at("materials").empty());
+  CHECK(empty.at("totals").at("spendUsd").empty());
+
+  sim->step(60 * 96);
+  const State& st = sim->state();
+  const json doc = json::parse(economyJson(w, st, sim->recorder(), 24));
+  const size_t n = doc.at("buckets").get<size_t>();
+  CHECK(n == 60);
+  CHECK(doc.at("tick") == 60 * 96);
+  CHECK(doc.at("bucketH") == 24);
+  const auto sum = [](const json& arr) {
+    double s = 0;
+    for (const json& v : arr) s += v.get<double>();
+    return s;
+  };
+  const double tol = 0.01 * static_cast<double>(n);  // each bucket is rounded to the cent
+
+  // Per material: tonnes ordered, dollars spent and tonnes delivered match
+  // the order book, bucket arrays are all N long.
+  std::map<std::string, std::array<double, 4>> book;  // ordered, spend, delivered, freight
+  double freight_book = 0;
+  for (const Order& o : st.order) {
+    if (o.status == OrdStatus::Cancelled) continue;
+    auto& b = book[w.catalog.materials[o.material].key];
+    b[0] += o.qty_t;
+    b[1] += o.qty_t * o.price;
+    if (o.status == OrdStatus::Delivered) {
+      b[2] += o.qty_t;
+      b[3] += o.freight_usd;
+      freight_book += o.freight_usd;
+      CHECK(o.delivered_tick >= o.created_tick);
+      CHECK(o.km > 0.0);
+    }
+  }
+  CHECK(doc.at("materials").size() == book.size());
+  CHECK(book.size() >= 15);
+  for (const json& m : doc.at("materials")) {
+    const auto& b = book.at(m.at("key").get<std::string>());
+    for (const char* key : {"orderedT", "lots", "spendUsd", "freightUsd", "deliveredT", "priceIndex"})
+      CHECK(m.at(key).size() == n);
+    CHECK(std::abs(sum(m.at("orderedT")) - b[0]) <= tol);
+    CHECK(std::abs(sum(m.at("spendUsd")) - b[1]) <= tol);
+    CHECK(std::abs(sum(m.at("deliveredT")) - b[2]) <= tol);
+    CHECK(std::abs(sum(m.at("freightUsd")) - b[3]) <= tol);
+    for (const json& idx : m.at("priceIndex")) {
+      CHECK(idx.get<double>() >= 0.25);
+      CHECK(idx.get<double>() <= 4.0);
+    }
+    CHECK(m.at("basePriceUsdT").get<double>() > 0.0);
+  }
+
+  // By class and in total: freight equals the engine's running total, and
+  // every other total is the accumulator it came from.
+  double class_freight = 0, class_tonnes = 0, delivered_tonnes = 0;
+  for (const json& c : doc.at("byClass")) {
+    class_freight += sum(c.at("freightUsd"));
+    class_tonnes += sum(c.at("tonnes"));
+    CHECK(sum(c.at("tonneKm")) > 0.0);
+  }
+  for (const auto& entry : book) delivered_tonnes += entry.second[2];
+  CHECK(doc.at("byClass").size() == 7);  // every class in the fleet has delivered
+  CHECK(std::abs(class_freight - freight_book) <= 7 * tol);
+  CHECK(std::abs(class_tonnes - delivered_tonnes) <= 7 * tol);
+  const json& totals = doc.at("totals");
+  CHECK(std::abs(sum(totals.at("freightUsd")) - st.cum_freight_usd) <= tol);
+  CHECK(std::abs(sum(totals.at("energyUsd")) - st.cum_energy_usd) <= tol);
+  CHECK(std::abs(sum(totals.at("demandT")) - st.cum_demand_t) <= tol);
+  CHECK(std::abs(sum(totals.at("unmetT")) - st.cum_unmet_t) <= tol);
+  CHECK(std::abs(sum(totals.at("shutdownH")) - st.cum_shutdown_h) <= tol);
+  double spend_book = 0;
+  for (const auto& entry : book) spend_book += entry.second[1];
+  CHECK(std::abs(sum(totals.at("spendUsd")) - spend_book) <= tol);
+  for (const json& s : totals.at("service")) CHECK(s.get<double>() == doctest::Approx(1.0));
+
+  // Plants: sources and plants (no customers), each with a rate band inside
+  // [0, 1.1] per bucket.
+  CHECK(doc.at("plants").size() == 18);
+  for (const json& pl : doc.at("plants")) {
+    CHECK(pl.at("designRateTph").get<double>() > 0.0);
+    for (size_t b = 0; b < n; ++b) {
+      const double lo = pl.at("rateMin")[b].get<double>(), mid = pl.at("rateMean")[b].get<double>(),
+                   hi = pl.at("rateMax")[b].get<double>();
+      CHECK(lo >= 0.0);
+      CHECK(hi <= 1.1);
+      CHECK(lo <= mid + 1e-4);
+      CHECK(mid <= hi + 1e-4);
+    }
+  }
+
+  // A fork carries its parent's history; a few more ticks open a partial
+  // bucket; other bucket sizes re-cut the same history.
+  Sim fork(*sim);
+  CHECK(economyJson(w, fork.state(), fork.recorder(), 24) ==
+        economyJson(w, st, sim->recorder(), 24));
+  fork.step(10);
+  const json more = json::parse(economyJson(w, fork.state(), fork.recorder(), 24));
+  CHECK(more.at("buckets") == 61);
+  CHECK(more.at("plants")[5].at("rateMean").size() == 61);
+  const json hourly = json::parse(economyJson(w, st, sim->recorder(), 1));
+  CHECK(hourly.at("buckets") == 60 * 24);
+  CHECK(std::abs(sum(hourly.at("totals").at("freightUsd")) - st.cum_freight_usd) <= 0.01 * 1440);
+  const json weekly = json::parse(economyJson(w, st, sim->recorder(), 168));
+  CHECK(weekly.at("buckets") == 9);  // 60 days = 8 full weeks and a part
+  CHECK(std::abs(sum(weekly.at("totals").at("demandT")) - st.cum_demand_t) <= 0.1);
 }

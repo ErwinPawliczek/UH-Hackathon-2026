@@ -337,6 +337,46 @@ TEST_CASE("vehicle: where it is going, where from, and what it holds") {
   CHECK(unknown->status == 404);
 }
 
+TEST_CASE("economy: the run so far in time buckets, cut back by a rewind") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  const auto economy = [&](const std::string& query) {
+    auto res = cli.Get("/api/sim/" + id + "/economy" + query);
+    REQUIRE(res);
+    return *res;
+  };
+
+  // Before the first tick there is nothing to show.
+  CHECK(json::parse(economy("").body).at("buckets") == 0);
+
+  REQUIRE(cli.Post("/api/sim/" + id + "/step", R"({"ticks":1000})", "application/json"));
+  const json daily = json::parse(economy("").body);  // default bucket: a day
+  CHECK(daily.at("bucketH") == 24);
+  CHECK(daily.at("tick") == 1000);
+  CHECK(daily.at("buckets") == 11);  // ten full days and a part
+  CHECK(!daily.at("materials").empty());
+  CHECK(daily.at("materials")[0].at("orderedT").size() == 11);
+  CHECK(daily.at("totals").at("energyUsd").size() == 11);
+  CHECK(daily.at("plants")[0].at("rateMax").size() == 11);
+  CHECK(json::parse(economy("?bucket_h=6").body).at("buckets") == 42);
+  CHECK(json::parse(economy("?bucket_h=168").body).at("buckets") == 2);
+
+  // A rewind shortens the history to the moment gone back to.
+  REQUIRE(cli.Post("/api/sim/" + id + "/rewind", R"({"tick":300})", "application/json"));
+  const json earlier = json::parse(economy("").body);
+  CHECK(earlier.at("tick") == 300);
+  CHECK(earlier.at("buckets") == 4);
+  CHECK(earlier.at("totals").at("demandT").size() == 4);
+
+  CHECK(economy("?bucket_h=0").status == 400);
+  CHECK(economy("?bucket_h=169").status == 400);
+  CHECK(economy("?bucket_h=day").status == 400);
+  auto unknown = cli.Get("/api/sim/nope/economy");
+  REQUIRE(unknown);
+  CHECK(unknown->status == 404);
+}
+
 TEST_CASE("world json: fleet manifest without a fabricated shuttle schedule") {
   TestServer srv;
   auto cli = client(srv.port);

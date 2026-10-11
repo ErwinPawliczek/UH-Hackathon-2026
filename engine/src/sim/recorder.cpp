@@ -32,6 +32,16 @@ void recordHourly(const World& world, const State& state, Recorder& rec) {
              world.processes[p].design_rate_t_h > 0.0
                  ? state.proc[p].rate_t_h / world.processes[p].design_rate_t_h
                  : 0.0);
+
+  // Economy history: untrimmed, one row per hour.
+  for (size_t p = 0; p < world.processes.size(); ++p)
+    rec.hour_rate.push_back(world.processes[p].design_rate_t_h > 0.0
+                                ? static_cast<float>(state.proc[p].rate_t_h /
+                                                     world.processes[p].design_rate_t_h)
+                                : 0.f);
+  for (const double idx : state.price_index) rec.hour_price.push_back(static_cast<float>(idx));
+  rec.hour_totals.push_back({state.cum_demand_t, state.cum_unmet_t, state.cum_unmet_usd,
+                             state.cum_freight_usd, state.cum_energy_usd, state.cum_shutdown_h});
 }
 
 void logEvent(Recorder& rec, uint64_t tick, const std::string& type, const std::string& site,

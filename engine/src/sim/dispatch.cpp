@@ -298,6 +298,7 @@ void stepTransport(const World& world, State& state, PathCache& paths, Recorder&
       // the buyer's lead-time estimate (§5.7–5.8).
       buyer.inbound_t -= o.qty_t;
       o.status = OrdStatus::Delivered;
+      o.delivered_tick = state.tick;
       Ledger& seller_led = state.ledger[world.tanks[o.from].site.v];
       Ledger& buyer_led = state.ledger[world.tanks[o.to].site.v];
       seller_led.revenue += o.qty_t * o.price;

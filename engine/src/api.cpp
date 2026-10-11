@@ -827,6 +827,14 @@ const char* crx_vehicle(const crx_sim* sim, uint32_t index) {
   return api->reply.empty() ? nullptr : api->reply.c_str();
 }
 
+const char* crx_economy(const crx_sim* sim, uint32_t bucket_h) {
+  const ApiSim* api = asApi(sim);
+  if (api == nullptr || bucket_h < 1 || bucket_h > 168) return nullptr;
+  api->reply = crx::sim::economyJson(api->sim->world(), api->sim->state(), api->sim->recorder(),
+                                     bucket_h);
+  return api->reply.c_str();
+}
+
 uint64_t crx_tick(const crx_sim* sim) { return asApi(sim)->sim->state().tick; }
 
 uint64_t crx_state_hash(const crx_sim* sim) { return asApi(sim)->sim->stateHash(); }
