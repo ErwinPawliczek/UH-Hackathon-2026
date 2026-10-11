@@ -8,6 +8,7 @@
 // for the rest of the run and the button shows its name. On the in-page stub
 // it is the stub-era scripted-scenario setting (a session restart).
 
+import { useId } from 'react';
 import { useSim, SPEEDS } from '../store/sim';
 import { SCENARIOS } from '../engine/events';
 import { scenariosFor, type EngineScenario } from '../engine/scenarios';
@@ -24,6 +25,43 @@ export function scenarioButtonLabel(scenarios: EngineScenario[], triggered: stri
   const latest = scenarios.find((s) => s.key === triggered[triggered.length - 1]);
   if (latest === undefined) return 'Scenario';
   return triggered.length > 1 ? `${latest.label} +${triggered.length - 1}` : latest.label;
+}
+
+/** Zigzag period and depth in px: the lower edges of 20 px wide pointy-top hexagons. */
+export const CHAIN_PERIOD = 20;
+export const CHAIN_DEPTH = CHAIN_PERIOD / (2 * Math.sqrt(3)); // ≈ 5.77: every bend is 120°
+
+/**
+ * The top bar's bottom edge, drawn as a carbon chain: the lower edges of a
+ * row of pointy-top hexagons side by side — a skeletal-formula zigzag with
+ * 120° bends — as a hairline in the border colour, with the bar's fill
+ * following the zigzag above it. It hangs below the bar's 48 px box, so
+ * nothing inside the bar moves; an SVG pattern keeps it crisp at any width.
+ */
+function ChainEdge() {
+  const id = useId();
+  const top = 0.5; // half a pixel down: the hairline's upper bends sit on the bar's edge
+  const low = (top + CHAIN_DEPTH).toFixed(2);
+  const h = Math.ceil(top + CHAIN_DEPTH + 1);
+  // One period, drawn half a period past each side so the bends at the tile
+  // edges are whole on both tiles.
+  const zigzag = `M${-CHAIN_PERIOD / 2} ${low} L0 ${top} L${CHAIN_PERIOD / 2} ${low} L${CHAIN_PERIOD} ${top} L${CHAIN_PERIOD * 1.5} ${low}`;
+  return (
+    <svg
+      className="pointer-events-none absolute inset-x-0 top-full block w-full"
+      height={h}
+      aria-hidden="true"
+      data-testid="chain-edge"
+    >
+      <defs>
+        <pattern id={id} width={CHAIN_PERIOD} height={h} patternUnits="userSpaceOnUse">
+          <path d={`M0 0 H${CHAIN_PERIOD} V${top} L${CHAIN_PERIOD / 2} ${low} L0 ${top} Z`} fill="var(--panel)" />
+          <path d={zigzag} fill="none" stroke="var(--line-2)" strokeWidth="1" strokeLinejoin="miter" />
+        </pattern>
+      </defs>
+      <rect width="100%" height={h} fill={`url(#${id})`} />
+    </svg>
+  );
 }
 
 export function TopBar() {
@@ -44,7 +82,8 @@ export function TopBar() {
   const engineScenarios = backendKind === 'http' ? scenariosFor(world) : [];
 
   return (
-    <header className="pointer-events-auto absolute inset-x-0 top-0 z-10 flex h-12 items-center gap-2 border-b border-line bg-panel px-4">
+    <header className="pointer-events-auto absolute inset-x-0 top-0 z-10 flex h-12 items-center gap-2 bg-panel px-4">
+      <ChainEdge />
       <span className="flex items-center gap-2" data-testid="wordmark">
         <img src="/logo.svg" alt="PetroGrid mark" width={20} height={20} />
         <span className="wordmark text-base leading-none">
@@ -56,8 +95,8 @@ export function TopBar() {
         {tick === undefined ? '—' : fmtClock(Number(tick))}
       </span>
 
-      {/* Before the first start this is the primary call to action; afterwards Pause / Resume. */}
-      <button className={`btn ${playing || !started ? 'btn-active' : ''}`} onClick={togglePlay} data-testid="play-pause">
+      {/* Start and Resume are the call to action (primary); Pause, while running, reads as the active state. */}
+      <button className={`btn ${playing ? 'btn-active' : 'btn-primary'}`} onClick={togglePlay} data-testid="play-pause">
         {!started ? '▶ Start simulation' : playing ? '⏸ Pause' : '▶ Resume'}
       </button>
 

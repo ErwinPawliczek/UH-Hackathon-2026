@@ -50,9 +50,7 @@ export default function App() {
       {world !== null && snap !== null && !started && error === null && (
         <div className="pointer-events-none absolute inset-x-0 bottom-20 z-10 flex justify-center">
           <button
-            className="btn btn-active pointer-events-auto"
-            // sized inline: the .btn component class pins control-size padding and type
-            style={{ padding: '12px 28px', fontSize: 16, fontWeight: 600 }}
+            className="btn btn-primary btn-lg pointer-events-auto"
             onClick={togglePlay}
             data-testid="start-simulation"
           >

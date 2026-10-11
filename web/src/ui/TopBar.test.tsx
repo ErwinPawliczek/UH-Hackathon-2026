@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { TopBar, scenarioButtonLabel } from './TopBar';
+import { CHAIN_DEPTH, CHAIN_PERIOD, TopBar, scenarioButtonLabel } from './TopBar';
 
 describe('scenarioButtonLabel', () => {
   const scenarios = [
@@ -38,6 +38,16 @@ describe('TopBar markup', () => {
     expect(html).toContain('Simulation speed');
     expect(html).toContain('data-testid="seed-input"');
     expect(html).toContain('data-testid="scenario-select"');
+  });
+
+  it('draws its bottom edge as a 120 degree zigzag, with no straight border', () => {
+    expect(html).toContain('data-testid="chain-edge"');
+    expect(html).not.toContain('border-b');
+    // 30 degree edges: depth = period / (2 * sqrt 3), so every bend is 120 degrees
+    const bend = 180 - 2 * (Math.atan2(CHAIN_DEPTH, CHAIN_PERIOD / 2) * 180) / Math.PI;
+    expect(bend).toBeCloseTo(120, 6);
+    expect(CHAIN_DEPTH).toBeGreaterThan(5);
+    expect(CHAIN_DEPTH).toBeLessThan(6);
   });
 
   it('names the scenario control on the control itself, with no separate label or native select', () => {

@@ -73,14 +73,123 @@ h2 {
   @apply rounded-md border border-line bg-panel;
 }
 
-/* Controls: 4px radius, panel-2 fill, line-2 outline. */
+/*
+ * Buttons are hexagons — the brand shape. A text button is an elongated
+ * hexagon: flat top and bottom, the two ends pointed at 120 degrees (the
+ * slanted edges run at 60 degrees, so each point is height / (2 * sqrt 3)
+ * deep). A single-glyph button (.btn-glyph) is the same outline at the width
+ * of a regular hexagon.
+ *
+ * clip-path would cut a border off, so the outline is drawn as two layers
+ * behind the label: ::before in the outline colour, ::after inset by one
+ * hairline in the fill colour. Both follow --hex-h, so a size is one variable.
+ */
 .btn {
-  @apply cursor-pointer rounded-sm border border-line-2 bg-panel-2 px-2 py-1 text-xs text-ink hover:bg-line disabled:cursor-not-allowed disabled:opacity-40;
+  --hex-h: 28px;
+  --hex-d: calc(var(--hex-h) * 0.2887);
+  --btn-line: var(--line-2);
+  --btn-fill: var(--panel-2);
+  --btn-ring: 1px;
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--hex-h);
+  min-width: calc(var(--hex-h) * 1.1547);
+  padding: 0 calc(var(--hex-d) + 6px);
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
-/* Active control: the one blue; hover and pressed in blue-strong. */
-.btn-active {
-  @apply border-blue bg-blue text-white hover:border-blue-strong hover:bg-blue-strong;
+.btn::before,
+.btn::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  clip-path: polygon(var(--d) 0, calc(100% - var(--d)) 0, 100% 50%, calc(100% - var(--d)) 100%, var(--d) 100%, 0 50%);
+}
+
+/* outline layer */
+.btn::before {
+  --d: var(--hex-d);
+  inset: 0;
+  background: var(--btn-line);
+}
+
+/* fill layer: one hairline in on every edge (1.155 = 1 / sin 60 on the slants) */
+.btn::after {
+  --d: calc((var(--hex-h) - 2 * var(--btn-ring)) * 0.2887);
+  inset: var(--btn-ring) calc(var(--btn-ring) * 1.155);
+  background: var(--btn-fill);
+}
+
+.btn:hover:not(:disabled) {
+  --btn-fill: var(--line);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+/* Keyboard focus: the hexagon's own outline thickens and turns blue. */
+.btn:focus-visible {
+  outline: none;
+  --btn-line: var(--blue);
+  --btn-ring: 2px;
+}
+
+/* Primary: the one blue; hover and pressed in blue-strong. */
+.btn-primary {
+  --btn-line: var(--blue);
+  --btn-fill: var(--blue);
+  color: var(--white);
+}
+
+.btn-primary:hover:not(:disabled) {
+  --btn-line: var(--blue-strong);
+  --btn-fill: var(--blue-strong);
+}
+
+.btn-primary:focus-visible {
+  --btn-line: var(--ink);
+}
+
+/* Active (a chosen speed, an open window or menu): blue outline on blue-soft. */
+.btn-active,
+.btn-active:hover:not(:disabled) {
+  --btn-line: var(--blue);
+  --btn-fill: var(--blue-soft);
+  color: var(--blue-strong);
+}
+
+/* Single glyph: a regular hexagon. */
+.btn-glyph {
+  width: calc(var(--hex-h) * 1.1547);
+  min-width: 0;
+  padding: 0;
+}
+
+/* Large call to action. */
+.btn-lg {
+  --hex-h: 48px;
+  padding: 0 calc(var(--hex-d) + 16px);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* Compact, for controls inside cards (still a 28 px tall hit area). */
+.btn-sm {
+  padding: 0 calc(var(--hex-d) + 2px);
+  font-family: var(--f-mono);
+  font-size: 11px;
 }
 
 /* Rows of a dropdown list: full-width, quiet until hovered or focused. */

@@ -23,7 +23,7 @@ export function EngineErrorOverlay({
         <p className="data w-full break-all rounded-sm bg-panel-2 px-2 py-1 text-xs text-muted">
           {message}
         </p>
-        <button className="btn btn-active mt-1" onClick={onRetry} data-testid="retry-engine">
+        <button className="btn btn-primary mt-1" onClick={onRetry} data-testid="retry-engine">
           Retry
         </button>
       </div>

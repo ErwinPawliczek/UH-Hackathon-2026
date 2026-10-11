@@ -155,20 +155,7 @@ function FailControl({
         style={{ ...num, width: 52, border: '1px solid var(--line-2)', borderRadius: 'var(--r-sm)', padding: '1px 4px', background: 'var(--panel-2)' }}
       />
       <span style={label}>h</span>
-      <button
-        type="button"
-        onClick={() => onFail(trainsDown, hours)}
-        style={{
-          fontFamily: 'var(--f-mono)',
-          fontSize: 11,
-          color: 'var(--white)',
-          background: 'var(--blue)',
-          border: '1px solid var(--blue-strong)',
-          borderRadius: 'var(--r-sm)',
-          padding: '1px 8px',
-          cursor: 'pointer',
-        }}
-      >
+      <button type="button" className="btn btn-primary btn-sm" onClick={() => onFail(trainsDown, hours)}>
         Fail unit
       </button>
     </span>
