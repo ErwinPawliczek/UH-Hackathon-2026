@@ -1,18 +1,16 @@
 // What the visitor did, written down for the Log. The engine's event log
 // records what the simulation does; it does not say who caused it. So every
 // command the client sends on the visitor's behalf — a unit failed from a
-// site window, an order placed by hand, a route closed — leaves a note here,
+// site window, a route closed — leaves a note here,
 // built from the command itself, and so does going back in time. Notes are
 // ordinary log entries with a negative sequence number, which is what marks
 // an entry as the visitor's own (the engine numbers its entries from zero).
 
 import type { SimEvent } from '../engine/api';
 import type { ProcessSpec, UnitSpec, WorldSpec } from '../engine/world';
-import { VEHICLE_CLASSES, type VehicleClassKey } from '../engine/world';
-import { materialName } from '../ui/materials';
 
-/** Entry types the client writes: a triggered scenario, a disruption, a hand-placed order, a rewind. */
-export type UserNoteType = 'scenario' | 'user_outage' | 'user_order' | 'user_action' | 'rewind';
+/** Entry types the client writes: a triggered scenario, a disruption, a rewind. */
+export type UserNoteType = 'scenario' | 'user_outage' | 'user_action' | 'rewind';
 
 let nextSeq = -1;
 
@@ -115,15 +113,6 @@ export function describeCommand(
       const route = world !== null && typeof cmd.edge === 'number' ? world.routes[cmd.edge] : undefined;
       const where = route === undefined ? 'a route' : `the ${route.mode === 'road' ? 'road' : route.mode === 'river' ? 'river lane' : 'sea lane'} ${route.ends[0] === route.ends[1] ? route.ends[0] : `between ${route.ends[0]} and ${route.ends[1]}`}`;
       return { type: 'user_outage', text: `You closed ${where}${hoursWords(cmd.duration_h)}` };
-    }
-    case 'place_order': {
-      const seller = siteOf(world, cmd.seller ?? cmd.from);
-      const cls = VEHICLE_CLASSES[cmd.cls as VehicleClassKey]?.label.toLowerCase();
-      const t = typeof cmd.tonnes === 'number' ? `${Math.round(cmd.tonnes * 10) / 10} t of ` : '';
-      return {
-        type: 'user_order', site: site.index,
-        text: `You ordered ${t}${materialName(String(cmd.material ?? 'material'))} from ${seller.name} for ${site.name}${cls === undefined ? '' : `, by ${cls}`}`,
-      };
     }
     default:
       return null;

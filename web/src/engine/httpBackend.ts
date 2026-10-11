@@ -112,6 +112,20 @@ export class HttpBackend implements SimBackend {
         headers: JSON_HEADERS,
         body: JSON.stringify(body),
       });
+    // A map drawn in the builder: the layout goes with the world it redraws.
+    // A refusal is the visitor's to read and act on (the layout cannot be
+    // run as drawn), so there is no falling back to another world here.
+    if (config.layout !== undefined) {
+      try {
+        return await post({ seed: config.seed, world: config.world, layout: config.layout });
+      } catch (err) {
+        if (!(err instanceof HttpError) || err.status !== 400) throw err;
+        // The create only says no. The checker says why, in sentences:
+        // ask it, and carry those as the reason.
+        const why = await this.layoutErrors(config.layout);
+        throw why.length > 0 ? new HttpError(400, why.join('\n'), JSON.stringify({ error: why.join('\n') })) : err;
+      }
+    }
     const named = config.world !== undefined && config.world !== BUILTIN_WORLD;
     if (!named) return post({ seed: config.seed });
     try {
@@ -123,6 +137,20 @@ export class HttpBackend implements SimBackend {
       // running simulation instead of an error screen.
       if (err instanceof HttpError && err.status === 400) return post({ seed: config.seed });
       throw err;
+    }
+  }
+
+  /** Why a drawn layout cannot be run, one plain sentence per problem (POST /api/worlds/check); empty when it cannot say. */
+  async layoutErrors(layout: Record<string, unknown>): Promise<string[]> {
+    try {
+      const reply = await this.json<{ errors?: { text?: unknown }[] }>('/api/worlds/check', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ layout }),
+      });
+      return (reply.errors ?? []).map((e) => e.text).filter((t): t is string => typeof t === 'string' && t !== '');
+    } catch {
+      return []; // the checker itself failed: the create's own answer stands
     }
   }
 

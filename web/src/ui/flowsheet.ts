@@ -479,6 +479,24 @@ export function edgePath(
 
 // ---------------------------------------------------------------- live values
 
+/** Which side of the site a tank is on: what it uses, what it makes, or stock it both fills and draws from. */
+export type TankSide = 'input' | 'output' | 'held';
+
+/**
+ * A tank's side. A feed tank is an input and a product tank an output; a
+ * tank between two of the site's own processes (the refinery's heavy
+ * naphtha), or one the site both draws from and returns to (the flex
+ * cracker's LPG, drawn at both ends of its diagram), is held on site.
+ */
+export function tankSide(sheet: Flowsheet, tank: number): TankSide {
+  const roles = new Set(sheet.nodes.filter((n): n is FlowTankNode => n.kind === 'tank' && n.tank === tank).map((n) => n.role));
+  if (roles.has('mid') || (roles.has('feed') && roles.has('product'))) return 'held';
+  return roles.has('product') ? 'output' : 'input';
+}
+
+/** A tank's side as the diagram and the lists word it. */
+export const TANK_SIDE_WORDS: Record<TankSide, string> = { input: 'input tank', output: 'output tank', held: 'held on site' };
+
 /** A process's rate as a share of its design rate, from the snapshot. */
 export function rateOf(snap: Snapshot, procIndex: number): number {
   return snap.procRate[procIndex] ?? 0;

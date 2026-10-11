@@ -7,11 +7,11 @@ import type { Snapshot } from '../engine/snapshot';
 import type { WorldSpec } from '../engine/world';
 import { blueRamp } from './charts/palette';
 import {
-  STRAIGHT, buildFlowsheet, edgePath, fmtHours, fmtTph, labelWidth, streamLabel, tankLive, unitLive,
+  STRAIGHT, buildFlowsheet, tankSide, edgePath, fmtHours, fmtTph, labelWidth, streamLabel, tankLive, unitLive,
   type FlowTankNode, type FlowUnitNode, type Flowsheet,
 } from './flowsheet';
 import {
-  flowLines, headline, plantRows, sampleTick, since, toSeries, unitRows, weightedSum, withNow, type Histories,
+  flowLines, headline, isLevel, levelLines, plantRows, sampleTick, since, toSeries, unitRows, weightedSum, withNow, type Histories,
 } from './siteSeries';
 
 const world = { ...(fixture as unknown as WorldSpec), pipelines: [] } as WorldSpec;
@@ -356,7 +356,26 @@ describe('analytics rows', () => {
     expect(lpg?.now).toBeCloseTo(18.61, 1);
     // intermediates are neither an input nor an output of the plant, but their tanks are listed
     expect(rows.some((r) => (r.group === 'in' || r.group === 'out') && r.label === 'Vacuum gasoil')).toBe(false);
-    expect(rows.filter((r) => r.group === 'level')).toHaveLength(13);
+    expect(rows.filter((r) => isLevel(r.group))).toHaveLength(13);
+    // tank levels by side: the crude it uses, the nine products it makes, and what it holds between its own units
+    const of = (g: string) => rows.filter((r) => r.group === g).map((r) => r.label).sort();
+    expect(of('level-in')).toEqual(['Crude oil']);
+    expect(of('level-out')).toHaveLength(9);
+    expect(of('level-held')).toEqual(['Gasoil', 'Heavy naphtha', 'Vacuum gasoil']);
+    expect(tankSide(s, tank(s, 'CRUDE').tank)).toBe('input');
+    expect(tankSide(s, tank(s, 'VGO').tank)).toBe('held');
+    // an input tank says how long it lasts, an output tank how long until it is full
+    expect(rows.find((r) => r.group === 'level-in')?.hoursLeft).toBeGreaterThan(0);
+    expect(rows.find((r) => r.group === 'level-out')?.hoursLeft).toBeGreaterThan(0);
+    // the flex cracker draws LPG and returns LPG: one tank, held on site, listed once
+    const flex = sheetOf('CRACKER_FLEX');
+    const flexRows = plantRows(flex, world, snapAt(1, 0.7, 10), new Map(), streamLabel);
+    expect(flexRows.filter((r) => r.group === 'level-held').map((r) => r.label)).toEqual(['LPG']);
+    // a level chart shades its tanks, the biggest darkest
+    const lines = levelLines(rows.filter((r) => r.group === 'level-out'));
+    expect(lines).toHaveLength(9);
+    expect(new Set(lines.map((l) => l.color)).size).toBe(9);
+    expect(lines[0].color).toBe(blueRamp(9)[8]);
     expect(rows.find((r) => r.id === `level-${tank(s, 'VGO').tank}`)?.now).toBeCloseTo(70, 3);
   });
 

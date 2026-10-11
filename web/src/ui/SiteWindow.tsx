@@ -45,7 +45,7 @@ import {
 } from './flowsheet';
 import { presetLabel } from './siteIcons';
 import {
-  WINDOWS, flowLines, headline, plantRows, since, unitRows, type AnalyticsRow, type Histories, type History,
+  WINDOWS, isLevel, levelLines, flowLines, headline, plantRows, since, unitRows, type AnalyticsRow, type Histories, type History, type LevelGroup,
 } from './siteSeries';
 
 export const SITE_WINDOW_ID = 'site';
@@ -246,7 +246,7 @@ function RowTable({
 function chartTitle(r: AnalyticsRow): string {
   if (r.group === 'in') return `${r.label} into the plant`;
   if (r.group === 'out') return `${r.label} out of the plant`;
-  if (r.group === 'level') return `${r.label} level`;
+  if (isLevel(r.group)) return `${r.label} level`;
   return `${r.label} throughput — ${r.node?.unit.name ?? ''}`;
 }
 
@@ -292,6 +292,49 @@ function FlowChart({
   );
 }
 
+/** The three groups of tank levels, in the order they are listed and charted. */
+const LEVEL_GROUPS: { key: LevelGroup; title: string; left: string }[] = [
+  { key: 'level-in', title: 'Input tanks', left: 'cover' },
+  { key: 'level-out', title: 'Output tanks', left: 'room' },
+  { key: 'level-held', title: 'Held on site', left: 'cover' },
+];
+
+/**
+ * The fill of every tank of one group over time, in shades of blue (the
+ * biggest tank darkest). Each legend entry carries the tank's fill now and
+ * how long it lasts: days of cover for what the site uses, days of room for
+ * what it makes.
+ */
+function LevelChart({ group, fromTick, width }: {
+  group: { key: LevelGroup; title: string; left: string; rows: AnalyticsRow[] };
+  fromTick: number;
+  width: number;
+}) {
+  const left = new Map(group.rows.map((r) => [r.label, r.hoursLeft ?? null]));
+  const lines = levelLines(group.rows);
+  const named = (label: string) => {
+    const h = left.get(label) ?? null;
+    return h === null ? label : `${label} (${fmtHours(h)} ${group.left})`;
+  };
+  return (
+    <LineChart
+      // a single tank has no legend: its name and time left go in the title
+      title={lines.length === 1 ? `${group.title}: ${named(lines[0].label)}` : group.title}
+      unit="% full"
+      width={width}
+      height={170}
+      series={lines.map((l) => {
+        const s = since(l.series, fromTick);
+        return { label: named(l.label), color: l.color, values: s.values, x: s.ticks };
+      })}
+      yMax={100}
+      format={(v) => `${Math.round(v)}`}
+      toggleable={lines.length > 1}
+      testId={`plant-${group.key}-chart`}
+    />
+  );
+}
+
 function Analytics({
   sheet, world, snap, hist, width,
 }: {
@@ -304,7 +347,6 @@ function Analytics({
 }) {
   const [mode, setMode] = useState<'plant' | 'units'>('plant');
   const [windowKey, setWindowKey] = useState('7d');
-  const [chosenLevel, setChosenLevel] = useState<string | null>(null);
   const [chosenUnit, setChosenUnit] = useState<string | null>(null);
 
   const now = Number(snap.tick);
@@ -320,10 +362,13 @@ function Analytics({
   const sideBySide = both && width >= 2 * FLOW_CHART_MIN + FLOW_CHART_GAP;
   const flowWidth = sideBySide ? Math.floor((width - FLOW_CHART_GAP) / 2) : width;
 
-  // the chart under the list: a picked tank level (Plant) or unit (Units)
-  const chosen = mode === 'plant'
-    ? rows.find((r) => r.id === chosenLevel && r.group === 'level')
-    : rows.find((r) => r.id === chosenUnit) ?? rows[0];
+  // tank levels in their three groups; inputs and outputs sit side by side when there is room, like the flows
+  const levelGroups = LEVEL_GROUPS.map((g) => ({ ...g, rows: rows.filter((r) => r.group === g.key) })).filter((g) => g.rows.length > 0);
+  const pair = levelGroups.filter((g) => g.key !== 'level-held');
+  const levelsSideBySide = pair.length === 2 && width >= 2 * FLOW_CHART_MIN + FLOW_CHART_GAP;
+
+  // the chart above the list in Units: the picked unit
+  const chosen = mode === 'plant' ? undefined : rows.find((r) => r.id === chosenUnit) ?? rows[0];
   const series = chosen === undefined ? null : since(chosen.series, fromTick);
   const refs = chosen === undefined || chosen.unit === '%'
     ? []
@@ -387,23 +432,36 @@ function Analytics({
         </>
       )}
 
+      {mode === 'plant' && levelGroups.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-4" data-testid="plant-levels" data-layout={levelsSideBySide ? 'side-by-side' : 'stacked'}>
+          {levelGroups.map((g) => {
+            const w = levelsSideBySide && g.key !== 'level-held' ? Math.floor((width - FLOW_CHART_GAP) / 2) : width;
+            // a box of the chart's own width, so a long legend wraps inside it instead of pushing its neighbour down
+            return (
+              <div key={g.key} className="self-end" style={{ width: w }}>
+                <LevelChart group={g} fromTick={fromTick} width={w} />
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {mode === 'units' && picked !== null && <div className="mb-3">{picked}</div>}
 
       <RowTable
         rows={rows}
         groups={mode === 'plant'
-          ? [{ key: 'in', title: 'Going in' }, { key: 'out', title: 'Coming out' }, { key: 'level', title: 'Tank levels' }]
+          ? [{ key: 'in', title: 'Going in' }, { key: 'out', title: 'Coming out' }, ...LEVEL_GROUPS.map((g) => ({ key: g.key, title: g.title }))]
           : [{ key: 'unit', title: 'Units' }]}
         chosen={chosen?.id ?? null}
-        onChoose={mode === 'plant' ? (id) => setChosenLevel(id === chosenLevel ? null : id) : setChosenUnit}
+        onChoose={setChosenUnit}
         fromTick={fromTick}
         unitsMode={mode === 'units'}
-        canChoose={(r) => mode === 'units' || r.group === 'level'}
+        canChoose={() => mode === 'units'}
       />
-      {mode === 'plant' && picked !== null && <div className="mt-3">{picked}</div>}
       <p className="mt-2 text-[11px] text-muted">
         {mode === 'plant'
-          ? 'Each flow is the sum over the plant\'s processes of their rate times that stream\'s design t/h; shades run from the smallest stream (lightest) to the largest (darkest). Click a name in a chart to hide or show its line, and a tank level in the list to chart it.'
+          ? 'Each flow is the sum over the plant\'s processes of their rate times that stream\'s design t/h; shades run from the smallest stream (lightest) to the largest (darkest). Tank levels are grouped by side: input tanks hold what the site uses, output tanks what it makes, and stock held on site is filled and drawn by the site itself. Click a name in a chart to hide or show its line.'
           : 'A unit\'s throughput is its process\'s rate times everything the unit takes in at design; load is that against the capacity of the trains online. Click a row to chart it.'}
       </p>
     </section>

@@ -67,12 +67,6 @@ describe('describeCommand', () => {
     });
   });
 
-  it('says what the visitor ordered by hand, from whom and for whom', () => {
-    expect(describeCommand(world, { type: 'place_order', site: 0, material: 'SALT', seller: 1, cls: 'BARGE_DRY', tonnes: 1500 })).toEqual({
-      type: 'user_order', site: 0, text: 'You ordered 1500 t of salt from Salt mine for Chlor-alkali, by barge (dry)',
-    });
-  });
-
   it('describes a route closure by the route, and other disruptions by their site', () => {
     expect(describeCommand(world, { type: 'route_break', edge: 0, duration_h: 120 })?.text)
       .toBe('You closed the river lane between Salt mine and near Steam cracker (ethane) for 5 days');
