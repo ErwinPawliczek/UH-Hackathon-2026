@@ -1701,3 +1701,27 @@ TEST_CASE("R10 room: the summary sets the run beside an untouched baseline and s
   postJson(cli, a + "/host", {{"hostToken", madeA.at("hostToken")}, {"action", "end"}});
   CHECK(getJson(cli, a + "/summary").at("tick") == sum.at("tick"));
 }
+
+TEST_CASE("R11 room: a room can be opened on another world file, by name only") {
+  RoomServer ts(false);
+  auto cli = client(ts.port);
+  const json plain = postJson(cli, "/api/room", json::object());
+  CHECK(plain.at("world") == "erwin-world-v1");
+  CHECK(getJson(cli, "/api/room/" + plain.at("code").get<std::string>()).at("world") == "erwin-world-v1");
+
+  const json market = postJson(cli, "/api/room", {{"world", "erwin-market-v1"}});
+  REQUIRE(market.contains("code"));
+  CHECK(market.at("world") == "erwin-market-v1");
+  const std::string base = "/api/room/" + market.at("code").get<std::string>();
+  CHECK(getJson(cli, base).at("world") == "erwin-market-v1");
+  CHECK(getJson(cli, base + "/world").at("sites").size() == 22);
+  // The forecast rebuilds the same world.
+  postJson(cli, base + "/host", {{"hostToken", market.at("hostToken")}, {"action", "start"}});
+  ts.rooms.find(market.at("code").get<std::string>())->beat(3.0);
+  CHECK(postJson(cli, base + "/forecast", {{"days", 1}}).at("disruptions") == 0);
+
+  CHECK(postJson(cli, "/api/room", {{"world", "no-such-world"}}).at("error") == "There is no world called no-such-world");
+  CHECK(postJson(cli, "/api/room", {{"world", "../catalog/materials"}}).at("ok") == false);
+  CHECK(postJson(cli, "/api/room", {{"world", 7}}).at("ok") == false);
+  CHECK(ts.rooms.size() == 2);
+}

@@ -1,6 +1,8 @@
 // Chain Reaction — §5.4 production, energy booking and sink accounting.
 #include "sim/production.h"
 
+#include "sim/market.h"
+
 #include "sim/words.h"
 
 #include <algorithm>
@@ -11,8 +13,8 @@ namespace sim {
 
 namespace {
 
-constexpr double kEnergyPriceGJ = 8.0;   // $/GJ purchased heat (§3.1 note)
-constexpr double kPowerPriceMWh = 80.0;  // $/MWh
+constexpr double kEnergyPriceGJ = kMarketHeatUsdGJ;     // $/GJ purchased heat (§3.1 note)
+constexpr double kPowerPriceMWh = kMarketPowerUsdMWh;  // $/MWh
 constexpr double kServedEps = 0.999;     // below this share a sink is starved
 
 // Design real output in t/h at the world's mode mix, for the production
@@ -65,6 +67,17 @@ void stepProduction(const World& world, State& state, const std::vector<ControlD
     ProductionResult& r = out[p];
     const double rate = state.proc[p].rate_t_h;
     const double demand_dt = type.boundary == Boundary::Sink ? control[p].target * dt : 0.0;
+
+    // Priced out: what the customer would have taken at the base price but
+    // does not want at the price it pays. Not unmet demand; counted apart.
+    if (type.boundary == Boundary::Sink && state.demand_factor[p] < 1.0 && demand_dt > 1e-9) {
+      const double priced_out = demand_dt / state.demand_factor[p] - demand_dt;
+      const double usd = priced_out * feedPrice(world, proc);
+      state.cum_priced_out_t += priced_out;
+      state.cum_priced_out_usd += usd;
+      state.site_trade[proc.site.v].priced_out_t += priced_out;
+      state.site_trade[proc.site.v].priced_out_usd += usd;
+    }
 
     if (rate <= 1e-9) {
       // A stopped sink still books its demand as unmet (service-level KPI).

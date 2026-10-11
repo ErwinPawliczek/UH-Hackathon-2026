@@ -678,9 +678,22 @@ bool loadWorld(const std::string& name, const std::string& text, uint64_t seed, 
                      : k == "min_lot_target_frac" ? &market.min_lot_target_frac
                      : k == "max_lots_per_tank"   ? &market.max_lots_per_tank
                      : k == "dispatch_urgency_boost_h" ? &market.dispatch_urgency_boost_h
+                     : k == "price_aware_buying" ? &market.price_aware_buying
+                     : k == "price_cheap_ratio"  ? &market.price_cheap_ratio
+                     : k == "price_dear_ratio"   ? &market.price_dear_ratio
+                     : k == "price_cheap_fill"   ? &market.price_cheap_fill
+                     : k == "price_dear_fill"    ? &market.price_dear_fill
+                     : k == "price_cheap_cover"  ? &market.price_cheap_cover
+                     : k == "price_dear_cover"   ? &market.price_dear_cover
+                     : k == "demand_elasticity"  ? &market.demand_elasticity
+                     : k == "demand_min_frac"    ? &market.demand_min_frac
+                     : k == "demand_max_frac"    ? &market.demand_max_frac
+                     : k == "margin_control"     ? &market.margin_control
                                                        : nullptr;
       if (slot == nullptr) bad("market: unknown key \"" + k + "\"");
-      *slot = numField(jm, k.c_str(), "market");
+      // Switches may be written true / false.
+      *slot = it.value().is_boolean() ? (it.value().get<bool>() ? 1.0 : 0.0)
+                                      : numField(jm, k.c_str(), "market");
       if (*slot < 0) bad("market: \"" + k + "\" must be >= 0");
     }
     if (jm.contains("max_lots_per_tank") && market.max_lots_per_tank < 1)

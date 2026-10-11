@@ -42,6 +42,12 @@ struct TankState {
   // Product that did not fit and was thrown away, cumulative (only ever
   // non-zero for a tank the world marks reject_when_full).
   double rejected_t = 0;
+  // Rolling average of the price paid per tonne on this tank's booked lots
+  // (0 = nothing booked yet, read as the base price). Kept only in worlds
+  // with demand elasticity; hashed only when non-zero.
+  double paid_avg = 0;
+  // The same for lots sold from this tank (kept with margin control only).
+  double sold_avg = 0;
 };
 
 // §4.4 vehicle state. Plain data so forks copy it: the planned node sequence
@@ -145,6 +151,10 @@ struct SiteTrade {
   // customer sales it lost, at base prices.
   double stopped_h = 0;
   double unmet_usd = 0;
+  // Demand the site's customers gave up because of the price they pay
+  // (base demand less what they want at that price), tonnes and base-price
+  // dollars. Zero without demand elasticity.
+  double priced_out_t = 0, priced_out_usd = 0;
 };
 
 struct State {
@@ -178,6 +188,17 @@ struct State {
   // Per material: tonnes and dollars of every lot booked since tick 0, at
   // the price booked (summary view; not hashed).
   std::vector<double> mat_bought_t, mat_bought_usd;
+  // Demand elasticity (from the world's market block; the same in every
+  // fork): a customer wants base x (price paid / base price)^-elasticity,
+  // held within [demand_min, demand_max] of base. 0 = demand ignores price.
+  double demand_elasticity = 0, demand_min = 0.6, demand_max = 1.2;
+  std::vector<double> demand_factor;   // per process: wanted / base this tick (1 for non-sinks)
+  double cum_priced_out_t = 0, cum_priced_out_usd = 0;  // not hashed: follow from hashed state
+  // Margin control (market.h; from the world's market block). The vectors
+  // carry over from hour to hour, so they are state: hashed where non-zero.
+  bool margin_control = false;
+  std::vector<double> cost_delta, ask_floor;      // per tank
+  std::vector<double> margin_signal, proc_margin; // per process
   // trade_block: pairs that do not trade, as seller site << 32 | buyer site,
   // kept sorted. Empty unless a player set one; hashed only when not empty.
   std::vector<uint64_t> trade_blocks;

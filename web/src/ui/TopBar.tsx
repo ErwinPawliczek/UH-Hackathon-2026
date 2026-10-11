@@ -12,6 +12,8 @@
 import { EDITOR_PATH, leaveCustomMap } from '../store/customMap';
 import { useId } from 'react';
 import { useSim } from '../store/sim';
+import { DEFAULT_WORLD } from '../store/bootstrap';
+import { MARKET_WORLD } from '../store/roomTypes';
 import { SCENARIOS } from '../engine/events';
 import { activeScenarios, scenariosFor, type EngineScenario } from '../engine/scenarios';
 import { DropdownMenu } from './DropdownMenu';
@@ -81,6 +83,7 @@ export function TopBar() {
   const triggeredAll = useSim((s) => s.triggered);
   const triggeredAt = useSim((s) => s.triggeredAt);
   const customMap = useSim((s) => s.customMap);
+  const worldName = useSim((s) => s.worldName);
   const live = useSim((s) => s.sendCommand !== null);
   const logOpen = useWindows((s) => s.windows[LOG_WINDOW_ID]?.open === true);
   const rewindOpen = useWindows((s) => s.windows[REWIND_WINDOW_ID]?.open === true);
@@ -119,6 +122,19 @@ export function TopBar() {
       </button>
 
       <SpeedControl />
+
+      {/* the same map with or without the market rules: switching starts the run again */}
+      {backendKind === 'http' && !customMap && (
+        <button
+          className={`btn ${worldName === MARKET_WORLD ? 'btn-active' : ''}`}
+          aria-pressed={worldName === MARKET_WORLD}
+          onClick={() => useSim.setState({ worldName: worldName === MARKET_WORLD ? DEFAULT_WORLD : MARKET_WORLD })}
+          title="Buyers time their orders by price, customers buy less when prices rise, and plants slow down when they lose money. Switching starts the run again."
+          data-testid="market-toggle"
+        >
+          Market: {worldName === MARKET_WORLD ? 'on' : 'off'}
+        </button>
+      )}
 
       {/* One control: the button is named "Scenario" and opens the list. */}
       {backendKind === 'http' ? (

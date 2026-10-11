@@ -2538,3 +2538,174 @@ TEST_CASE("M32: a hurricane slows the roads and a water restriction holds barges
     moving += modeOf(v) != Mode::Road && sim->state().vehicle[v].status != VehStatus::Idle ? 1 : 0;
   CHECK(moving > 0);  // and they sail again
 }
+
+// --- Market behaviour (world erwin-market-v1: the switches on) ---------------
+
+namespace {
+std::unique_ptr<Sim> makeMarketSim() {
+  std::string error;
+  auto sim = Sim::createFromConfig(R"({"seed":42,"world":"erwin-market-v1"})", error);
+  REQUIRE_MESSAGE(sim != nullptr, "createFromConfig failed: " << error);
+  return sim;
+}
+}  // namespace
+
+TEST_CASE("M33: price-aware buyers defer when the only seller is dear and stock up when it is cheap") {
+  auto plain = makeMarketSim();
+  auto dear = makeMarketSim();
+  auto cheap = makeMarketSim();
+  REQUIRE(plain->marketParams().price_aware_buying);
+  CHECK(!makeMapSim()->marketParams().price_aware_buying);  // off in the default world
+  const World& w = plain->world();
+  const int pe = w.findSite("POLYETHYLENE");
+  REQUIRE(pe >= 0);
+  for (Sim* s : {plain.get(), dear.get(), cheap.get()}) s->step(96 * 5);
+  REQUIRE(json::parse(dear->command(R"({"type":"set_price","site":"POLYETHYLENE","markup":0.3})")).at("ok") == true);
+  REQUIRE(json::parse(cheap->command(R"({"type":"set_price","site":"POLYETHYLENE","markup":-0.2})")).at("ok") == true);
+  const auto sold = [&](const Sim& s) { return s.state().site_trade[static_cast<size_t>(pe)].sold_t; };
+  const auto ordered = [&](const Sim& s) {
+    double t = 0;
+    for (const Order& o : s.state().order)
+      if (w.tanks[o.from].site.v == static_cast<uint32_t>(pe)) t += o.qty_t;
+    return t;
+  };
+  const auto stock = [&](const Sim& s) {
+    for (size_t t = 0; t < w.tanks.size(); ++t)
+      if (w.tanks[t].site.v == static_cast<uint32_t>(pe) && w.tanks[t].role == TankRole::Product)
+        return s.state().tank[t].level_t / w.tanks[t].capacity_t;
+    return 0.0;
+  };
+  const double sold0 = sold(*plain), ordered0 = ordered(*plain);
+  for (Sim* s : {plain.get(), dear.get(), cheap.get()}) s->step(96 * 20);
+  const double base_sold = sold(*plain) - sold0;
+  MESSAGE("PE sold over 20 days: plain " << base_sold << " t, +30% " << (sold(*dear) - sold0)
+                                         << " t, -20% " << (sold(*cheap) - sold0) << " t; PE tank fill plain "
+                                         << stock(*plain) << ", +30% " << stock(*dear) << ", -20% " << stock(*cheap));
+  CHECK(ordered(*dear) - ordered0 < 0.97 * (ordered(*plain) - ordered0));
+  CHECK(sold(*dear) - sold0 < base_sold);
+  CHECK(stock(*dear) > stock(*plain));
+  CHECK(ordered(*cheap) - ordered0 > 1.02 * (ordered(*plain) - ordered0));
+  CHECK(stock(*cheap) < stock(*plain));
+  // The customers are still served while they wait for a better price.
+  CHECK(dear->state().cum_unmet_t == doctest::Approx(plain->state().cum_unmet_t).epsilon(0.02));
+}
+
+TEST_CASE("M34: customers want less of what has become dear, and the books keep the two losses apart") {
+  auto plain = makeMarketSim();
+  auto broken = makeMarketSim();
+  REQUIRE(plain->state().demand_elasticity > 0.0);
+  CHECK(makeMapSim()->state().demand_elasticity == 0.0);  // off in the default world
+  const World& w = plain->world();
+  const int depot = w.findSite("FUEL_DEPOT");
+  REQUIRE(depot >= 0);
+  plain->step(96 * 5);
+  broken->step(96 * 5);
+  REQUIRE(json::parse(broken->command(R"({"type":"site_shutdown","site":"REFINERY","duration_h":480})")).at("ok") == true);
+  plain->step(96 * 20);
+  broken->step(96 * 20);
+
+  // What the depot pays for fuel has gone up, and its customers want less.
+  double paid_plain = 0, paid_broken = 0, factor_plain = 1, factor_broken = 1;
+  int lines = 0;
+  for (size_t p = 0; p < w.processes.size(); ++p) {
+    if (w.processes[p].site.v != static_cast<uint32_t>(depot)) continue;
+    ++lines;
+    factor_plain = std::min(factor_plain, plain->state().demand_factor[p]);
+    factor_broken = std::min(factor_broken, broken->state().demand_factor[p]);
+  }
+  for (size_t t = 0; t < w.tanks.size(); ++t)
+    if (w.tanks[t].site.v == static_cast<uint32_t>(depot)) {
+      const double base = w.catalog.materials[w.tanks[t].material].base_price;
+      paid_plain = std::max(paid_plain, plain->state().tank[t].paid_avg / base);
+      paid_broken = std::max(paid_broken, broken->state().tank[t].paid_avg / base);
+    }
+  MESSAGE("fuel depot: dearest fuel at " << paid_plain << " x base normally, " << paid_broken
+                                         << " x with the refinery down; wanted share " << factor_plain << " and "
+                                         << factor_broken);
+  REQUIRE(lines > 0);
+  CHECK(paid_broken > paid_plain * 1.05);
+  CHECK(factor_broken < factor_plain - 0.01);
+  CHECK(factor_broken < 1.0);
+  CHECK(factor_broken >= plain->state().demand_min);
+
+  // The books: priced out is counted apart from not served, and the summary
+  // reports lost sales as their sum.
+  const State& st = broken->state();
+  CHECK(st.cum_priced_out_usd > plain->state().cum_priced_out_usd);
+  const json sum = json::parse(summaryJson(w, st));
+  const json& eco = sum.at("economy");
+  CHECK(eco.at("notServedUsd").get<double>() == doctest::Approx(st.cum_unmet_usd));
+  CHECK(eco.at("pricedOutUsd").get<double>() == doctest::Approx(st.cum_priced_out_usd));
+  CHECK(eco.at("lostSalesUsd").get<double>() == doctest::Approx(st.cum_unmet_usd + st.cum_priced_out_usd));
+  double sites_priced = 0, sites_unserved = 0;
+  for (const json& s : sum.at("sites")) {
+    sites_priced += s.at("pricedOutUsd").get<double>();
+    sites_unserved += s.at("notServedUsd").get<double>();
+    CHECK(s.at("lostSalesUsd").get<double>() ==
+          doctest::Approx(s.at("pricedOutUsd").get<double>() + s.at("notServedUsd").get<double>()));
+  }
+  CHECK(sites_priced == doctest::Approx(st.cum_priced_out_usd));
+  CHECK(sites_unserved == doctest::Approx(st.cum_unmet_usd));
+  CHECK(sum.at("sites").at(static_cast<size_t>(depot)).at("demandFactor").get<double>() == doctest::Approx(factor_broken));
+}
+
+TEST_CASE("M35: dearer feed moves down the chain, and a unit with no margin turns down to its minimum") {
+  auto plain = makeMarketSim();
+  auto dear = makeMarketSim();
+  REQUIRE(plain->state().margin_control);
+  CHECK(!makeMapSim()->state().margin_control);  // off in the default world
+  const World& w = plain->world();
+  const auto tankOf = [&](const char* site, const char* material) {
+    const int s = w.findSite(site);
+    const int m = w.catalog.findMaterial(material);
+    for (uint32_t t = 0; t < w.tanks.size(); ++t)
+      if (w.tanks[t].site.v == static_cast<uint32_t>(s) && w.tanks[t].material == static_cast<uint16_t>(m)) return t;
+    FAIL("no such tank");
+    return 0u;
+  };
+  const uint32_t ethylene = tankOf("CRACKER_ETHANE", "ETHYLENE"), pe = tankOf("POLYETHYLENE", "PE");
+  plain->step(96 * 5);
+  dear->step(96 * 5);
+  // The gas plant charges 30% more: ethane, then ethylene, then polyethylene.
+  REQUIRE(json::parse(dear->command(R"({"type":"set_price","site":"GAS_PLANT","markup":0.3})")).at("ok") == true);
+  plain->step(96 * 3);
+  dear->step(96 * 3);
+  MESSAGE("cost pass-through after 3 days, as a share of base price: ethylene "
+          << dear->state().cost_delta[ethylene] << " (was " << plain->state().cost_delta[ethylene]
+          << "), polyethylene " << dear->state().cost_delta[pe] << " (was " << plain->state().cost_delta[pe] << ")");
+  CHECK(dear->state().cost_delta[ethylene] > plain->state().cost_delta[ethylene] + 0.02);
+  CHECK(dear->state().cost_delta[pe] > plain->state().cost_delta[pe] + 0.02);
+  // And the customer is quoted more for polyethylene.
+  const auto peAsk = [&](Sim& s) {
+    const json doc = json::parse(sourcingJson(s, "PACKAGING", "PE"));
+    double ask = 0;
+    for (const json& o : doc.at("options")) ask = std::max(ask, o.value("ask_usd_t", 0.0));
+    return ask;
+  };
+  CHECK(peAsk(*dear) > peAsk(*plain) * 1.02);
+
+  // A plant selling far under the market earns nothing on its product and
+  // turns down to its minimum rate; it does not stop.
+  auto loss = makeMarketSim();
+  loss->step(96 * 5);
+  const int pp_site = w.findSite("POLYPROPYLENE");
+  size_t pp = 0;
+  for (size_t p = 0; p < w.processes.size(); ++p)
+    if (w.processes[p].site.v == static_cast<uint32_t>(pp_site)) pp = p;
+  loss->state().tank[tankOf("POLYPROPYLENE", "PP")].sold_avg = 1.0;  // sells for next to nothing
+  loss->step(96 * 2);
+  for (int t = 0; t < 96; ++t) {
+    loss->state().tank[tankOf("POLYPROPYLENE", "PP")].sold_avg = 1.0;
+    loss->step(1);
+  }
+  const double turndown = w.catalog.process_types[w.processes[pp].type].turndown;
+  const double share = loss->state().proc[pp].rate_t_h / w.processes[pp].design_rate_t_h;
+  MESSAGE("polypropylene at a loss: margin " << loss->state().proc_margin[pp] << " of product value, signal "
+                                            << loss->state().margin_signal[pp] << ", rate " << share
+                                            << " of design (turndown " << turndown << ")");
+  CHECK(loss->state().proc_margin[pp] < 0.0);
+  CHECK(loss->state().margin_signal[pp] == 0.0);
+  CHECK(share == doctest::Approx(turndown).epsilon(0.05));
+  CHECK(loss->state().proc[pp].status != ProcStatus::Shutdown);
+  CHECK(plain->state().margin_signal[pp] > 0.9);
+}

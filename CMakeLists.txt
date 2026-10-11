@@ -22,6 +22,7 @@ add_library(crx_engine STATIC
   engine/src/sim/events.cpp
   engine/src/sim/inspect.cpp
   engine/src/sim/layout.cpp
+  engine/src/sim/market.cpp
   engine/src/sim/pipelines.cpp
   engine/src/sim/production.cpp
   engine/src/sim/procurement.cpp
