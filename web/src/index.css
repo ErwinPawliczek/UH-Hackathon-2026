@@ -451,3 +451,19 @@ h2 {
   font-stretch: 125%;
   font-weight: 700;
 }
+
+/* The Names switch (ui/namesMode.ts). Icons only: the badge alone, still the
+   click target and still in its state colours. Hidden: no plant labels and
+   no pipeline names. */
+:root[data-names='icons'] .site-label-name {
+  display: none;
+}
+
+:root[data-names='icons'] .site-label-box {
+  padding: 1px 2px !important;
+}
+
+:root[data-names='hidden'] .site-label,
+:root[data-names='hidden'] .pipeline-labels {
+  display: none !important;
+}

@@ -800,6 +800,12 @@ bool buildWorldFromJson(const std::string& name, const std::string& json_text, u
 }
 
 bool buildNamedWorld(const std::string& name, uint64_t seed, World& out, std::string& error) {
+  std::string text;
+  if (!readNamedWorldText(name, text, error)) return false;
+  return buildWorldFromJson(name, text, seed, out, error);
+}
+
+bool readNamedWorldText(const std::string& name, std::string& text, std::string& error) {
   if (!validWorldName(name)) {
     error = "world name must be 1-64 characters of a-z, 0-9 and '-'";
     return false;
@@ -816,12 +822,12 @@ bool buildNamedWorld(const std::string& name, uint64_t seed, World& out, std::st
   }
   std::ostringstream buf;
   buf << in.rdbuf();
-  const std::string text = buf.str();
+  text = buf.str();
   if (text.size() > kMaxFileBytes) {
     error = "world " + name + ": file is too large";
     return false;
   }
-  return buildWorldFromJson(name, text, seed, out, error);
+  return true;
 }
 
 }  // namespace sim

@@ -91,9 +91,12 @@ export class SiteLabels {
       // trusted SVG string from the icon set), then the name as text.
       const box = document.createElement('span');
       box.style.cssText = LABEL_CSS;
+      // classes for the Names switch (ui/namesMode.ts): CSS hides the name, or the whole label
+      box.className = 'site-label-box';
       box.innerHTML = siteBadgeSvg(site.preset, BADGE_ICON_PX);
       const name = document.createElement('span');
       name.textContent = site.name;
+      name.className = 'site-label-name';
       box.appendChild(name);
       el.appendChild(box);
       this.boxes.push(box);

@@ -1,6 +1,7 @@
 // Chain Reaction — sim integration implementation.
 #include "sim/sim.h"
 
+#include "sim/layout.h"
 #include "sim/sixsite.h"
 #include "sim/worldfile.h"
 
@@ -26,6 +27,22 @@ std::unique_ptr<Sim> Sim::createNamed(const std::string& world_name, uint64_t se
   } else if (!buildNamedWorld(world_name, seed, *world, error)) {
     return nullptr;
   }
+  return createOn(std::move(world), seed);
+}
+
+std::unique_ptr<Sim> Sim::createWithLayout(const std::string& world_name,
+                                           const std::string& layout_json, uint64_t seed,
+                                           std::string& error) {
+  auto world = std::make_shared<World>();
+  LayoutReport report;
+  if (!buildWorldWithLayout(world_name, layout_json, seed, *world, report)) {
+    error = report.errors.empty() ? "the layout could not be used" : report.errors.front().text;
+    return nullptr;
+  }
+  return createOn(std::move(world), seed);
+}
+
+std::unique_ptr<Sim> Sim::createOn(std::shared_ptr<World> world, uint64_t seed) {
 
   auto sim = std::unique_ptr<Sim>(new Sim());
   world->seed = seed;  // stamped through the non-const pointer before the move
@@ -95,6 +112,7 @@ std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string&
   uint64_t seed = 42;  // §7.1: NULL or missing seed = defaults
   bool adaptation_override = true;
   std::string world_name = "sixsite";
+  std::string layout_json;  // a redrawn map over the named world (layout.h)
   if (config_json != nullptr && config_json[0] != '\0') {
     try {
       const json cfg = json::parse(config_json);
@@ -127,6 +145,14 @@ std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string&
           world_name = it.value().get<std::string>();
           continue;
         }
+        if (it.key() == "layout") {
+          if (!it.value().is_object()) {
+            error = "config layout must be an object";
+            return nullptr;
+          }
+          layout_json = it.value().dump();
+          continue;
+        }
         // §7.1 also names "gen" (M3 worldgen); it is not a surface yet —
         // reject instead of silently ignoring.
         error = "config key \"" + it.key() + "\" is not supported (only \"seed\", "
@@ -138,7 +164,8 @@ std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string&
       return nullptr;
     }
   }
-  auto sim = createNamed(world_name, seed, error);
+  auto sim = layout_json.empty() ? createNamed(world_name, seed, error)
+                                 : createWithLayout(world_name, layout_json, seed, error);
   if (sim) sim->state().adaptation = adaptation_override;
   return sim;
 }

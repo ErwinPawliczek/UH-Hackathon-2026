@@ -57,7 +57,7 @@ describe('event log rows and notable events', () => {
     const mine = [
       ...events,
       { seq: -1, tick: 15, type: 'scenario', text: 'Refinery crude unit down (7 days)' },
-      { seq: -2, tick: 35, type: 'user_order', text: 'You ordered 25 t of salt …' },
+      { seq: -2, tick: 35, type: 'user_action', text: 'You did something else' },
     ].sort((a, b) => a.tick - b.tick);
     const off = { consequences: false, deliveries: false };
     expect(logRows(mine, 50, off).map((e) => e.seq)).toEqual([-2, -1]);
@@ -101,10 +101,10 @@ describe('whose entry it is', () => {
   it('labels the visitor\'s entries as theirs and keeps a rewind note out of Back in time', () => {
     const ev = (seq: number, type: string): SimEvent => ({ seq, tick: 5, type, text: '' });
     expect(eventLabel(ev(-1, 'user_outage'))).toBe('you: disruption');
-    expect(eventLabel(ev(-2, 'user_order'))).toBe('you: order');
+    expect(eventLabel(ev(-2, 'user_action'))).toBe('you');
     expect(eventLabel(ev(-3, 'rewind'))).toBe('back in time');
     expect(eventMark(ev(-1, 'user_outage')).color).toBe('var(--alarm)');
-    expect(eventMark(ev(-2, 'user_order')).color).toBe('var(--blue)');
+    expect(eventMark(ev(-2, 'user_action')).color).toBe('var(--blue)');
     expect(notableEvents([ev(-1, 'user_outage'), ev(-3, 'rewind'), ev(4, 'unit_failed')], 10).map((e) => e.type))
       .toEqual(['user_outage', 'unit_failed']);
   });

@@ -7,13 +7,11 @@
 // in the order the plant itself would choose — who sells, by what vehicle,
 // how far, how long door to door, whether that beats the tank running dry,
 // how much the seller can spare, and what a tonne costs delivered: the price
-// an order is booked at plus freight, which is exactly what "Order one load"
-// then reports.
+// an order is booked at plus freight. The view is read-only: every tank
+// orders for itself.
 //
 // Selecting a site on the map jumps to that site's first buying tank; a
-// supplier's name selects the supplier on the map. "Order one load" on an
-// option books one vehicle load from that supplier by hand; when a vehicle
-// takes the order it is selected, so its trip shows on the map.
+// supplier's name selects the supplier on the map.
 
 import { useEffect, useRef, useState } from 'react';
 import type { SourcingDetail, SourcingOption, SourcingTank } from '../engine/api';
@@ -21,11 +19,10 @@ import { useSim } from '../store/sim';
 import { SiteBadge } from './SiteIcon';
 import { fmtTonnes } from './economyData';
 import { useEconomyView } from './economyView';
-import { fmtClock, fmtMomentWords } from './format';
+import { fmtMomentWords } from './format';
 import {
-  blockedWords, cashWords, cutOff, fmtCover, fmtTrip, inTime, nextPassWords, optionCash, orderBookedWords, orderCommand,
-  orderRefusedWords, sellerSplitWords, sortByCover, stateWords, supplierDown, tankHeadline, tankLabel, useSourcingDetail, useSourcingList,
-  vehicleWords, weighedWords, type PlaceOrderReply,
+  blockedWords, cashWords, cutOff, fmtCover, fmtTrip, inTime, nextPassWords, optionCash, sellerSplitWords, sortByCover, stateWords, supplierDown, tankHeadline, tankLabel, useSourcingDetail, useSourcingList,
+  vehicleWords, weighedWords,
 } from './supplyData';
 
 /** Hours of stock that fill the cover bar: a week. */
@@ -71,19 +68,14 @@ function TankRow({ tank, preset, chosen, onPick }: { tank: SourcingTank; preset:
   );
 }
 
-/** Hand-placed orders kept in the list. */
-const MAX_BOOKINGS = 6;
 
-function OptionRow({ option, material, coverH, presetOf, onSupplier, onOrder, busy }: {
+function OptionRow({ option, material, coverH, presetOf, onSupplier }: {
   option: SourcingOption;
   /** the product this tank buys */
   material: string;
   coverH: number | null;
   presetOf: (site: number) => string;
   onSupplier: (site: number) => void;
-  /** book one vehicle load from this supplier; absent when orders cannot be placed */
-  onOrder?: (option: SourcingOption) => void;
-  busy?: boolean;
 }) {
   const blocked = blockedWords(option);
   const timing = inTime(option, coverH);
@@ -135,17 +127,6 @@ function OptionRow({ option, material, coverH, presetOf, onSupplier, onOrder, bu
           {cashWords(cash)}
           {weighed !== null && <span className="block">{weighed}</span>}
         </span>
-        {onOrder !== undefined && option.feasible_now && blocked === null && (
-          <button
-            className="btn"
-            disabled={busy === true}
-            onClick={() => onOrder(option)}
-            title={`Book one ${vehicleWords(option.cls)} load (${fmtTonnes(option.lot_t)}) from ${option.seller_name} now`}
-            data-testid="supply-order"
-          >
-            Order one load
-          </button>
-        )}
       </div>
       {split !== null && <div className="mt-0.5 pl-7 text-xs text-ink" data-testid="supply-option-split">{split}.</div>}
       {blocked !== null && (
@@ -159,16 +140,10 @@ function OptionRow({ option, material, coverH, presetOf, onSupplier, onOrder, bu
 }
 
 /** The chosen tank: where it stands and every way to fill it. */
-export function SupplyDetail({ detail, presetOf, onSupplier, onOrder, busy, note = null, bookings = [] }: {
+export function SupplyDetail({ detail, presetOf, onSupplier }: {
   detail: SourcingDetail;
   presetOf: (site: number) => string;
   onSupplier: (site: number) => void;
-  onOrder?: (option: SourcingOption) => void;
-  busy?: boolean;
-  /** what became of the last order placed for this tank */
-  note?: { ok: boolean; text: string } | null;
-  /** what was booked by hand in this session, newest first */
-  bookings?: { id: number; text: string }[];
 }) {
   const t = detail.tank;
   return (
@@ -180,20 +155,6 @@ export function SupplyDetail({ detail, presetOf, onSupplier, onOrder, busy, note
         <span className="data text-ink">{fmtTonnes(t.inbound_t)}</span> on the way
       </p>
       <p className="mt-1 text-xs text-ink">{nextPassWords(detail)}</p>
-      {note !== null && (
-        <p className="mt-1.5 flex items-start gap-1.5 text-xs text-ink" role="status" data-testid="supply-order-note">
-          <span aria-hidden="true" className={`mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full ${note.ok ? 'bg-blue' : 'bg-alarm'}`} />
-          <span>{note.text}</span>
-        </p>
-      )}
-      {bookings.length > 0 && (
-        <div className="mt-2" data-testid="supply-bookings">
-          <div className="label mb-0.5">Booked by you this session</div>
-          <ul className="text-xs text-ink">
-            {bookings.map((b) => <li key={b.id} className="border-t border-line py-0.5">{b.text}</li>)}
-          </ul>
-        </div>
-      )}
       <div className="label mb-0.5 mt-3">
         {detail.options.length === 0 ? 'No one can supply it' : `${detail.options.length} way${detail.options.length === 1 ? '' : 's'} to supply it`}
       </div>
@@ -207,7 +168,7 @@ export function SupplyDetail({ detail, presetOf, onSupplier, onOrder, busy, note
       ) : (
         <ul>
           {detail.options.map((o) => (
-            <OptionRow key={`${o.seller}-${o.cls}`} option={o} material={t.material} coverH={t.cover_h} presetOf={presetOf} onSupplier={onSupplier} onOrder={onOrder} busy={busy} />
+            <OptionRow key={`${o.seller}-${o.cls}`} option={o} material={t.material} coverH={t.cover_h} presetOf={presetOf} onSupplier={onSupplier} />
           ))}
         </ul>
       )}
@@ -227,17 +188,7 @@ export function EconomySupply({ open }: { open: boolean }) {
   const chosen = useEconomyView((s) => s.supplyTank);
   const choose = useEconomyView((s) => s.chooseSupplyTank);
   const [onlyDown, setOnlyDown] = useState(false);
-  // bumped after an order by hand, so the figures show it at once
-  const [nonce, setNonce] = useState(0);
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<{ tank: string; ok: boolean; text: string } | null>(null);
-  /** an order placed here that no vehicle has taken yet */
-  const [awaiting, setAwaiting] = useState<{ id: number; epoch: number; tank: string; booked: string } | null>(null);
-  /** this session's hand-placed orders, newest first; emptied when the run is replaced or goes back in time */
-  const [bookings, setBookings] = useState<{ id: number; epoch: number; text: string }[]>([]);
-  const canOrder = useSim((s) => s.sendCommand !== null);
-  const epoch = useSim((s) => s.runEpoch);
-  const list = useSourcingList(open, nonce);
+  const list = useSourcingList(open);
   const presetOf = (site: number) => world?.sites[site]?.preset ?? '';
 
   const all = list.data === null ? [] : sortByCover(list.data.tanks);
@@ -246,52 +197,7 @@ export function EconomySupply({ open }: { open: boolean }) {
   const current = chosen === null ? undefined : all.find((t) => t.site_index === chosen.site && t.material === chosen.material);
   // the tank on show: the chosen one, else the first of the list
   const tank = current ?? shown[0] ?? all[0];
-  const detail = useSourcingDetail(open, tank?.site ?? null, tank?.material ?? null, nonce);
-  const tankKey = tank === undefined ? '' : `${tank.site}/${tank.material}`;
-
-  // the vehicle that has taken the awaited order, once dispatch gives it one
-  const carrier = useSim((s) => {
-    if (awaiting === null || s.snap === null) return -1;
-    for (let v = 0; v < s.snap.vehOrder.length; v++) if (s.snap.vehOrder[v] === awaiting.id) return v;
-    return -1;
-  });
-  useEffect(() => {
-    if (awaiting === null) return;
-    if (awaiting.epoch !== epoch) {
-      setAwaiting(null); // the run went back in time or was replaced: that order is not this run's
-      return;
-    }
-    if (carrier < 0) return;
-    select({ kind: 'vehicle', index: carrier });
-    setNote({ tank: awaiting.tank, ok: true, text: `Booked ${awaiting.booked}. A vehicle has taken it: it is selected on the map.` });
-    setAwaiting(null);
-  }, [awaiting, carrier, epoch, select]);
-
-  const placeOrder = (option: SourcingOption) => {
-    const send = useSim.getState().sendCommand;
-    if (send === null || tank === undefined || busy) return;
-    setBusy(true);
-    const forTank = tankKey;
-    send(orderCommand(tank, option))
-      .then((raw) => {
-        const reply = (raw ?? {}) as PlaceOrderReply;
-        if (reply.ok === true && reply.order !== undefined) {
-          const booked = orderBookedWords(reply.order, option.seller_name, option.door_to_door_h);
-          setNote({ tank: forTank, ok: true, text: `Booked ${booked}. Waiting for a vehicle (the next dispatch is on the hour).` });
-          const at = useSim.getState();
-          setAwaiting({ id: reply.order.id, epoch: at.runEpoch, tank: forTank, booked });
-          setBookings((list) => [{ id: reply.order!.id, epoch: at.runEpoch, text: `${fmtClock(Number(at.snap?.tick ?? 0))}: ${booked}, for ${tank.name}` }, ...list].slice(0, MAX_BOOKINGS));
-        } else {
-          setNote({ tank: forTank, ok: false, text: `Not booked. ${orderRefusedWords(reply)}` });
-        }
-      })
-      .catch((err: unknown) => setNote({ tank: forTank, ok: false, text: `Not booked. ${err instanceof Error ? err.message : String(err)}` }))
-      .finally(() => {
-        setBusy(false);
-        setNonce((n) => n + 1);
-      });
-  };
-
+  const detail = useSourcingDetail(open, tank?.site ?? null, tank?.material ?? null);
   // A site selected on the map jumps to that site's first buying tank —
   // unless it was selected from here, by a supplier's name.
   const ownPick = useRef(-1);
@@ -367,10 +273,6 @@ export function EconomySupply({ open }: { open: boolean }) {
             detail={detail.data}
             presetOf={presetOf}
             onSupplier={onSupplier}
-            onOrder={canOrder ? placeOrder : undefined}
-            busy={busy}
-            note={note !== null && note.tank === tankKey ? note : null}
-            bookings={bookings.filter((b) => b.epoch === epoch)}
           />
         ) : (
           <p className="py-4 text-sm text-muted">

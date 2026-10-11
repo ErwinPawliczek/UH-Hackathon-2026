@@ -1,6 +1,6 @@
 // The log as a floating window, newest first, scrollable. By default it
 // lists only what the visitor did: scenarios triggered, units failed from a
-// site window, orders placed by hand, going back in time. Everything the
+// site window, going back in time. Everything the
 // simulation does on its own is behind two tick boxes in the title bar:
 // "Consequences" (shutdowns and restarts, stockouts, failures and repairs as
 // the engine logs them, routes closing and reopening, cancelled orders) and

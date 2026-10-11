@@ -15,6 +15,7 @@
 #include "api_world.h"
 #include "sim/routes.h"
 #include "sim/inspect.h"
+#include "sim/layout.h"
 #include "sim/sim.h"
 #include "sim/window.h"
 #include "sim/words.h"
@@ -848,6 +849,13 @@ const char* crx_sourcing(const crx_sim* sim, const char* site, const char* mater
   else
     api->reply = crx::sim::sourcingJson(*api->sim, site, material);
   return api->reply.c_str();
+}
+
+const char* crx_check_layout(const char* world_name, const char* layout_json) {
+  thread_local std::string reply;
+  reply = crx::sim::checkLayoutJson(world_name != nullptr ? world_name : "",
+                                    layout_json != nullptr ? layout_json : "");
+  return reply.c_str();
 }
 
 uint64_t crx_tick(const crx_sim* sim) { return asApi(sim)->sim->state().tick; }

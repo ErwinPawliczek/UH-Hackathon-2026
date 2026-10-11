@@ -3,6 +3,7 @@
 // snapshots, see vehicleMotion.ts), forwards clicks to picking, and handles
 // resize.
 
+import { NAMES_LABEL, useNamesMode } from '../ui/namesMode';
 import { useEffect, useRef } from 'react';
 import { useSim } from '../store/sim';
 import { MapScene, viewFromParams } from './mapScene';
@@ -96,10 +97,24 @@ export function SceneCanvas() {
     };
   }, []);
 
+  const namesMode = useNamesMode((s) => s.mode);
+  const cycleNames = useNamesMode((s) => s.cycle);
+
   return (
     <>
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-label="Simulation map" />
-      <div className="absolute bottom-4 right-4 z-10">
+      <div className="absolute bottom-4 right-4 z-10 flex gap-2">
+      {/* plant names get big beside a zoomed-out map: names and icons, icons only, or nothing */}
+      <button
+        type="button"
+        className={`btn ${namesMode === 'full' ? '' : 'btn-active'}`}
+        onClick={cycleNames}
+        title="Plant names on the map: names and icons, icons only, or hidden"
+        data-testid="names-toggle"
+        data-names={namesMode}
+      >
+        {NAMES_LABEL[namesMode]}
+      </button>
       <button
         type="button"
         className="btn"
