@@ -1,5 +1,6 @@
-// Top bar: brand, sim clock, playback and speed controls, and the
-// seed/scenario pickers. Engine choice has no UI — visitors run the hosted engine; the
+// Top bar: brand, sim clock, playback and speed controls, and the scenario
+// picker. Engine choice and seed have no UI — visitors run the hosted engine
+// on a fixed seed (?seed= overrides it for testing); the
 // in-page stub is selected only via ?engine= for tests and local development.
 //
 // The scenario control is one button named "Scenario" that opens a list. On
@@ -17,6 +18,7 @@ import { SpeedControl } from './SpeedControl';
 import { fmtClock } from './format';
 import { LOG_WINDOW_AT, LOG_WINDOW_ID } from './EventLog';
 import { REWIND_WINDOW_AT, REWIND_WINDOW_ID } from './RewindWindow';
+import { SITES_WINDOW_AT, SITES_WINDOW_ID } from './SitesKey';
 import { useWindows } from './windows';
 
 /**
@@ -69,7 +71,6 @@ function ChainEdge() {
 export function TopBar() {
   const playing = useSim((s) => s.playing);
   const started = useSim((s) => s.started);
-  const seed = useSim((s) => s.seed);
   const scenario = useSim((s) => s.scenario);
   const tick = useSim((s) => s.snap?.tick);
   const error = useSim((s) => s.error);
@@ -79,9 +80,10 @@ export function TopBar() {
   const live = useSim((s) => s.sendCommand !== null);
   const logOpen = useWindows((s) => s.windows[LOG_WINDOW_ID]?.open === true);
   const rewindOpen = useWindows((s) => s.windows[REWIND_WINDOW_ID]?.open === true);
+  const sitesOpen = useWindows((s) => s.windows[SITES_WINDOW_ID]?.open === true);
   const canRewind = useSim((s) => s.rewindTo !== null) && Number(tick ?? 0) > 0;
 
-  const { togglePlay, setSeed, setScenario, triggerScenario } = useSim.getState();
+  const { togglePlay, setScenario, triggerScenario } = useSim.getState();
   const engineScenarios = backendKind === 'http' ? scenariosFor(world) : [];
 
   return (
@@ -104,20 +106,6 @@ export function TopBar() {
       </button>
 
       <SpeedControl />
-
-      <label className="ml-2 flex items-center gap-2">
-        <span className="label">Seed</span>
-        <input
-          id="seed-input"
-          name="seed"
-          type="number"
-          className="field w-20"
-          value={seed}
-          min={0}
-          onChange={(e) => setSeed(Number(e.target.value) || 0)}
-          data-testid="seed-input"
-        />
-      </label>
 
       {/* One control: the button is named "Scenario" and opens the list. */}
       {backendKind === 'http' ? (
@@ -155,6 +143,14 @@ export function TopBar() {
         data-testid="rewind-toggle"
       >
         ↶ Back in time
+      </button>
+      <button
+        className={`btn ${sitesOpen ? 'btn-active' : ''}`}
+        onClick={() => useWindows.getState().toggle(SITES_WINDOW_ID, SITES_WINDOW_AT)}
+        aria-pressed={sitesOpen}
+        data-testid="sites-toggle"
+      >
+        Sites
       </button>
       <button
         className={`btn ${logOpen ? 'btn-active' : ''}`}

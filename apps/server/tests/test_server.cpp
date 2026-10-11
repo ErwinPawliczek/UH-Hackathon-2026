@@ -194,6 +194,74 @@ TEST_CASE("rewind rebuilds an earlier tick exactly and forgets what came after")
   CHECK(tickOf(snapshotAt(a)) == 100);
 }
 
+TEST_CASE("forecast: with and without the disruptions, cost and countdown, session untouched") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const auto post = [&cli](const std::string& path, const std::string& body) {
+    auto res = cli.Post(path, body, "application/json");
+    REQUIRE(res);
+    return *res;
+  };
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  post("/api/sim/" + id + "/step", R"({"ticks":960})");  // day 10
+
+  // Nothing broken: the two futures are the same run.
+  const auto calm = post("/api/sim/" + id + "/forecast", R"({"days":30})");
+  REQUIRE(calm.status == 200);
+  const json quiet = json::parse(calm.body);
+  CHECK(quiet.at("tick") == 960);
+  CHECK(quiet.at("to_tick") == 960 + 30 * 96);
+  CHECK(quiet.at("disruptions") == 0);
+  CHECK(quiet.at("countdown").empty());
+  for (const auto& item : quiet.at("delta").items()) CHECK(item.value().get<double>() == 0.0);
+  CHECK(quiet.at("with") == quiet.at("without"));
+  CHECK(quiet.at("with").at("customers").size() == 15);
+
+  // Ethane cracker compressor down for ten days.
+  CHECK(json::parse(post("/api/sim/" + id + "/command",
+                         R"({"type":"unit_outage","site":"CRACKER_ETHANE","unit":"SC-CGC",)"
+                         R"("trains":1,"duration_h":240})")
+                        .body)
+            .at("ok") == true);
+  const std::string before = post("/api/sim/" + id + "/step", R"({"ticks":0})").body;
+  const auto first = post("/api/sim/" + id + "/forecast", R"({"days":30})");
+  const auto second = post("/api/sim/" + id + "/forecast", R"({"days":30})");
+  REQUIRE(first.status == 200);
+  CHECK(first.body == second.body);  // repeatable
+  CHECK(post("/api/sim/" + id + "/step", R"({"ticks":0})").body == before);  // run untouched
+
+  const json f = json::parse(first.body);
+  CHECK(f.at("disruptions") == 1);
+  CHECK(f.at("delta").at("cost_usd").get<double>() > 0.0);
+  CHECK(f.at("delta").at("shutdown_h").get<double>() >= 240.0);
+  CHECK(f.at("without").at("totals").at("shutdown_h").get<double>() == 0.0);
+  CHECK(f.at("without") == quiet.at("without"));  // "without" is the run nobody broke
+  bool pe_stops = false;
+  uint64_t last_tick = 0;
+  for (const json& c : f.at("countdown")) {
+    CHECK(c.at("tick").get<uint64_t>() >= last_tick);  // soonest first
+    last_tick = c.at("tick").get<uint64_t>();
+    CHECK(c.at("hours_from_now").get<double>() == doctest::Approx((last_tick - 960) * 0.25));
+    if (c.at("site") == "POLYETHYLENE" && c.at("kind") == "shuts_down") pe_stops = true;
+  }
+  CHECK(pe_stops);
+
+  // Default window, bounds and refusals.
+  CHECK(json::parse(post("/api/sim/" + id + "/forecast", "").body).at("days") == 30);
+  CHECK(json::parse(post("/api/sim/" + id + "/forecast", R"({"days":1})").body).at("to_tick") ==
+        960 + 96);
+  CHECK(post("/api/sim/" + id + "/forecast", R"({"days":0})").status == 400);
+  CHECK(post("/api/sim/" + id + "/forecast", R"({"days":121})").status == 400);
+  CHECK(post("/api/sim/" + id + "/forecast", R"({"days":"ten"})").status == 400);
+  CHECK(post("/api/sim/" + id + "/forecast", "not json").status == 400);
+  CHECK(post("/api/sim/nope/forecast", R"({"days":5})").status == 404);
+
+  // The six-site world forecasts too.
+  const std::string six = createSession(cli, R"({"seed":42})");
+  post("/api/sim/" + six + "/step", R"({"ticks":200})");
+  CHECK(post("/api/sim/" + six + "/forecast", R"({"days":10})").status == 200);
+}
+
 TEST_CASE("world json: fleet manifest without a fabricated shuttle schedule") {
   TestServer srv;
   auto cli = client(srv.port);

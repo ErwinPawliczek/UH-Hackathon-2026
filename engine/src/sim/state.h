@@ -115,6 +115,15 @@ struct Ledger {
   double revenue = 0, feed_cost = 0, freight = 0, energy_cost = 0;
 };
 
+// Per-process running totals since tick 0. Derived from quantities the hash
+// already covers, so they stay out of the state hash; they exist so a window
+// of a run (forecasts, per-customer service) is a plain subtraction.
+struct ProcTotals {
+  double demand_t = 0;  // sinks: tonnes asked for
+  double served_t = 0;  // sinks: tonnes actually drawn
+  double down_h = 0;    // plants: hours in Shutdown or Restarting
+};
+
 struct State {
   uint64_t tick = 0;
   Rng rng;
@@ -134,6 +143,7 @@ struct State {
   std::vector<Ledger> ledger;          // per site
   std::vector<uint8_t> sink_starved;   // per process: edge state for stockouts
   std::vector<double> rate_override;   // per process: §7.2 R_max cap, <0 = none
+  std::vector<ProcTotals> proc_totals; // per process, cumulative (not hashed)
 
   // Accounting accumulators (§5.4, §5.10). Real material only: pseudo
   // streams (FUEL_GAS, LOSS, WATER, AIR_O2) never enter tanks, so their

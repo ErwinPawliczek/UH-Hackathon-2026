@@ -222,6 +222,133 @@ SessionRegistry::RewindStatus SessionRegistry::rewind(const std::string& id, uin
   return RewindStatus::kOk;
 }
 
+namespace {
+
+// §5.9 disruptions: the commands a "what if nothing had broken" run leaves out.
+bool isDisruption(const std::string& command) {
+  const json::json j = json::json::parse(command, nullptr, false);
+  if (!j.is_object() || !j.contains("type") || !j["type"].is_string()) return false;
+  const std::string type = j["type"].get<std::string>();
+  return type == "unit_outage" || type == "site_shutdown" || type == "supply_shock" ||
+         type == "demand_shock" || type == "route_break";
+}
+
+void stepSimTo(crx_sim* sim, uint64_t target) {
+  while (crx_tick(sim) < target) {
+    const uint64_t gap = target - crx_tick(sim);
+    crx_step(sim, static_cast<uint32_t>(std::min<uint64_t>(gap, 1u << 20)));
+  }
+}
+
+}  // namespace
+
+SessionRegistry::ForecastStatus SessionRegistry::forecast(const std::string& id, uint32_t days,
+                                                          std::string& out) {
+  std::shared_ptr<Session> s;
+  {
+    std::lock_guard<std::mutex> lock(globalMutex_);
+    const auto it = sessions_.find(id);
+    if (it == sessions_.end()) return ForecastStatus::kNotFound;
+    s = it->second;
+  }
+  // Copy what the two futures need under the session lock, then compute
+  // outside it so the run itself is never held up.
+  crx_sim* with = nullptr;
+  std::string config;
+  Session::CommandLog commands;
+  uint64_t now = 0;
+  {
+    std::lock_guard<std::mutex> sessionLock(s->mutex);
+    s->lastUsed = nowFn_().time_since_epoch().count();
+    with = crx_fork(s->sim);
+    config = s->config;
+    commands = s->commands;
+    now = crx_tick(s->sim);
+  }
+  if (with == nullptr) return ForecastStatus::kFailed;
+
+  const uint32_t ticks = days * 96u;  // 0.25 h ticks
+  json::json futureWith = json::json::parse(crx_step_report(with, ticks), nullptr, false);
+  crx_destroy(with);
+
+  size_t disruptions = 0;
+  for (const auto& entry : commands) disruptions += isDisruption(entry.second) ? 1 : 0;
+
+  // Nothing was ever broken: the two futures are the same run.
+  json::json futureWithout = futureWith;
+  if (disruptions > 0) {
+    crx_sim* without = crx_create(config.empty() ? nullptr : config.c_str());
+    if (without == nullptr) return ForecastStatus::kFailed;
+    for (const auto& entry : commands) {
+      if (isDisruption(entry.second)) continue;
+      stepSimTo(without, entry.first);
+      crx_command(without, entry.second.c_str());
+    }
+    stepSimTo(without, now);
+    futureWithout = json::json::parse(crx_step_report(without, ticks), nullptr, false);
+    crx_destroy(without);
+  }
+  if (!futureWith.is_object() || !futureWithout.is_object()) return ForecastStatus::kFailed;
+
+  const json::json& tw = futureWith.at("totals");
+  const json::json& to = futureWithout.at("totals");
+  const auto diff = [&](const char* key) {
+    return tw.at(key).get<double>() - to.at(key).get<double>();
+  };
+  // What the disruptions cost: sales lost at the customers, plus the stock
+  // that is no longer there at the end (product never made, less the feed
+  // never used), plus what moving and making things cost more or less than
+  // they would have. A stopped plant saves energy, so without the stock term
+  // an outage would look like a saving.
+  const double lost = diff("unmet_usd"), freight = diff("freight_usd"), energy = diff("energy_usd");
+  const double stock = diff("inventory_usd");
+  const json::json delta = {{"service", diff("service")},
+                            {"unmet_t", diff("unmet_t")},
+                            {"unmet_usd", lost},
+                            {"freight_usd", freight},
+                            {"energy_usd", energy},
+                            {"inventory_usd", stock},
+                            {"shutdown_h", diff("shutdown_h")},
+                            {"cost_usd", lost + freight + energy - stock}};
+
+  // Countdown: what goes wrong with the disruptions that would not have
+  // gone wrong without them, soonest first.
+  json::json countdown = json::json::array();
+  const auto collect = [&](const char* list, const char* tickKey, const char* startKey,
+                           const char* kind, const char* whatKey) {
+    const json::json& a = futureWith.at(list);
+    const json::json& b = futureWithout.at(list);
+    for (size_t i = 0; i < a.size() && i < b.size(); ++i) {
+      if (a[i].at(tickKey).is_null() || !b[i].at(tickKey).is_null()) continue;
+      const uint64_t tick = a[i].at(tickKey).get<uint64_t>();
+      countdown.push_back({{"site", a[i].at("site")},
+                           {"site_index", a[i].at("site_index")},
+                           {"name", a[i].at("name")},
+                           {"kind", kind},
+                           {"what", a[i].at(whatKey)},
+                           {"tick", tick},
+                           {"hours_from_now", static_cast<double>(tick - now) * 0.25},
+                           {"already", a[i].at(startKey)}});
+    }
+  };
+  collect("plants", "first_down_tick", "down_at_start", "shuts_down", "process_name");
+  collect("customers", "first_dry_tick", "dry_at_start", "runs_dry", "material");
+  std::stable_sort(countdown.begin(), countdown.end(), [](const json::json& x, const json::json& y) {
+    return x.at("tick").get<uint64_t>() < y.at("tick").get<uint64_t>();
+  });
+
+  out = json::json{{"tick", now},
+                   {"to_tick", now + ticks},
+                   {"days", days},
+                   {"disruptions", disruptions},
+                   {"with", futureWith},
+                   {"without", futureWithout},
+                   {"delta", delta},
+                   {"countdown", countdown}}
+            .dump();
+  return ForecastStatus::kOk;
+}
+
 void SessionRegistry::reapExpired() {
   std::vector<std::shared_ptr<Session>> expired;
   {
@@ -339,6 +466,40 @@ void registerRoutes(httplib::Server& svr, SessionRegistry& sessions, const std::
                  break;
                default:
                  sendJson(res, 500, jsonError("the run could not be rebuilt"));
+                 break;
+             }
+           });
+
+  // Impact forecast: {"days": N} (1 to 120, default 30). Read-only.
+  svr.Post("/api/sim/" + id + "/forecast",
+           [&sessions](const httplib::Request& req, httplib::Response& res) {
+             uint32_t days = 30;
+             if (!req.body.empty()) {
+               const json::json body = json::json::parse(req.body, nullptr, false);
+               if (!body.is_object() ||
+                   (body.contains("days") && !body["days"].is_number_unsigned())) {
+                 sendJson(res, 400, jsonError("body must be {\"days\":N} with N from 1 to 120"));
+                 return;
+               }
+               if (body.contains("days")) {
+                 const uint64_t asked = body["days"].get<uint64_t>();
+                 if (asked < 1 || asked > 120) {
+                   sendJson(res, 400, jsonError("days must be from 1 to 120"));
+                   return;
+                 }
+                 days = static_cast<uint32_t>(asked);
+               }
+             }
+             std::string doc;
+             switch (sessions.forecast(req.matches[1].str(), days, doc)) {
+               case SessionRegistry::ForecastStatus::kOk:
+                 sendJson(res, 200, std::move(doc));
+                 break;
+               case SessionRegistry::ForecastStatus::kNotFound:
+                 sendJson(res, 404, jsonError("unknown session"));
+                 break;
+               default:
+                 sendJson(res, 500, jsonError("the forecast could not be computed"));
                  break;
              }
            });

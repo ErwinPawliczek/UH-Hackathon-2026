@@ -8,16 +8,18 @@ import { SceneCanvas } from './scene/SceneCanvas';
 import { TopBar } from './ui/TopBar';
 import { EngineErrorOverlay } from './ui/EngineErrorOverlay';
 import { SiteInspector } from './ui/SiteInspector';
-import { VehicleInspector } from './ui/VehicleInspector';
+import { VehicleWindow } from './ui/VehicleWindow';
 import { RewindWindow } from './ui/RewindWindow';
+import { SitesKey } from './ui/SitesKey';
 import { EventLog } from './ui/EventLog';
 
 function InspectorPanel() {
   const selected = useSim((s) => s.selected);
   if (selected === null) return null;
+  // a selected vehicle has its own floating window (VehicleWindow)
   return selected.kind === 'site'
     ? <div className="absolute right-2 top-14 z-10"><SiteInspector siteIdx={selected.index} /></div>
-    : <div className="absolute right-2 top-14 z-10"><VehicleInspector vehIdx={selected.index} /></div>;
+    : null;
 }
 
 export default function App() {
@@ -45,6 +47,8 @@ export default function App() {
       <InspectorPanel />
       <EventLog />
       <RewindWindow />
+      <SitesKey />
+      <VehicleWindow />
 
       {/* A new run waits here, paused at day 0, until the visitor starts it. */}
       {world !== null && snap !== null && !started && error === null && (

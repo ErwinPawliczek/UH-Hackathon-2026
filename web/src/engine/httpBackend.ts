@@ -4,7 +4,7 @@
 
 import { decode, type Snapshot } from './snapshot';
 import type { WorldSpec } from './world';
-import type { SimBackend, SimConfig, SimEvent } from './api';
+import type { SimBackend, SimConfig, SimEvent, VehicleDetail } from './api';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 
@@ -135,6 +135,10 @@ export class HttpBackend implements SimBackend {
 
   async series(id: string, kind: number, refId: number): Promise<number[]> {
     return this.json(`/api/sim/${encodeURIComponent(id)}/series?kind=${kind}&id=${refId}`);
+  }
+
+  async vehicle(id: string, index: number): Promise<VehicleDetail> {
+    return this.json(`/api/sim/${encodeURIComponent(id)}/vehicle?index=${Math.max(0, Math.floor(index))}`);
   }
 
   async rewind(id: string, tick: number): Promise<{ tick: number }> {

@@ -22,6 +22,7 @@
 #include "sim/dispatch.h"
 #include "sim/routes.h"
 #include "sim/sim.h"
+#include "sim/window.h"
 #include "sim/worldfile.h"
 
 #include <nlohmann/json.hpp>
@@ -452,4 +453,71 @@ TEST_CASE("M8: dispatch queue order — urgency first, or first come with a head
   CHECK(assigned(40, 0.5, 8, 0.5, 48.0) == 1);
   // Boost 0: age alone decides.
   CHECK(assigned(0, 0.1, 4, 1.0, 0.0) == 0);
+}
+
+TEST_CASE("M9: a window of a run accounts for exactly that stretch") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  sim->step(960);  // day 10
+  REQUIRE(sim->command(R"({"type":"unit_outage","site":"CRACKER_ETHANE","unit":"SC-CGC",)"
+                       R"("trains":1,"duration_h":240})")
+              .find("\"ok\":true") != std::string::npos);
+
+  const uint64_t parent_hash = sim->stateHash();
+  std::vector<double> k0, k1;
+  sim->computeKpis(k0);
+
+  Sim future(*sim);  // the window runs on a copy: the run itself is untouched
+  const WindowReport r = runWindow(future, 30 * 96);
+  future.computeKpis(k1);
+  CHECK(sim->stateHash() == parent_hash);
+  CHECK(sim->state().tick == 960);
+  CHECK(r.from_tick == 960);
+  CHECK(r.to_tick == 960 + 30 * 96);
+
+  // Totals are the window's own, and they add up from the per-customer rows.
+  double demand = 0, served = 0;
+  for (const WindowCustomer& c : r.customers) {
+    demand += c.demand_t;
+    served += c.served_t;
+    CHECK(c.served_t <= c.demand_t + 1e-6);
+  }
+  CHECK(r.customers.size() == 15);
+  CHECK(demand == doctest::Approx(r.demand_t).epsilon(1e-9));
+  CHECK(demand - served == doctest::Approx(r.unmet_t).epsilon(1e-6));
+  CHECK(r.unmet_t == doctest::Approx(k1[1] - k0[1]).epsilon(1e-9));
+  CHECK(r.unmet_usd == doctest::Approx(k1[2] - k0[2]).epsilon(1e-9));
+  CHECK(r.freight_usd == doctest::Approx(k1[6] - k0[6]).epsilon(1e-9));
+  CHECK(r.energy_usd == doctest::Approx(k1[7] - k0[7]).epsilon(1e-9));
+  CHECK(r.inventory_usd_start > 0);
+  CHECK(r.inventory_usd_end > 0);
+
+  // The shutdown-hours KPI now counts: it equals the plants' hours down.
+  double down = 0;
+  bool cracker_down = false, pe_down = false;
+  for (const WindowPlant& pl : r.plants) {
+    down += pl.down_h;
+    const Process& proc = sim->world().processes[pl.process];
+    const std::string site = sim->world().sites[proc.site.v].key;
+    if (site == "CRACKER_ETHANE" && pl.down_h >= 240) {
+      cracker_down = true;
+      CHECK(pl.first_down_tick == 961);  // the tick after the command
+    }
+    if (site == "POLYETHYLENE" && pl.down_h > 0) pe_down = pl.first_down_tick > 961;
+  }
+  CHECK(cracker_down);
+  CHECK(pe_down);
+  CHECK(down > 240);
+  CHECK(r.shutdown_h == doctest::Approx(down).epsilon(1e-9));
+  CHECK(k1[4] - k0[4] == doctest::Approx(down).epsilon(1e-9));
+  CHECK(k0[4] == 0.0);  // nothing was down in the first ten undisturbed days
+
+  // The JSON names sites and processes and marks "never" as null.
+  const json doc = json::parse(windowJson(sim->world(), r));
+  CHECK(doc.at("customers").size() == 15);
+  CHECK(doc.at("plants").size() == r.plants.size());
+  CHECK(doc.at("totals").at("shutdown_h").get<double>() == doctest::Approx(down));
+  bool saw_null = false;
+  for (const json& pl : doc.at("plants")) saw_null = saw_null || pl.at("first_down_tick").is_null();
+  CHECK(saw_null);
 }
