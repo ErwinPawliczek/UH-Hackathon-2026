@@ -46,6 +46,41 @@ describe('HttpBackend request mapping', () => {
     expect(JSON.parse(calls[0].body)).toEqual({ seed: 42 });
   });
 
+  it('asks for a named world and leaves the key out for the built-in one', async () => {
+    const { calls, impl } = fakeFetch({ 'POST /api/sim': () => ({ id: 'sim-8' }) });
+    const b = new HttpBackend('http://x', impl);
+    await b.create({ seed: 42, scenario: 'none', world: 'erwin-world-v1' });
+    await b.create({ seed: 42, scenario: 'none', world: 'sixsite' });
+    expect(JSON.parse(calls[0].body)).toEqual({ seed: 42, world: 'erwin-world-v1' });
+    expect(JSON.parse(calls[1].body)).toEqual({ seed: 42 });
+  });
+
+  it('falls back to the built-in world when the server rejects the named one', async () => {
+    const bodies: unknown[] = [];
+    const impl: typeof fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      bodies.push(body);
+      return 'world' in body
+        ? new Response('{"error":"engine rejected the config JSON"}', { status: 400 })
+        : new Response(JSON.stringify({ id: 'sim-9' }), { status: 200 });
+    };
+    const b = new HttpBackend('http://x', impl);
+    const { id } = await b.create({ seed: 7, scenario: 'none', world: 'erwin-world-v1' });
+    expect(id).toBe('sim-9');
+    expect(bodies).toEqual([{ seed: 7, world: 'erwin-world-v1' }, { seed: 7 }]);
+  });
+
+  it('does not retry a named-world create on errors other than a 400', async () => {
+    let n = 0;
+    const impl: typeof fetch = async () => {
+      n += 1;
+      return new Response('busy', { status: 503 });
+    };
+    const b = new HttpBackend('http://x', impl);
+    await expect(b.create({ seed: 7, scenario: 'none', world: 'erwin-world-v1' })).rejects.toThrow(/503/);
+    expect(n).toBe(1);
+  });
+
   it('steps by posting {"ticks":N} and decodes the binary snapshot reply', async () => {
     const snapshotBytes = encodeStub(9, 480);
     const { calls, impl } = fakeFetch({ 'POST /api/sim/sim-7/step': () => snapshotBytes });

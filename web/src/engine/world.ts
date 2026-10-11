@@ -13,7 +13,12 @@ export type GlyphKind =
   | 'extruder_hall'
   | 'tank'
   | 'flare'
-  | 'jetty';
+  | 'jetty'
+  | 'pipe_rack'
+  | 'truck_rack'
+  | 'silo'
+  | 'cell_room'
+  | 'exchanger_bank';
 
 export type RouteMode = 'road' | 'river' | 'sea';
 
@@ -31,8 +36,14 @@ export interface RouteSpec {
   mode: RouteMode;
   /** display names of the two ends (e.g. site names, or "Overseas" off-map) */
   ends: [string, string];
-  /** site indices at each end, null for off-map */
+  /** site indices at each end, null for off-map ends and network junctions */
   sites: [number | null, number | null];
+  /**
+   * True where the end is a junction of the drawn network rather than a site
+   * (hand-drawn map worlds: a route is one stretch of road, river or sea lane
+   * between two junctions). Absent on worlds whose routes all join sites.
+   */
+  junction?: [boolean, boolean];
   /** km points in map coordinates (0..w, 0..h) */
   points: [number, number][];
 }
@@ -89,8 +100,10 @@ export const VEHICLE_CLASSES: Record<
 
 export interface VehicleSpec {
   cls: VehicleClassKey;
-  /** cargo material key */
+  /** representative cargo material key; the cargo on board is snapshot state */
   cargo: string;
+  /** site index the vehicle is based at (engine worlds) */
+  home?: number;
   /** index into routes[] the vehicle shuttles along. Stub-producer-only: the
    * engine's world JSON carries no schedule — live movement (route, progress,
    * ETA) comes from snapshot arrays 12-14. The stub still needs these to
@@ -119,6 +132,14 @@ export interface SiteSpec {
 }
 
 export interface WorldSpec {
+  /** world name as the engine reports it ('sixsite', a named map world, …) */
+  world?: string;
+  /**
+   * Engine material keys in snapshot index order (the catalog's list, which
+   * also carries site-internal streams). Absent on the stub world, whose
+   * snapshot indexes MATERIALS.
+   */
+  materials?: string[];
   seed: number;
   wKm: number;
   hKm: number;
@@ -147,6 +168,12 @@ const MATERIAL_COLORS: Record<string, number> = {
   CAUSTIC: 0x60a5fa, STYRENE: 0xa78bfa, PE: 0xe2e8f0, PP: 0xc4b5fd,
   PVC: 0xfda4af, PS: 0x93c5fd,
 };
+
+/** Material key for a snapshot material index in this world, or null when out of range. */
+export function materialKeyAt(world: WorldSpec, index: number): string | null {
+  const list = world.materials ?? MATERIALS;
+  return index >= 0 && index < list.length ? list[index] : null;
+}
 
 export function materialColor(key: string): number {
   return MATERIAL_COLORS[key] ?? 0x94a3b8;

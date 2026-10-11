@@ -11,7 +11,7 @@ import { persist } from 'zustand/middleware';
 import type { Snapshot } from '../engine/snapshot';
 import type { SimEvent, BackendKind } from '../engine/api';
 import type { WorldSpec } from '../engine/world';
-import { STORAGE_KEY, dropLegacyPersistedState, backendOverride } from './bootstrap';
+import { DEFAULT_WORLD, STORAGE_KEY, dropLegacyPersistedState, backendOverride, worldFromParams } from './bootstrap';
 
 export type Selection = { kind: 'site' | 'vehicle'; index: number } | null;
 
@@ -30,6 +30,8 @@ export interface SimState {
 
   // runtime
   backendKind: BackendKind;
+  /** Named world the session asks the engine for; ?world= at bootstrap, no UI. */
+  worldName: string;
   playing: boolean;
   world: WorldSpec | null;
   snap: Snapshot | null;
@@ -72,6 +74,7 @@ export const useSim = create<SimState>()(
       speed: 16,
 
       backendKind: 'http',
+      worldName: DEFAULT_WORLD,
       playing: true,
       world: null,
       snap: null,
@@ -113,8 +116,11 @@ export const useSim = create<SimState>()(
 );
 
 // Apply the ?engine= override on top of the hosted default (tests and local
-// development select the in-page stub this way; no UI exists for it).
+// development select the in-page stub this way; no UI exists for it), and
+// the ?world= choice of map.
 if (typeof location !== 'undefined') {
-  const override = backendOverride(new URLSearchParams(location.search));
+  const params = new URLSearchParams(location.search);
+  const override = backendOverride(params);
   if (override !== null) useSim.setState({ backendKind: override });
+  useSim.setState({ worldName: worldFromParams(params) });
 }

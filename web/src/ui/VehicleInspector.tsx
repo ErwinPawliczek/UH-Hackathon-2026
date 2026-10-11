@@ -4,6 +4,7 @@
 import { VEHICLE_CLASSES } from '../engine/world';
 import { VEH_STATUS } from '../engine/stub';
 import { materialColor } from '../scene/palette';
+import { liveCargo } from '../scene/instances';
 import { useSim } from '../store/sim';
 import { fmtClock, fmtDelta, fmtPct } from './format';
 import { vehicleLive } from './vehicleLive';
@@ -16,8 +17,10 @@ export function VehicleInspector({ vehIdx }: { vehIdx: number }) {
   if (veh === undefined) return null;
 
   const live = vehicleLive(world, snap, vehIdx);
-  const clsLabel = VEHICLE_CLASSES[veh.cls].label;
-  const cargoColor = materialColor(veh.cargo).getHexString();
+  const clsLabel = VEHICLE_CLASSES[veh.cls]?.label ?? veh.cls;
+  // What is on board right now; an empty vehicle carries nothing.
+  const cargo = liveCargo(world, snap, vehIdx);
+  const cargoColor = cargo === null ? '5f656c' : materialColor(cargo).getHexString();
 
   return (
     <section className="panel pointer-events-auto w-80 p-4 text-xs" data-testid="vehicle-inspector">
@@ -29,7 +32,7 @@ export function VehicleInspector({ vehIdx }: { vehIdx: number }) {
           className="rounded-sm px-2 py-0.5 font-medium"
           style={{ backgroundColor: `#${cargoColor}33`, color: `#${cargoColor}` }}
         >
-          {veh.cargo}
+          {cargo ?? 'Empty'}
         </span>
       </header>
 

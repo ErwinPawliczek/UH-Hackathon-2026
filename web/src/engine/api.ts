@@ -14,6 +14,11 @@ export type BackendKind = 'stub' | 'http';
 export interface SimConfig {
   seed: number;
   scenario: string;
+  /**
+   * Named world to load (engine/data/worlds/<name>.json). Absent or
+   * 'sixsite' asks for the engine's built-in six-site world.
+   */
+  world?: string;
 }
 
 /** §7.2 log entry. */

@@ -128,6 +128,9 @@ export function siteNeighbors(world: WorldSpec, siteIdx: number): SiteNeighbor[]
     const myPos = route.sites[0] === siteIdx ? 0 : route.sites[1] === siteIdx ? 1 : -1;
     if (myPos < 0) return;
     const other = route.sites[1 - myPos];
+    // A junction of the drawn network is not a neighbour: on map worlds a
+    // site's road leads to the shared network, not to one other site.
+    if (other === null && route.junction?.[1 - myPos] === true) return;
     const name = other === null ? route.ends[1 - myPos] : world.sites[other].name;
     const n = table.get(other, name);
     if (!n.modes.includes(route.mode)) n.modes.push(route.mode);

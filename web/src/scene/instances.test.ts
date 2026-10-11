@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Snapshot } from '../engine/snapshot';
 import { stubWorld, type WorldSpec } from '../engine/world';
-import { lerpPose, sampleRoute, type VehiclePose } from './instances';
+import { buildVehicleLayer, lerpPose, liveCargo, sampleRoute, type VehiclePose } from './instances';
 
 /** Lean v2-shaped snapshot with nVeh vehicles; movement arrays optional. */
 function makeSnap(nVeh: number, opts?: { route?: number[]; progress?: number[] }): Snapshot {
@@ -104,5 +104,37 @@ describe('lerpPose', () => {
     const pose = lerpPose(world, cur, null, 0, 0.5);
     expect(pose.x).toBe(10);
     expect(pose.y).toBe(20);
+  });
+});
+
+describe('vehicle layer', () => {
+  it('maps instance slots to vehicles when a class is split across the fleet list', () => {
+    // An engine fleet lists vehicles home by home, so classes interleave.
+    const mixed: WorldSpec = {
+      ...world,
+      vehicles: [
+        { cls: 'TRUCK_TANK', cargo: 'NAPHTHA' },
+        { cls: 'BARGE_TANK', cargo: 'NAPHTHA' },
+        { cls: 'TRUCK_TANK', cargo: 'NAPHTHA' },
+        { cls: 'SHIP_GAS', cargo: 'LPG' },
+        { cls: 'TRUCK_TANK', cargo: 'NAPHTHA' },
+      ],
+    };
+    const layer = buildVehicleLayer(mixed);
+    expect(layer.members).toEqual([[0, 2, 4], [1], [3]]);
+    expect(layer.meshes.map((m) => m.count)).toEqual([3, 1, 1]);
+  });
+});
+
+describe('liveCargo', () => {
+  it('reads the cargo on board from the snapshot and null when empty', () => {
+    const snap = makeSnap(2);
+    snap.vehStatus[1] = 255; // vehicle 0: empty
+    snap.vehStatus[3] = 2; // vehicle 1: material index 2
+    const engineWorld: WorldSpec = { ...world, materials: ['CRUDE', 'HEAVY_NAPHTHA', 'BENZENE'] };
+    expect(liveCargo(engineWorld, snap, 0)).toBeNull();
+    expect(liveCargo(engineWorld, snap, 1)).toBe('BENZENE');
+    // without an engine material list the snapshot indexes the traded-material table
+    expect(liveCargo(world, snap, 1)).toBe('SALT');
   });
 });

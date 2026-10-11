@@ -3,9 +3,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   backendOverride,
+  DEFAULT_WORLD,
   dropLegacyPersistedState,
   LEGACY_STORAGE_PREFIX,
   STORAGE_KEY,
+  worldFromParams,
 } from './bootstrap';
 
 function memoryStorage(seed: Record<string, string> = {}) {
@@ -64,5 +66,23 @@ describe('backendOverride', () => {
 
   it('reads the engine parameter among other parameters', () => {
     expect(backendOverride(new URLSearchParams('?foo=bar&engine=stub'))).toBe('stub');
+  });
+});
+
+describe('worldFromParams', () => {
+  it('defaults to the hand-drawn map', () => {
+    expect(worldFromParams(new URLSearchParams(''))).toBe(DEFAULT_WORLD);
+    expect(DEFAULT_WORLD).toBe('erwin-world-v1');
+  });
+
+  it('reads the world parameter', () => {
+    expect(worldFromParams(new URLSearchParams('world=sixsite'))).toBe('sixsite');
+    expect(worldFromParams(new URLSearchParams('engine=http&world=my-map-2'))).toBe('my-map-2');
+  });
+
+  it('ignores anything that is not a world name', () => {
+    expect(worldFromParams(new URLSearchParams('world=../etc/passwd'))).toBe(DEFAULT_WORLD);
+    expect(worldFromParams(new URLSearchParams('world=Six Site'))).toBe(DEFAULT_WORLD);
+    expect(worldFromParams(new URLSearchParams('world='))).toBe(DEFAULT_WORLD);
   });
 });

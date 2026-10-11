@@ -33,6 +33,8 @@ export interface SessionOptions {
   kind: BackendKind;
   seed: number;
   scenario: string;
+  /** Named world to ask the engine for; absent = the engine's built-in world. */
+  world?: string;
 }
 
 /** Live session, as owned by openEngineSession / recovery. */
@@ -58,11 +60,11 @@ function releaseCurrent(): void {
  * `stillRunning()` turns false — the caller's effect was replaced mid-open.
  */
 async function openSessionFor(
-  { seed, scenario }: SessionOptions,
+  { seed, scenario, world: worldName }: SessionOptions,
   backend: SimBackend,
   stillRunning: () => boolean = () => true,
 ): Promise<LiveSession | null> {
-  const { id } = await backend.create({ seed, scenario });
+  const { id } = await backend.create({ seed, scenario, world: worldName });
   // The M0 stub engine's /world reply is too sparse to render (§7.3 world
   // lands in M1); reconcile it with the client's deterministic stub world.
   const world = resolveWorld(await backend.world(id), seed);
@@ -92,7 +94,7 @@ async function openSessionFor(
  * releases the session it owned; the step loop keeps its own lifetime.
  */
 export function openEngineSession(
-  { kind, seed, scenario }: SessionOptions,
+  { kind, seed, scenario, world }: SessionOptions,
   backend: SimBackend = createBackend(kind),
 ): () => void {
   let cancelled = false;
@@ -101,7 +103,7 @@ export function openEngineSession(
   useSim.getState().setError(null);
   void (async () => {
     try {
-      const live = await openSessionFor({ kind, seed, scenario }, backend, () => !cancelled);
+      const live = await openSessionFor({ kind, seed, scenario, world }, backend, () => !cancelled);
       if (live === null) return; // replaced mid-open; openSessionFor released the id
       session = live;
     } catch (err) {
@@ -160,7 +162,7 @@ export async function recoverFromGoneSession(ticks: number): Promise<void> {
     // (A settings change racing this recovery can orphan one session —
     // bounded by the server's 2-minute idle expiry and LRU eviction.)
     const fresh = await openSessionFor(
-      { kind: dead.backend.kind, seed: s.seed, scenario: s.scenario },
+      { kind: dead.backend.kind, seed: s.seed, scenario: s.scenario, world: s.worldName },
       dead.backend,
     );
     if (fresh === null) return;

@@ -8,6 +8,9 @@ import type { SimBackend, SimConfig, SimEvent } from './api';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 
+/** The engine's built-in world: requested by sending no `world` key at all. */
+export const BUILTIN_WORLD = 'sixsite';
+
 /** Non-2xx reply. Status is typed so callers can branch — e.g. a 404/410 means
  * the session id is gone server-side (idle expiry or LRU eviction) and the
  * client recreates instead of erroring. */
@@ -54,15 +57,28 @@ export class HttpBackend implements SimBackend {
   }
 
   async create(config: SimConfig): Promise<{ id: string }> {
-    // The engine's create contract is {seed, adaptation?} (§7.1); the UI's
-    // scenario list is a stub-era demo feature until the demo maps scenarios
-    // onto queued engine events (M4+). Passing scenario through gets the
-    // config rejected — the engine refuses unknown keys on purpose.
-    return this.json('/api/sim', {
-      method: 'POST',
-      headers: JSON_HEADERS,
-      body: JSON.stringify({ seed: config.seed }),
-    });
+    // The engine's create contract is {seed, world?, adaptation?} (§7.1); the
+    // UI's scenario list is a stub-era demo feature until the demo maps
+    // scenarios onto queued engine events (M4+). Passing scenario through
+    // gets the config rejected — the engine refuses unknown keys on purpose.
+    const post = (body: Record<string, unknown>) =>
+      this.json<{ id: string }>('/api/sim', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify(body),
+      });
+    const named = config.world !== undefined && config.world !== BUILTIN_WORLD;
+    if (!named) return post({ seed: config.seed });
+    try {
+      return await post({ seed: config.seed, world: config.world });
+    } catch (err) {
+      // A 400 here means this server cannot build the named world (an older
+      // build that refuses the `world` key, or a world file it does not
+      // ship). Fall back to its built-in world so the visitor still gets a
+      // running simulation instead of an error screen.
+      if (err instanceof HttpError && err.status === 400) return post({ seed: config.seed });
+      throw err;
+    }
   }
 
   async world(id: string): Promise<WorldSpec> {
