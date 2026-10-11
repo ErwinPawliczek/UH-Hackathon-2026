@@ -29,6 +29,7 @@ add_library(crx_engine STATIC
   engine/src/sim/sim.cpp
   engine/src/sim/sixsite.cpp
   engine/src/sim/validate.cpp
+  engine/src/sim/window.cpp
   engine/src/sim/world.cpp
   engine/src/sim/worldfile.cpp)
 target_include_directories(crx_engine PUBLIC engine/include engine/src)

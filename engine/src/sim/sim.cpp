@@ -57,6 +57,7 @@ std::unique_ptr<Sim> Sim::createNamed(const std::string& world_name, uint64_t se
   sim->state_.ledger.resize(w.sites.size());
   sim->state_.sink_starved.assign(w.processes.size(), 0);
   sim->state_.rate_override.assign(w.processes.size(), -1.0);
+  sim->state_.proc_totals.assign(w.processes.size(), ProcTotals{});
   // M2 logistics (§4.4): all edges open, market index at par, the fleet at
   // its home sites, no orders.
   sim->state_.edge_open.assign(w.edges.size(), 1);
@@ -151,6 +152,15 @@ void Sim::step(uint32_t ticks) {
     stepEvents(w, state_, rec_);
     computeSignals(w, state_, signals);
     stepControl(w, state_, signals, rec_, control);
+    // §5.10 shutdown hours: every plant (not a source or a sink) that is
+    // shut down or restarting this tick counts its quarter hour.
+    for (size_t p = 0; p < w.processes.size(); ++p) {
+      const ProcStatus st = state_.proc[p].status;
+      if (st != ProcStatus::Shutdown && st != ProcStatus::Restarting) continue;
+      if (w.catalog.process_types[w.processes[p].type].boundary != Boundary::None) continue;
+      state_.cum_shutdown_h += kTickHours;
+      state_.proc_totals[p].down_h += kTickHours;
+    }
     stepPipelines(w, state_);
     stepProduction(w, state_, control, production, rec_);
     // M2 logistics (§5.1 ordering): procurement and dispatch run hourly,

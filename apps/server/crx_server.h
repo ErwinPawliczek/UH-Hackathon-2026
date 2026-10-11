@@ -93,6 +93,16 @@ class SessionRegistry {
   enum class RewindStatus { kOk, kNotFound, kAhead, kFailed };
   RewindStatus rewind(const std::string& id, uint64_t tick);
 
+  // Impact forecast: runs two futures of `days` from the session's current
+  // tick without touching the session. "with" is a fork of the run as it is;
+  // "without" is the same run rebuilt with no disruption command ever issued
+  // (unit_outage, site_shutdown, supply_shock, demand_shock, route_break).
+  // `out` receives one JSON document: both futures, their difference (with
+  // cost_usd = lost sales + extra freight + extra energy - change in stock
+  // value), and a countdown of what the disruptions cause, soonest first.
+  enum class ForecastStatus { kOk, kNotFound, kFailed };
+  ForecastStatus forecast(const std::string& id, uint32_t days, std::string& out);
+
   // Runs fn(session) with the session locked and its last-use stamp touched.
   // Returns false when the id is unknown. The shared_ptr is copied out under
   // the registry lock, so the session stays alive even if release, eviction

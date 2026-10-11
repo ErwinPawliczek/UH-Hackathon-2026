@@ -50,6 +50,12 @@ const float* crx_series(const crx_sim* sim, uint32_t kind, uint32_t id, uint32_t
    shutdown hours, stock-outs, freight cost, energy cost. */
 const double* crx_kpis(const crx_sim* sim, uint32_t* n);
 
+/* Advances `ticks` and returns a JSON account of exactly that window: money
+   and service for the window only, each customer's demand against what it was
+   served and the first tick it ran short, each plant's hours down and the
+   first tick it stopped. Reply valid until the next call on this sim. */
+const char* crx_step_report(crx_sim* sim, uint32_t ticks);
+
 uint64_t crx_tick(const crx_sim* sim);
 uint64_t crx_state_hash(const crx_sim* sim);
 const char* crx_version(void);

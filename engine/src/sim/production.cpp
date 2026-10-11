@@ -67,6 +67,7 @@ void stepProduction(const World& world, State& state, const std::vector<ControlD
     if (rate <= 1e-9) {
       // A stopped sink still books its demand as unmet (service-level KPI).
       if (type.boundary == Boundary::Sink && demand_dt > 1e-9) {
+        state.proc_totals[p].demand_t += demand_dt;
         state.cum_demand_t += demand_dt;
         state.cum_unmet_t += demand_dt;
         state.cum_unmet_usd += demand_dt * feedPrice(world, proc);
@@ -155,6 +156,8 @@ void stepProduction(const World& world, State& state, const std::vector<ControlD
 
     if (type.boundary == Boundary::Sink) {
       const double served = r.real_in_t;
+      state.proc_totals[p].demand_t += demand_dt;
+      state.proc_totals[p].served_t += std::min(served, demand_dt);
       state.cum_demand_t += demand_dt;
       state.cum_consumed_t += served;
       const double unmet = std::max(0.0, demand_dt - served);

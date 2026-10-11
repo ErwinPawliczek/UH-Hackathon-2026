@@ -15,6 +15,7 @@
 #include "api_world.h"
 #include "sim/routes.h"
 #include "sim/sim.h"
+#include "sim/window.h"
 
 #include "crx/rng.h"
 
@@ -731,6 +732,15 @@ const double* crx_kpis(const crx_sim* sim, uint32_t* n) {
   api->sim->computeKpis(api->kpis);
   *n = static_cast<uint32_t>(api->kpis.size());
   return api->kpis.data();
+}
+
+const char* crx_step_report(crx_sim* sim, uint32_t ticks) {
+  ApiSim* api = asApi(sim);
+  if (api == nullptr) return "{}";
+  const crx::sim::WindowReport report = crx::sim::runWindow(*api->sim, ticks);
+  api->snap_dirty = true;
+  api->reply = crx::sim::windowJson(api->sim->world(), report);
+  return api->reply.c_str();
 }
 
 uint64_t crx_tick(const crx_sim* sim) { return asApi(sim)->sim->state().tick; }
