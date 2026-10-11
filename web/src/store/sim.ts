@@ -117,6 +117,13 @@ export interface SimState {
    */
   fetchVehicle: ((index: number) => Promise<VehicleDetail>) | null;
   /**
+   * Fetch one hourly history from the live session: kind 0 is a tank's fill
+   * (level / capacity) by tank index, kind 1 a process's rate / design by
+   * process index; one value per simulated hour, oldest first, the last one
+   * taken at the latest whole hour. Wired by the engine session.
+   */
+  fetchSeries: ((kind: number, id: number) => Promise<number[]>) | null;
+  /**
    * The selected vehicle's trip as last fetched — cargo, order, where from
    * and to, and `path`, the rest of its planned route in map km — or null
    * when no vehicle is selected or nothing has arrived yet. Kept fresh by
@@ -185,6 +192,7 @@ export const useSim = create<SimState>()(
       error: null,
       sendCommand: null,
       fetchVehicle: null,
+      fetchSeries: null,
       selectedVehicleDetail: null,
       triggered: [],
       triggeredAt: {},

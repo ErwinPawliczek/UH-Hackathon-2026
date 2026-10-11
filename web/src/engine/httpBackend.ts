@@ -133,8 +133,17 @@ export class HttpBackend implements SimBackend {
     return this.json(`/api/sim/${encodeURIComponent(id)}/kpis`);
   }
 
+  /**
+   * Hourly history: one value per simulated hour, oldest first (the engine
+   * keeps the last 60 days). The reply is a raw little-endian float32 array,
+   * not JSON; an empty body means no hour has been recorded yet.
+   */
   async series(id: string, kind: number, refId: number): Promise<number[]> {
-    return this.json(`/api/sim/${encodeURIComponent(id)}/series?kind=${kind}&id=${refId}`);
+    const res = await this.send(`/api/sim/${encodeURIComponent(id)}/series?kind=${kind}&id=${refId}`);
+    const type = res.headers.get('Content-Type') ?? '';
+    if (type.includes('json')) return (await res.json()) as number[]; // tolerated: a JSON-speaking host
+    const buf = await res.arrayBuffer();
+    return Array.from(new Float32Array(buf, 0, Math.floor(buf.byteLength / 4)));
   }
 
   async vehicle(id: string, index: number): Promise<VehicleDetail> {

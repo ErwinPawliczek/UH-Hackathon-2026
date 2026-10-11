@@ -1,5 +1,6 @@
-// App shell: mounts the engine hook once, layers the scene, top bar,
-// inspectors and floating windows over it, and shows loading/error states.
+// App shell: mounts the engine hook once, layers the scene, top bar and
+// floating windows over it (a selected site or vehicle opens its own
+// window), and shows loading/error states.
 
 import { useEffect } from 'react';
 import { useSimEngine } from './store/useSimEngine';
@@ -7,21 +8,12 @@ import { useSim } from './store/sim';
 import { SceneCanvas } from './scene/SceneCanvas';
 import { TopBar } from './ui/TopBar';
 import { EngineErrorOverlay } from './ui/EngineErrorOverlay';
-import { SiteInspector } from './ui/SiteInspector';
+import { SiteWindow } from './ui/SiteWindow';
 import { VehicleWindow } from './ui/VehicleWindow';
 import { RewindWindow } from './ui/RewindWindow';
 import { SitesKey } from './ui/SitesKey';
 import { EconomyWindow } from './ui/EconomyWindow';
 import { EventLog } from './ui/EventLog';
-
-function InspectorPanel() {
-  const selected = useSim((s) => s.selected);
-  if (selected === null) return null;
-  // a selected vehicle has its own floating window (VehicleWindow)
-  return selected.kind === 'site'
-    ? <div className="absolute right-2 top-14 z-10"><SiteInspector siteIdx={selected.index} /></div>
-    : null;
-}
 
 export default function App() {
   useSimEngine();
@@ -45,12 +37,12 @@ export default function App() {
     <div className="relative h-dvh w-full overflow-hidden bg-white text-ink">
       <SceneCanvas />
       <TopBar />
-      <InspectorPanel />
       <EventLog />
       <RewindWindow />
       <SitesKey />
       <EconomyWindow />
       <VehicleWindow />
+      <SiteWindow />
 
       {/* A new run waits here, paused at day 0, until the visitor starts it. */}
       {world !== null && snap !== null && !started && error === null && (

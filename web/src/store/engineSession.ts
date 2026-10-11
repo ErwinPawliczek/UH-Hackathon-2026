@@ -148,6 +148,7 @@ async function openSessionFor(
     snap: null,
     sendCommand: (cmd) => serial(() => backend.command(id, cmd)),
     fetchVehicle: (index) => serial(() => backend.vehicle(id, index)),
+    fetchSeries: (kind, refId) => serial(() => backend.series(id, kind, refId)),
     selectedVehicleDetail: null,
     rewindTo: (tick) => rewindSession({ id, backend }, tick),
   });
@@ -181,7 +182,9 @@ export function openEngineSession(
   return () => {
     cancelled = true;
     releaseCurrent();
-    useSim.setState({ sendCommand: null, rewindTo: null, fetchVehicle: null, selectedVehicleDetail: null });
+    useSim.setState({
+      sendCommand: null, rewindTo: null, fetchVehicle: null, fetchSeries: null, selectedVehicleDetail: null,
+    });
   };
 }
 

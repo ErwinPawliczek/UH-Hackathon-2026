@@ -1,19 +1,24 @@
 // The Economy window: the numbers behind the whole process, in one wide
 // draggable window opened from the top bar. Tabs:
 //
+//   Procurement — what has been bought so far: spend and tonnes per chemical
+//   over time, and freight by vehicle type (EconomyProcurement.tsx).
+//   Production — how hard every plant has run, day by day, and the network's
+//   service, lost sales and stopped time (EconomyProduction.tsx).
 //   Disruption impact — what is broken right now will cost over the next 30
 //   days, itemised in plain words, what stops next and when, and how the 30
 //   days compare with the same days had nothing broken.
 //
-// The data comes from the live session (see economyData.ts) and is refreshed
-// when something breaks or is repaired, after a step back in time, and at
-// most once per simulated day while the window is open.
+// The data comes from the live session (see economyData.ts): the run so far
+// once per simulated day, the forecast also whenever something breaks or is
+// repaired; all of it is dropped when the run is replaced or taken back.
 
 import { useState } from 'react';
 import type { ForecastReply } from '../engine/api';
 import { useSim } from '../store/sim';
 import { DraggableWindow } from './DraggableWindow';
 import { SiteBadge } from './SiteIcon';
+import { EconomyProcurement, EconomyProduction } from './EconomyTabs';
 import { costParts, countdownSentence, fmtMoney, fmtTonnes, nothingBroken, useForecast } from './economyData';
 import { fmtClock } from './format';
 import { useWindows } from './windows';
@@ -25,12 +30,16 @@ const WIDTH = 720;
 /** Days the disruption forecast looks ahead. */
 export const FORECAST_DAYS = 30;
 
-type TabKey = 'impact';
-const TABS: { key: TabKey; label: string }[] = [{ key: 'impact', label: 'Disruption impact' }];
+type TabKey = 'procurement' | 'production' | 'impact';
+const TABS: { key: TabKey; label: string }[] = [
+  { key: 'procurement', label: 'Procurement' },
+  { key: 'production', label: 'Production' },
+  { key: 'impact', label: 'Disruption impact' },
+];
 
 export function EconomyWindow() {
   const open = useWindows((s) => s.windows[ECONOMY_WINDOW_ID]?.open === true);
-  const [tab, setTab] = useState<TabKey>('impact');
+  const [tab, setTab] = useState<TabKey>('procurement');
   return (
     <DraggableWindow id={ECONOMY_WINDOW_ID} title="Economy" width={WIDTH} maxHeight="80vh" at={ECONOMY_WINDOW_AT}>
       <div className="flex gap-1.5 border-b border-line px-3 py-2" role="tablist" aria-label="Economy views">
@@ -47,6 +56,8 @@ export function EconomyWindow() {
           </button>
         ))}
       </div>
+      {tab === 'procurement' && <EconomyProcurement open={open} />}
+      {tab === 'production' && <EconomyProduction open={open} />}
       {tab === 'impact' && <ImpactTab open={open} />}
     </DraggableWindow>
   );
@@ -55,7 +66,7 @@ export function EconomyWindow() {
 /** A headline number with what it is, and the same number had nothing broken. */
 function Tile({ label, value, without, worse = false }: { label: string; value: string; without?: string; worse?: boolean }) {
   return (
-    <div className="min-w-0 flex-1 rounded-md border border-line bg-white px-3 py-1.5">
+    <div className="chamfer chamfer-sm min-w-0 flex-1 px-3 py-1.5" style={{ '--chamfer-fill': 'var(--white)' } as React.CSSProperties}>
       <div className="label">{label}</div>
       <div className="text-2xl font-semibold leading-tight text-ink">{value}</div>
       {without !== undefined && (

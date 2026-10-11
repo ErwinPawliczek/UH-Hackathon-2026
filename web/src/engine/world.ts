@@ -48,11 +48,36 @@ export interface RouteSpec {
   points: [number, number][];
 }
 
+/**
+ * One stream into or out of a unit or a process, at design rate. A
+ * "material" stream moves between the unit and a tank (`tank` is the index
+ * into WorldSpec.tanks); an "internal" stream joins one unit's out to
+ * another unit's in by key, inside one process; a "utility" stream (water,
+ * fuel gas, losses) has no tank and is shown as a note, not a line.
+ */
+export interface StreamSpec {
+  key: string;
+  /** tonnes per hour at design rate */
+  tph: number;
+  kind: 'material' | 'internal' | 'utility';
+  tank: number | null;
+}
+
 export interface UnitSpec {
   key: string;
   name: string;
   glyph: GlyphKind;
   trains: number;
+  // Flowsheet data (engine worlds; absent on the stub world):
+  /** global unit index — the unit's slot in snapshot array 3 (trains online) */
+  index?: number;
+  /** throughput one train can take, in t/h of everything the unit takes in */
+  capPerTrainTph?: number;
+  in?: StreamSpec[];
+  out?: StreamSpec[];
+  /** heat duty and electrical load at design rate */
+  heatGjH?: number;
+  powerMw?: number;
 }
 
 export interface ProcessSpec {
@@ -60,6 +85,20 @@ export interface ProcessSpec {
   name: string;
   designRateTph: number;
   units: UnitSpec[];
+  // Flowsheet data (engine worlds; absent on the stub world):
+  /** global process index — the process's slot in snapshot arrays 1 and 2 */
+  index?: number;
+  /** the stream the design rate is quoted in */
+  basis?: string;
+  /** "source" makes material from nothing, "sink" consumes it; "none" is a plant process */
+  boundary?: 'source' | 'sink' | 'none';
+  modes?: string[];
+  modeShare?: number[];
+  turndown?: number;
+  restartH?: number;
+  /** net streams of the whole process at design rate */
+  in?: StreamSpec[];
+  out?: StreamSpec[];
 }
 
 export type TankRole = 'feed' | 'product' | 'internal' | 'both';
