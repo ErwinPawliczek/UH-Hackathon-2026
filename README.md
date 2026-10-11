@@ -1,60 +1,78 @@
-# Chain Reaction
+# PetroGrid
 
-An interactive demo of a petrochemical supply chain in a fictional country. Trigger
-disruptions — compressor trips, chlorine squeezes, hurricanes, low rivers, gas
-shortfalls — and watch shortages, rerouting, and recovery propagate through plants,
-inventories, pipelines, and truck fleets. Every run can be compared against an
-outage-free baseline twin.
+A live simulation of a petrochemical supply chain: 22 sites (oil and gas fields, a refinery, two steam
+crackers, chlor-alkali, four polymer plants, and their customers) joined by pipelines, roads, river lanes and
+sea lanes, with trucks, barges and ships moving product between them. Break a unit, close a route or lose a
+supplier, and watch what stops next, what it costs, and who else can supply in time.
 
-The engine is a deterministic, time-stepped C++20 simulation exposed over a small
-HTTP API; the front end is a React + three.js client rendering the binary snapshots
-the engine emits. The design contract lives in [`docs/OUTLINE.md`](docs/OUTLINE.md).
+Every plant is modelled down to its process units with real mass and energy balances. Each tank decides
+when to order and each plant how fast to run from three simple signals, so the network reacts to an upset
+on its own rather than following a script.
 
-## Build and run locally
+Live demo: <https://demo.petrogrid.xyz> · Project site: <https://petrogrid.xyz>
 
-Prerequisites: a C++20 toolchain, CMake (≥ 3.23) with Ninja, and Node 20.
+## Run it locally
+
+Needs a C++20 compiler, CMake 3.23 or newer with Ninja, and Node 20 or newer.
 
 ```sh
-# 1. Native engine + server + tests (6 suites)
 cmake --preset native-release
 cmake --build --preset native-release
-ctest --preset native-release
+ctest --preset native-release          # engine, server and the 60-day gate for the default world
 
-# 2. Web client + unit tests
-cd web
-npm ci
-npm run build
-cd ..
+cd web && npm ci && npm run build && cd ..
 
-# 3. Serve API + client from one origin
 ./build/native-release/crx-server --port 8080 --web-dir web/dist
 ```
 
-Open **http://localhost:8080**. The app boots straight onto the hosted C++
-engine — no settings change needed. There is no engine UI: the in-page stub
-engine (used by the unit tests and for offline UI work) is selected with the
-`?engine=stub` URL parameter, e.g. <http://localhost:8080/?engine=stub>.
-If the hosted engine is unreachable, the app shows a retryable error instead
-of falling back to the stub.
+Open <http://localhost:8080> and press **Start simulation**.
 
 ## What to try
 
-- **Scenarios** — pick one from the dropdown (Compressor trip, Chlorine squeeze,
-  Hurricane landfall, Low river, Gas shortfall) and watch the event log as the
-  disruption propagates: unit failures, process shutdowns, stockouts, rerouting.
-- **Speed** — 4×/16×/64× playback; the timeline scrubs through the 60-day horizon.
-- **Inspectors** — click a site or a vehicle for tanks, recipes, cargo, and route.
-- **Deterministic runs** — the CLI drives the same engine headlessly:
+- **Speed.** One editable number: 1 is one simulated hour per second. Try 0.3 to follow single trucks, 16
+  to skip ahead.
+- **Scenario.** Trip a cracker compressor, take down the refinery's crude unit, halve the gas field, or close
+  a river lane, a sea lane or a road. The plant or route turns red and the consequences spread from there.
+- **Click a plant.** Its window shows a process flow diagram with every stream's live flow, each unit's
+  trains and load, and tank levels, then charts for the plant as a whole or for the units inside it. Each
+  unit has a Fail unit button.
+- **Click a truck, barge or ship.** See what it carries, from where to where, how far it has left, and its
+  route on the map.
+- **Economy.** Four views of the whole network: money and tonnes ordered per chemical over time, every
+  plant's running rate day by day, what the current disruption will cost over the next 30 days with a
+  countdown of what stops next, and, for any tank that buys material, who else can supply it, at what
+  delivered price, and whether it arrives before the tank runs dry. You can place an order with an
+  alternative supplier and watch the vehicle go.
+- **Back in time.** Jump the whole simulation back to any earlier moment; runs are exactly repeatable.
+- **Log.** What you changed, and optionally what followed.
 
-  ```sh
-  ./build/native-release/crx-cli run --seed 42 --ticks 960 --report 96 \
-      --event '{"kind":"unit_outage", ...}'   # repeatable, applied before tick 0
-  ./build/native-release/crx-cli worldgen --seed 7 --out world.json
-  ```
+## How it is built
 
-  Same seed + same events ⇒ byte-identical runs.
+| Part | Where | What it is |
+|---|---|---|
+| Engine | `engine/` | Deterministic C++20 simulation in 15-minute steps: tank signals, plant control, production, ordering, dispatch and transport, pipelines, learning. Same inputs give byte-identical runs. |
+| Catalog | `engine/data/catalog/` | Materials, 13 plant processes with 36 units, customers and sources, vehicle types. |
+| Default world | `engine/data/worlds/erwin-world-v1.json` | The hand-drawn map with plant sizes, tanks, berths and an 82-vehicle fleet. Built from `design/worlds/erwin-world-v1.json` by `tools/worlds/build_erwin_world.py`. |
+| Server | `apps/server/` | One engine per browser session behind a small HTTP API: step, command, world, events, history, vehicle, economy, forecast, sourcing, rewind. |
+| Web app | `web/` | React and three.js. The map, the windows and the charts. |
+| Project site | `site/` | The presentation site at petrogrid.xyz. |
+
+Two tools help when changing the world:
+
+```sh
+python3 tools/worlds/build_erwin_world.py      # re-size plants, tanks and fleet; writes the world file
+./build/native-release/crx-report --config '{"seed":42,"world":"erwin-world-v1"}' --days 60
+```
+
+`crx-report` runs the world for a number of days and prints customers, plants (with the tank that limits
+each), tanks, orders, lanes and fleet use. Its exit code is the verdict that `ctest -R mapworld_60d` checks:
+service at or above 95% at days 7, 30 and 60, every customer above 90%, and no plant starved of feed.
 
 ## Deployment
 
-`deploy/README.md` covers the Docker image, Fly.io, and the `demo.petrogrid.xyz`
-domain wiring. The demo needs no cloud to run — everything above is local.
+`deploy/README.md` covers the Docker image and Fly.io. The demo runs as one always-on machine.
+
+## Background
+
+`docs/OUTLINE.md` is the original technical outline. The engine's rules follow it closely; the user interface
+and the default world have moved on from what it describes.

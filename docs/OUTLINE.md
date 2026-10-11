@@ -1,4 +1,8 @@
-# Chain Reaction — technical outline
+# PetroGrid: original technical outline
+
+> **Status.** This is the design the engine was first built from (it used the working name "Chain Reaction"
+> and the `crx` prefix, which survives in the code). The engine's rules still follow it closely. The user interface
+> and the default world have moved on: see the README for what the app is today.
 
 Working title (rename freely). Code prefix `crx`. Outline v0.3, 2026-10-10.
 
