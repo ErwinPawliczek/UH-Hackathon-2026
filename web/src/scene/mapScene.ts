@@ -121,6 +121,8 @@ export class MapScene {
   private framedDist = 0;
   private readonly ring: THREE.Mesh;
   private readonly ringPivot: THREE.Group;
+  private readonly mineRing: THREE.Mesh;
+  private mine = -1;
   /** Wet stretch per route (river and sea lanes only; null for roads and dry spurs). */
   private readonly routeSpans: (WaterSpan | null)[];
   /** Berth per `${site}:${mode}`. */
@@ -266,6 +268,16 @@ export class MapScene {
     this.ringPivot = new THREE.Group();
     this.ringPivot.add(this.ring);
     this.scene.add(this.ringPivot);
+
+    // "yours" in a multiplayer room: a second, heavier blue ring that stays on the player's own plant
+    this.mineRing = new THREE.Mesh(
+      new THREE.RingGeometry(1.08, 1.3, 6).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: V3.blue, transparent: true, opacity: 0.85, depthTest: false }),
+    );
+    this.mineRing.rotation.y = Math.PI / 6;
+    this.mineRing.renderOrder = 1.9;
+    this.mineRing.visible = false;
+    this.scene.add(this.mineRing);
 
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.target.set(w / 2, 0, h / 2);
@@ -657,6 +669,18 @@ export class MapScene {
       restDir: [-berth.away * at.dirX, -berth.away * at.dirY],
       standoffKm: 0,
     };
+  }
+
+  /** Ring the player's own plant (a multiplayer room), or none with null. */
+  setMine(site: number | null): void {
+    const index = site ?? -1;
+    if (index === this.mine) return;
+    this.mine = index;
+    const anchor = this.siteLayer.siteAnchors[index];
+    this.mineRing.visible = anchor !== undefined;
+    if (anchor === undefined) return;
+    this.mineRing.position.set(anchor.x, anchor.topY + 0.025, anchor.z);
+    this.mineRing.scale.setScalar((anchor.clusterR + 0.15) / 1.02);
   }
 
   private syncRing(selection: Selection, poses: readonly { x: number; y: number }[]): void {
