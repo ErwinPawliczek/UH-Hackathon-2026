@@ -44,6 +44,12 @@ export interface SimBackend {
   kpis(id: string): Promise<number[]>;
   /** GET /api/sim/{id}/series?kind=&id= — hourly history. */
   series(id: string, kind: number, refId: number): Promise<number[]>;
+  /**
+   * DELETE /api/sim/{id} — release the session now: the client calls it
+   * whenever it replaces a session (retry, settings change, new world/preset
+   * load) and on page unload. Best-effort: never throws.
+   */
+  release(id: string): Promise<void>;
 }
 
 export function createBackend(kind: BackendKind, baseUrl = ''): SimBackend {

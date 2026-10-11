@@ -44,6 +44,8 @@ export function TopBar() {
       <label className="ml-2 flex items-center gap-2">
         <span className="label">Seed</span>
         <input
+          id="seed-input"
+          name="seed"
           type="number"
           className="field w-20"
           value={seed}
@@ -55,7 +57,7 @@ export function TopBar() {
 
       <label className="flex items-center gap-2">
         <span className="label">Scenario</span>
-        <select className="field" value={scenario} onChange={(e) => setScenario(e.target.value)} data-testid="scenario-select">
+        <select id="scenario-select" name="scenario" className="field" value={scenario} onChange={(e) => setScenario(e.target.value)} data-testid="scenario-select">
           {SCENARIOS.map((s) => (
             <option key={s.key} value={s.key}>{s.label}</option>
           ))}
