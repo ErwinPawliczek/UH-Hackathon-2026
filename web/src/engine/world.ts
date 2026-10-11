@@ -150,6 +150,11 @@ export interface WorldSpec {
   tanks: TankSpec[];
   routes: RouteSpec[];
   pipelines: PipelineSpec[];
+  /**
+   * Rail strips as drawn, each a list of km points (hand-drawn map worlds).
+   * Display only: the engine has no rail mode, so nothing runs on them.
+   */
+  rails?: [number, number][][];
   vehicles: VehicleSpec[];
 }
 
