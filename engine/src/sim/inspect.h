@@ -51,6 +51,16 @@ std::string buyTanksJson(const Sim& sim);
 // share, and a rank by profit (1 = best) among sites that run processes.
 std::string scoresJson(const World& world, const State& state);
 
+// The materials site `seller` can supply to site `buyer`: a product tank at
+// one and a feed tank at the other for a material vehicles carry, or a
+// pipeline between the two. Empty when the two never trade.
+std::vector<uint16_t> tradedMaterials(const World& world, uint32_t seller, uint32_t buyer);
+
+// One site's trading partners for the trade_block switches:
+// {"site","name","buyers":[{"site","key","name","materials":[..],"blocked"}],
+// "suppliers":[same]}. Empty string when `site` is not a site.
+std::string partnersJson(const World& world, const State& state, uint32_t site);
+
 std::string economyJson(const World& world, const State& state, const Recorder& rec,
                         uint32_t bucket_h);
 

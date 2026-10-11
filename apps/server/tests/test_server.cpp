@@ -1118,9 +1118,11 @@ TEST_CASE("R2 room: only the host starts, pauses and sets the speed; the clock m
   room->beat(5.0);
   CHECK(getJson(cli, base).at("tick") == 0);
 
+  CHECK(getJson(cli, base).at("speed") == 8.0);  // a new room starts at 8 hours a second
   CHECK(hostDo({{"action", "start"}}).at("ok") == true);
   CHECK(hostDo({{"action", "start"}}).at("ok") == false);
   CHECK(getJson(cli, base).at("phase") == "running");
+  CHECK(hostDo({{"action", "speed"}, {"speed", 1}}).at("speed") == 1.0);
 
   // Speed 1 = one simulated hour = 4 ticks per real second; fractions carry.
   room->beat(1.0);
@@ -1298,7 +1300,7 @@ TEST_CASE("R5 room: a player acts on their own plant only, and only once the gam
   for (const json& e : list) {
     priced = priced || e.at("type") == "price_set";
     down = down || (e.at("type") == "unit_failed" &&
-                    e.at("text").get<std::string>().find("taken down by the operator") != std::string::npos);
+                    e.at("text").get<std::string>().rfind("Ann took ", 0) == 0 && e.at("text").get<std::string>().find(" down") != std::string::npos);
   }
   CHECK(priced);
   CHECK(down);
@@ -1415,4 +1417,144 @@ TEST_CASE("R7 room: readers, players and the host hammer a running room while it
     });
   for (std::thread& th : threads) th.join();
   CHECK(bad.load() == 0);
+}
+
+TEST_CASE("R8 room: damage to the economy is what a player's own actions cost the customers") {
+  RoomServer ts(false);
+  auto cli = client(ts.port);
+  const json made = postJson(cli, "/api/room", json::object());
+  const std::string base = "/api/room/" + made.at("code").get<std::string>();
+  const std::shared_ptr<crx::server::Room> room = ts.rooms.find(made.at("code").get<std::string>());
+  REQUIRE(room);
+  const json world = getJson(cli, base + "/world");
+  int refinery = -1, pp = -1, pe = -1;
+  std::vector<uint32_t> refineryUnits;
+  for (size_t i = 0; i < world.at("sites").size(); ++i) {
+    const json& s = world.at("sites").at(i);
+    if (s.at("key") == "POLYPROPYLENE") pp = static_cast<int>(i);
+    if (s.at("key") == "POLYETHYLENE") pe = static_cast<int>(i);
+    if (s.at("key") == "REFINERY") {
+      refinery = static_cast<int>(i);
+      for (const json& p : s.at("processes"))
+        for (const json& u : p.at("units")) refineryUnits.push_back(u.at("index").get<uint32_t>());
+    }
+  }
+  REQUIRE(refinery >= 0);
+  REQUIRE(pp >= 0);
+  REQUIRE(pe >= 0);
+  const json ann = postJson(cli, base + "/join", {{"name", "Ann"}});  // breaks her refinery
+  const json bob = postJson(cli, base + "/join", {{"name", "Bob"}});  // never acts
+  const json cat = postJson(cli, base + "/join", {{"name", "Cat"}});  // sets a price of zero: an action, no effect
+  postJson(cli, base + "/claim", {{"token", ann.at("token")}, {"site", refinery}});
+  postJson(cli, base + "/claim", {{"token", bob.at("token")}, {"site", pp}});
+  postJson(cli, base + "/claim", {{"token", cat.at("token")}, {"site", pe}});
+  postJson(cli, base + "/host", {{"hostToken", made.at("hostToken")}, {"action", "start"}});
+  const auto days = [&](int n) {
+    for (int i = 0; i < n; ++i) room->beat(3.0);  // 3 s at speed 8 = one day
+  };
+  const auto damage = [&](int site) {
+    return getJson(cli, base + "/scores").at("scores").at(static_cast<size_t>(site)).at("damageUsd").get<double>();
+  };
+  days(2);
+  CHECK(room->shadows.empty());  // nobody has acted: nothing to compare
+  CHECK(damage(refinery) == 0.0);
+
+  // A refused action makes no shadow.
+  CHECK(postJson(cli, base + "/play", {{"token", ann.at("token")}, {"action", "unit"}, {"unit_index", 4000000}, {"down", true}}).at("ok") == false);
+  CHECK(room->shadows.empty());
+
+  REQUIRE(postJson(cli, base + "/play", {{"token", cat.at("token")}, {"action", "price"}, {"markup", 0.0}}).at("ok") == true);
+  for (const uint32_t unit : refineryUnits)
+    REQUIRE(postJson(cli, base + "/play", {{"token", ann.at("token")}, {"action", "unit"}, {"unit_index", unit}, {"down", true}}).at("ok") == true);
+  CHECK(room->shadows.size() == 2);
+  // The host's scenario reaches the shadows too, so it is nobody's damage.
+  REQUIRE(postJson(cli, base + "/host", {{"hostToken", made.at("hostToken")}, {"action", "scenario"},
+                                         {"command", {{"type", "demand_shock"}, {"site", "FUEL_DEPOT"}, {"multiplier", 1.2}, {"duration_h", 48}}}})
+              .at("ok") == true);
+  days(20);
+
+  CHECK(damage(refinery) > 0.0);  // no fuel for the depot: sales lost that were not lost without her
+  CHECK(damage(pp) == 0.0);       // Bob did nothing
+  // Cat's shadow lacks only a markup of zero but has Ann's outage and the
+  // host's shock: the same run as the room, to the last bit.
+  CHECK(damage(pe) == 0.0);
+  CHECK(crx_tick(room->shadows.at(cat.at("playerId").get<std::string>())) == crx_tick(room->sim));
+  CHECK(crx_state_hash(room->shadows.at(cat.at("playerId").get<std::string>())) == crx_state_hash(room->sim));
+  // Ann's shadow kept running; a shadow keeps no history.
+  CHECK(crx_tick(room->shadows.at(ann.at("playerId").get<std::string>())) == crx_tick(room->sim));
+  CHECK(std::string(crx_events(room->shadows.at(ann.at("playerId").get<std::string>()), 0)) == "[]");
+  const json row = getJson(cli, base + "/scores").at("scores").at(0);
+  CHECK(row.at("owner").is_null());
+  CHECK(row.at("damageUsd") == 0.0);
+}
+
+TEST_CASE("R9 room: a player blocks a partner, the moves feed names them, the host calls a hurricane") {
+  RoomServer ts(false);
+  auto cli = client(ts.port);
+  const json made = postJson(cli, "/api/room", json::object());
+  const std::string base = "/api/room/" + made.at("code").get<std::string>();
+  const std::shared_ptr<crx::server::Room> room = ts.rooms.find(made.at("code").get<std::string>());
+  REQUIRE(room);
+  const json state = getJson(cli, base);
+  int pe = -1;
+  for (const json& s : state.at("sites"))
+    if (s.at("key") == "POLYETHYLENE") pe = s.at("index").get<int>();
+  REQUIRE(pe >= 0);
+  const json maya = postJson(cli, base + "/join", {{"name", "Maya"}});
+  postJson(cli, base + "/claim", {{"token", maya.at("token")}, {"site", pe}});
+  postJson(cli, base + "/host", {{"hostToken", made.at("hostToken")}, {"action", "start"}});
+  room->beat(3.0);
+
+  const json partners = getJson(cli, base + "/partners?site=" + std::to_string(pe));
+  CHECK(partners.at("name") == "Polyethylene");
+  REQUIRE(!partners.at("buyers").empty());
+  REQUIRE(!partners.at("suppliers").empty());
+  const json buyer = partners.at("buyers").at(0), supplier = partners.at("suppliers").at(0);
+  CHECK(buyer.at("blocked") == false);
+  CHECK(buyer.at("materials").at(0).is_string());
+  CHECK(cli.Get(base + "/partners?site=999")->status == 400);
+
+  const auto play = [&](json action) {
+    action["token"] = maya.at("token");
+    return postJson(cli, base + "/play", action);
+  };
+  // Not a partner: refused in a sentence naming both.
+  const json refused = play({{"action", "block"}, {"partner", pe}, {"direction", "sell"}, {"blocked", true}});
+  CHECK(refused.at("error") == "Polyethylene does not sell to Polyethylene");
+  CHECK(play({{"action", "block"}, {"partner", buyer.at("site")}, {"direction", "sideways"}, {"blocked", true}}).at("ok") == false);
+  CHECK(play({{"action", "block"}, {"partner", 999}, {"direction", "sell"}, {"blocked", true}}).at("ok") == false);
+  CHECK(room->shadows.empty());
+
+  REQUIRE(play({{"action", "block"}, {"partner", buyer.at("site")}, {"direction", "sell"}, {"blocked", true}}).at("ok") == true);
+  REQUIRE(play({{"action", "block"}, {"partner", supplier.at("site")}, {"direction", "buy"}, {"blocked", true}}).at("ok") == true);
+  REQUIRE(play({{"action", "price"}, {"markup", 0.2}}).at("ok") == true);
+  REQUIRE(play({{"action", "rate"}, {"share", 0.9}}).at("ok") == true);
+  CHECK(room->shadows.size() == 1);  // a block is the player's action
+  CHECK(getJson(cli, base + "/partners?site=" + std::to_string(pe)).at("buyers").at(0).at("blocked") == true);
+  REQUIRE(postJson(cli, base + "/host", {{"hostToken", made.at("hostToken")}, {"action", "scenario"}, {"command", {{"type", "hurricane"}, {"duration_h", 24}}}}).at("ok") == true);
+  REQUIRE(postJson(cli, base + "/host", {{"hostToken", made.at("hostToken")}, {"action", "scenario"}, {"command", {{"type", "water_restriction"}}}}).at("ok") == true);
+  room->beat(1.0);
+
+  // The moves feed: events that carry a player.
+  std::vector<std::string> moves;
+  bool storm = false;
+  const json events = getJson(cli, base + "/events?since=0");
+  for (const json& e : events) {
+    if (e.contains("player")) {
+      CHECK(e.at("player") == maya.at("playerId"));
+      CHECK(e.at("playerName") == "Maya");
+      moves.push_back(e.at("text").get<std::string>());
+    } else {
+      storm = storm || e.at("text") == "A hurricane has slowed every road to a quarter speed";
+    }
+  }
+  REQUIRE(moves.size() == 4);
+  CHECK(moves[0] == "Maya stopped selling to " + buyer.at("name").get<std::string>());
+  CHECK(moves[1] == "Maya stopped buying from " + supplier.at("name").get<std::string>());
+  CHECK(moves[2] == "Maya raised Polyethylene's price to +20%");
+  CHECK(moves[3] == "Maya cut Polyethylene to 90%");
+  CHECK(storm);
+
+  // The forecast counts blocks and the two weather scenarios as disruptions.
+  CHECK(postJson(cli, base + "/forecast", {{"days", 2}}).at("disruptions") == 4);
 }

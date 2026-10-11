@@ -25,6 +25,8 @@ void stepPipelines(const World& world, State& state) {
     double wanted = dst.design_out_t_h + (dst.target_frac * dst.capacity_t - to.level_t) / kPullHours;
     wanted = std::clamp(wanted, 0.0, pipe.cap_t_h);
 
+    if (state.tradeBlocked(world.tanks[pipe.from.v].site.v, dst.site.v)) wanted = 0.0;
+
     const double flow =
         std::min(wanted, std::min(from.level_t / dt, std::max(0.0, dst.capacity_t - to.level_t) / dt));
 

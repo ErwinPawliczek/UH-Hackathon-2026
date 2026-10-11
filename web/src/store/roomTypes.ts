@@ -47,6 +47,8 @@ export interface RoomScore {
   rateShare: number;
   soldT: number;
   rank: number;
+  /** customer sales lost because of this player's actions; absent on older servers */
+  damageUsd?: number;
 }
 
 export interface RoomScores {
@@ -64,7 +66,12 @@ export type HostAction =
 export type PlayerAction =
   | { action: 'price'; markup: number }
   | { action: 'rate'; share: number }
-  | { action: 'unit'; unit_index: number; down: boolean };
+  | { action: 'unit'; unit_index: number; down: boolean }
+  | { action: 'block'; partner: number; direction: 'sell' | 'buy'; blocked: boolean };
+
+/** One plant a site trades with, and whether its owner has cut it off. */
+export interface RoomPartner { site: number; name: string; materials: string[]; blocked: boolean }
+export interface RoomPartners { buyers: RoomPartner[]; suppliers: RoomPartner[] }
 
 /** The server's answer to a claim or a player action. */
 export interface RoomReply { ok?: boolean; error?: string }
@@ -81,5 +88,23 @@ export function siteOwners(room: Pick<RoomInfo, 'sites' | 'players'> | null, nSi
   for (const p of room.players) {
     if (p.site !== null && p.site >= 0 && p.site < nSites && out[p.site] === null) out[p.site] = p.name;
   }
+  return out;
+}
+
+/** One bright colour per player, by the order they joined. */
+export const PLAYER_COLORS = ['#16a34a', '#2563eb', '#ea580c', '#9333ea', '#db2777', '#dc2626', '#0891b2', '#ca8a04', '#4f46e5', '#059669', '#c026d3', '#b45309', '#0d9488'];
+export function playerColor(room: Pick<RoomInfo, 'players'> | null, playerId: string | null): string | null {
+  if (room === null || playerId === null) return null;
+  const i = room.players.findIndex((p) => p.id === playerId);
+  return i < 0 ? null : PLAYER_COLORS[i % PLAYER_COLORS.length];
+}
+/** "Maya's Oil field": the owner first. */
+export const ownedName = (owner: string | null | undefined, site: string) => (owner ? `${owner}\u2019s ${site}` : site);
+/** Each site's owner colour, or null. */
+export function siteOwnerColors(room: Pick<RoomInfo, 'sites' | 'players'> | null, nSites: number): (string | null)[] {
+  const out: (string | null)[] = Array.from({ length: nSites }, () => null);
+  if (room === null) return out;
+  for (const s of room.sites) if (s.owner !== null && s.index >= 0 && s.index < nSites) out[s.index] = playerColor(room, s.owner);
+  for (const p of room.players) if (p.site !== null && p.site >= 0 && p.site < nSites && out[p.site] === null) out[p.site] = playerColor(room, p.id);
   return out;
 }

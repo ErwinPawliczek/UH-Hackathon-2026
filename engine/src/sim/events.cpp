@@ -317,6 +317,14 @@ void logShockStart(const World& world, const State& state, Recorder& rec, const 
 }  // namespace
 
 void stepEvents(const World& world, State& state, Recorder& rec) {
+  if (state.hurricane_until != 0 && state.tick >= state.hurricane_until) {
+    state.hurricane_until = 0;
+    logEvent(rec, state.tick, "hurricane_ended", "", "", "The hurricane has passed");
+  }
+  if (state.water_stop_until != 0 && state.tick >= state.water_stop_until) {
+    state.water_stop_until = 0;
+    logEvent(rec, state.tick, "water_restriction_ended", "", "", "The water restriction is lifted");
+  }
   // Promote pending events whose start tick has arrived.
   for (const EventDef& def : state.pending)
     if (def.start_tick <= state.tick) {
@@ -460,7 +468,8 @@ bool setUnitHeld(const World& world, State& state, Recorder& rec, uint32_t u, bo
     us.trains_down = static_cast<uint8_t>(type.units[unit.slot].trains);
     us.back_at_tick = UINT64_MAX;
     logEvent(rec, state.tick, "unit_failed", site.key, type.units[unit.slot].key,
-             what + " taken down by the operator");
+             rec.actor_name.empty() ? what + " taken down by the operator"
+                                    : rec.actor_name + " took " + type.units[unit.slot].name + " down");
     return true;
   }
   if (us.trains_down == 0) {
@@ -478,7 +487,8 @@ bool setUnitHeld(const World& world, State& state, Recorder& rec, uint32_t u, bo
   us.trains_down = 0;
   us.back_at_tick = 0;
   logEvent(rec, state.tick, "unit_repaired", site.key, type.units[unit.slot].key,
-           what + " brought back by the operator");
+           rec.actor_name.empty() ? what + " brought back by the operator"
+                                  : rec.actor_name + " brought " + type.units[unit.slot].name + " back");
   return true;
 }
 

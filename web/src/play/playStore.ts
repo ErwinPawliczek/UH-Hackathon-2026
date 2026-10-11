@@ -12,8 +12,8 @@ import { loadSeat, saveSeat, type Seat } from './playLogic';
 
 /** Real milliseconds between polls of the scores. */
 export const SCORES_MS = 1000;
-/** Control changes go out at most twice a second. */
-export const SEND_MS = 500;
+/** Control changes go out a few times a second. */
+export const SEND_MS = 150;
 
 export interface PlayState {
   code: string | null;
@@ -38,6 +38,7 @@ export interface PlayState {
   setPrice: (markup: number) => void;
   setRate: (share: number) => void;
   setUnit: (unitIndex: number, down: boolean) => Promise<void>;
+  setBlock: (partner: number, direction: 'sell' | 'buy', blocked: boolean) => Promise<void>;
 }
 
 const say = (err: unknown) => {
@@ -133,6 +134,19 @@ export const usePlay = create<PlayState>()((set, get) => {
 
     setPrice: (markup) => queue({ markup }),
     setRate: (share) => queue({ share }),
+    setBlock: async (partner, direction, blocked) => {
+      const { source, seat } = get();
+      if (source === null || seat === null) return;
+      set({ sending: true });
+      try {
+        const r = await source.play(seat.token, { action: 'block', partner, direction, blocked });
+        set(r.ok === false ? { error: r.error ?? 'The simulation did not accept that.' } : { confirmedAt: performance.now(), error: null });
+      } catch (err) {
+        set({ error: say(err) });
+      } finally {
+        set({ sending: false });
+      }
+    },
     setUnit: async (unitIndex, down) => {
       const { source, seat } = get();
       if (source === null || seat === null) return;

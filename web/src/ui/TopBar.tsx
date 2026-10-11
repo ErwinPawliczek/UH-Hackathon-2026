@@ -130,7 +130,7 @@ export function TopBar() {
             checked: triggered.includes(s.key),
             disabled: triggered.includes(s.key),
             // route closures follow the plant scenarios, under their own divider
-            heading: s.group === 'routes' && engineScenarios[i - 1]?.group !== 'routes' ? 'Routes' : undefined,
+            heading: s.group !== 'plants' && engineScenarios[i - 1]?.group !== s.group ? (s.group === 'routes' ? 'Routes' : 'Whole network') : undefined,
           }))}
           disabled={!live || engineScenarios.length === 0}
           emptyText="No scenarios for this world"

@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -53,7 +54,7 @@ class Room {
   std::mutex mutex;
   crx_sim* sim;
   Phase phase = Phase::Lobby;
-  double speed = 1.0;        // simulated hours per real second
+  double speed = 8.0;        // simulated hours per real second
   double tickDebt = 0.0;     // fractional ticks carried between clock beats
   std::string worldJson;     // static for the room's life
   std::string snapshot;      // the binary snapshot of the current tick
@@ -64,6 +65,11 @@ class Room {
   // Every command the engine accepted, with its tick: host scenarios and
   // players' actions alike. The forecast rebuilds the run from it.
   std::vector<std::pair<uint64_t, std::string>> commands;
+  // Per player id: the room as it would be without that player's actions.
+  // Forked just before the player's first accepted action, then given every
+  // other command and stepped in lockstep with the room. The gap in lost
+  // customer sales between the room and a shadow is that player's damage.
+  std::map<std::string, crx_sim*> shadows;
   std::atomic<std::chrono::steady_clock::rep> lastUsed;
 
   // Advances the run by what `elapsed` real seconds are worth at the

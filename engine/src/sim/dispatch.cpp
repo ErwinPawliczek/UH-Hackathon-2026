@@ -81,7 +81,8 @@ void advanceTravel(const World& world, State& state, const PathCache& paths, uin
     // Advance along the current edge — committed: a closure mid-edge waits
     // for the next node (§5.7).
     const RouteEdge& edge = world.edges[vs.edge];
-    const double speed = std::min(edge.speed_kmh, vc.speed_kmh);
+    double speed = std::min(edge.speed_kmh, vc.speed_kmh);
+    if (vc.mode == Mode::Road && state.hurricane_until > state.tick) speed *= 0.25;
     if (speed <= 0.0) return;
     const bool reverse = edge.b == vs.route_nodes[vs.leg];
     const double left_km = std::max(0.0, edge.length_km - vs.edge_pos_km);
@@ -174,6 +175,10 @@ void stepDispatch(const World& world, State& state, PathCache& paths, Recorder& 
                    "s cannot get it there now");
       continue;
     }
+
+    // Water restriction: no barge or ship sets off; the order waits.
+    if (state.water_stop_until > state.tick && (vc.mode == Mode::River || vc.mode == Mode::Sea))
+      continue;
 
     // The idle vehicle of the right class that reaches the pickup soonest
     // (§5.7). Ties break to the lower vehicle id (strict improvement only).
@@ -284,6 +289,9 @@ void stepTransport(const World& world, State& state, PathCache& paths, Recorder&
       // (Re-queueing with the counter reset loaded the lot again every time
       // a bay came free, until the vehicle was full and could never finish.)
       if (path.empty()) continue;
+      // Water restriction: loaded, but it stays at the berth until lifted.
+      if (state.water_stop_until > state.tick && (vc.mode == Mode::River || vc.mode == Mode::Sea))
+        continue;
       vs.moved_t = 0;
       vs.status = VehStatus::ToDropoff;
       vs.route_nodes = path;

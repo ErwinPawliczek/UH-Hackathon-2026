@@ -35,6 +35,9 @@ export interface SimEvent {
   site?: number;
   unit?: string;
   text: string;
+  /** in a room: the player whose action this line reports */
+  player?: string;
+  playerName?: string;
 }
 
 /** One end of an order, or where a vehicle is heading: a site by index, key and name. */
