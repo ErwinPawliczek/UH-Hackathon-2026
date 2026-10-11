@@ -17,6 +17,7 @@
 #include "sim/inspect.h"
 #include "sim/sim.h"
 #include "sim/window.h"
+#include "sim/words.h"
 
 #include "crx/rng.h"
 
@@ -256,6 +257,7 @@ std::string buildWorldJson(const sim::World& w, const TerrainGrid& terrain,
           if (!internal && !utility && slot < proc.tank_of.size() && proc.tank_of[slot].valid())
             tank = proc.tank_of[slot].v;
           out.push_back({{"key", acc[k].first},
+                         {"name", crx::sim::streamTitle(acc[k].first)},
                          {"tph", acc[k].second},
                          {"kind", internal ? "internal" : utility ? "utility" : "material"},
                          {"tank", tank}});

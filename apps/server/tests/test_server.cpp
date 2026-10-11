@@ -15,6 +15,8 @@
 #include <cstring>
 #include <fstream>
 #include <set>
+#include <map>
+#include <cctype>
 #include <string>
 #include <thread>
 
@@ -629,6 +631,38 @@ TEST_CASE("snapshot site status: 5 marks a site held back by a shock") {
        R"({"type":"supply_shock","site":"GAS_FIELD","multiplier":0.5,"duration_h":24})");
   CHECK(siteStatus(post("/api/sim/" + id + "/step", R"({"ticks":4})").body, gas_field) == 5);
   CHECK(siteStatus(post("/api/sim/" + id + "/step", R"({"ticks":100})").body, gas_field) == 0);
+}
+
+TEST_CASE("world json: every unit and process stream has a plain name") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  const json world = json::parse(cli.Get("/api/sim/" + id + "/world")->body);
+  std::map<std::string, std::string> names;
+  for (const json& site : world.at("sites"))
+    for (const json& proc : site.at("processes")) {
+      for (const char* side : {"in", "out"})
+        for (const json& st : proc.at(side)) names[st.at("key").get<std::string>()] = st.at("name");
+      for (const json& unit : proc.at("units"))
+        for (const char* side : {"in", "out"})
+          for (const json& st : unit.at(side)) {
+            const std::string key = st.at("key"), name = st.at("name");
+            names[key] = name;
+            CHECK(!name.empty());
+            if (key != "LPG" && key != "PVC") CHECK(name != key);  // never a raw key (these two are words)
+            CHECK(name.find('_') == std::string::npos);
+            CHECK(std::isupper(static_cast<unsigned char>(name[0])) != 0);
+          }
+    }
+  CHECK(names.at("edc") == "Ethylene dichloride");
+  CHECK(names.at("hcl") == "Hydrogen chloride");
+  CHECK(names.at("eb") == "Ethylbenzene");
+  CHECK(names.at("wet_cl2") == "Wet chlorine gas");
+  CHECK(names.at("ygrade") == "Mixed gas liquids");
+  CHECK(names.at("resid") == "Atmospheric residue");
+  CHECK(names.at("AIR_O2") == "Air");
+  CHECK(names.at("PE") == "Polyethylene");
+  CHECK(names.at("CAUSTIC") == "Caustic soda");
 }
 
 TEST_CASE("world json: fleet manifest without a fabricated shuttle schedule") {
