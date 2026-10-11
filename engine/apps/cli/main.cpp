@@ -10,6 +10,7 @@
 #include "crx/catalog.h"
 #include "world/worldgen/CatalogView.h"
 #include "world/worldgen/Freeze.h"
+#include "sim/genworld.h"
 #include "world/worldgen/HandDrawn.h"
 #include "world/worldgen/WorldGen.h"
 #include "world/worldgen/WorldJson.h"
@@ -142,15 +143,15 @@ void printHelp() {
       "crx-cli — Chain Reaction engine driver\n"
       "  version                     print engine version\n"
       "  run   [--seed N --ticks N --report N] [--event '<json>' ...]\n"
-      "        [--world default|sixsite|<preset>]\n"
+      "        [--world default|sixsite|generator]\n"
       "                              step the sim, report sites, tanks and rates\n"
       "                              every N ticks (default 96); inject §5.9 events\n"
       "                              via --event (repeatable, applied before tick 0);\n"
-      "                              --world picks the generated default world (a\n"
+      "                              --world picks the world: hand-drawn default,\n"
       "                              named preset like gulf-basin) or the M1 six-site\n"
       "                              test world\n"
       "  dump  [--seed N --ticks N --out F] [--event '<json>' ...]\n"
-      "        [--world default|sixsite|<preset>]\n"
+      "        [--world default|sixsite|generator]\n"
       "                              write the binary snapshot to F\n"
       "  worldgen [--seed N --out F] generate the template world, write JSON\n");
 }
@@ -173,7 +174,7 @@ int main(int argc, char** argv) {
   uint32_t ticks = 96 * 10;
   uint32_t report = 96;
   const char* out = "snapshot.bin";
-  std::string world_sel = "default";  // generated world; "sixsite" or a preset name
+  std::string world_sel = "default";  // hand-drawn world; "sixsite" or "generator" dev mode
   std::vector<std::string> events;  // --event JSON, repeatable, applied in order
   for (int i = 2; i + 1 < argc; i += 2) {
     if (std::strcmp(argv[i], "--seed") == 0) {
@@ -301,11 +302,14 @@ int main(int argc, char** argv) {
   if (world_sel == "sixsite") {
     cfg["world"] = "sixsite";
     cfg["seed"] = seed;
+  } else if (world_sel == "generator") {
+    cfg["world"] = "generator";  // development path: arbitrary generator seed
+    cfg["seed"] = seed;
   } else if (world_sel != "default") {
-    cfg["preset"] = world_sel;  // a named preset pins its validated seed; --seed never overrides
-  } else if (explicit_seed) {
-    cfg["seed"] = seed;  // arbitrary generator mode (development)
+    std::fprintf(stderr, "unknown world '%s' (default|sixsite|generator)\n", world_sel.c_str());
+    return 1;
   }
+  // default: the hand-drawn layout — a --seed does not apply to it
   const std::string cfg_str = cfg.dump();
   crx_sim* sim = crx_create(cfg_str.c_str());
   if (sim == nullptr) {

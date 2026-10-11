@@ -705,16 +705,15 @@ bool loadHandDrawnWorld(const std::string& jsonPath, const CatalogView& catalog,
   std::vector<Flow> flows{
       {"SALT", iSaltMine, iCA, salt, Mode::Road},
       {"CHLORINE", iCA, iVinyls, caBasis, Mode::Road},
-      {"NAPHTHA", iRefinery, iFlex, naphthaFlexFeed, Mode::Road},
-      {"LPG", iGasPlant, iFlex, lpgFlexFeed, Mode::Road},
+      // Liquids ride the drawn river when both ends are river-adjacent
+      // (barge), the sea lanes for export legs (ship), and trucks only for
+      // short urban legs — per the four-mode plan.
+      {"NAPHTHA", iRefinery, iFlex, naphthaFlexFeed, Mode::River},
+      {"LPG", iGasPlant, iFlex, lpgFlexFeed, Mode::River},
       {"BENZENE", iRefinery, iStyrenics, benzeneRefinery, Mode::Road},
       {"BENZENE", iFlex, iStyrenics, benzeneFlex, Mode::Road},
-      {"PROPYLENE", iRefinery, iPP, yield(fcc, 0, "PROPYLENE", true) * fccBasis, Mode::Road},
-      {"PROPYLENE", iFlex, iPP,
-       (flexShare[1] * yield(flexCracker, 1, "PROPYLENE", true) +
-        flexShare[2] * yield(flexCracker, 2, "PROPYLENE", true)) * flexBasis, Mode::Road},
-      {"PROPYLENE", iCrackerGas, iPP,
-       yield(gasCracker, 0, "PROPYLENE", true) * gasCrackerBasis, Mode::Road},
+      // Propylene moves by pipeline only (catalog P-only); no pipeline to the
+      // polypropylene plant is drawn — recorded as a gap below.
       {"PE", iPE, iPackaging, peOut, Mode::Road},
       {"PP", iPP, iPackaging, ppOut * 0.5, Mode::Road},
       {"PP", iPP, iConsumer, ppOut * 0.5, Mode::Road},
@@ -723,11 +722,11 @@ bool loadHandDrawnWorld(const std::string& jsonPath, const CatalogView& catalog,
       {"STYRENE", iStyrenics, iPaints, styreneToPaints, Mode::Road},
       {"SOLVENT", iRefinery, iPaints, solventRefinery, Mode::Road},
       {"SOLVENT", iStyrenics, iPaints, solventStyrenics, Mode::Road},
-      {"CAUSTIC", iCA, iProcessInd, caustic, Mode::Road},
-      {"GASOLINE", iRefinery, iDepot, depotGasoline, Mode::Road},
-      {"DIESEL", iRefinery, iDepot, depotDiesel, Mode::Road},
-      {"JET", iRefinery, iDepot, depotJet, Mode::Road},
-      {"LPG", iRefinery, iDepot, depotLpg, Mode::Road},
+      {"CAUSTIC", iCA, iProcessInd, caustic, Mode::River},
+      {"GASOLINE", iRefinery, iDepot, depotGasoline, Mode::River},
+      {"DIESEL", iRefinery, iDepot, depotDiesel, Mode::River},
+      {"JET", iRefinery, iDepot, depotJet, Mode::River},
+      {"LPG", iRefinery, iDepot, depotLpg, Mode::River},
       // Export legs: the gas plant and refinery surpluses to the ports.
       {"NAPHTHA", iGasPlant, iPortA, nglNaphtha, Mode::Sea},
       {"LPG", iGasPlant, iPortA, nglLpg - lpgFlexFeed, Mode::Sea},
@@ -740,14 +739,14 @@ bool loadHandDrawnWorld(const std::string& jsonPath, const CatalogView& catalog,
       // Cracker byproduct surpluses ride the road network to the nearest
       // port by drawn distance (deterministic, no fabricated routes).
       {"LPG", iCrackerGas, iPortA, yield(gasCracker, 0, "LPG", true) * gasCrackerBasis,
-       Mode::Road},
+       Mode::Sea},
       {"BENZENE", iCrackerGas, iPortA,
-       yield(gasCracker, 0, "BENZENE", true) * gasCrackerBasis, Mode::Road},
+       yield(gasCracker, 0, "BENZENE", true) * gasCrackerBasis, Mode::Sea},
       {"GASOLINE", iCrackerGas, iPortA,
-       yield(gasCracker, 0, "GASOLINE", true) * gasCrackerBasis, Mode::Road},
+       yield(gasCracker, 0, "GASOLINE", true) * gasCrackerBasis, Mode::Sea},
       {"FUEL_OIL", iCrackerGas, iPortA,
-       yield(gasCracker, 0, "FUEL_OIL", true) * gasCrackerBasis, Mode::Road},
-      {"GASOLINE", iFlex, iPortB, gasolineCrackers - gasolineCrackers * 0.0, Mode::Road},
+       yield(gasCracker, 0, "FUEL_OIL", true) * gasCrackerBasis, Mode::Sea},
+      {"GASOLINE", iFlex, iPortB, gasolineCrackers - gasolineCrackers * 0.0, Mode::Sea},
       {"FUEL_OIL", iFlex, iPortB,
        (flexShare[0] * yield(flexCracker, 0, "FUEL_OIL", true) +
         flexShare[1] * yield(flexCracker, 1, "FUEL_OIL", true) +
@@ -767,6 +766,13 @@ bool loadHandDrawnWorld(const std::string& jsonPath, const CatalogView& catalog,
       f.to = dist(p0, pa) <= dist(p0, pb) ? iPortA : iPortB;
     }
   }
+  // Propylene is pipeline-only in the catalog and no pipeline reaches the
+  // polypropylene plant: unusable as drawn. The plant still exists (as
+  // drawn) and starves after its tank cover — the acceptance run reports it.
+  gaps.push_back({"Polypropylene", "PROPYLENE feed",
+                  "no drawn pipeline and propylene is pipeline-only in the catalog; the "
+                  "polypropylene chain is unsuppliable as drawn — minimal fix: one drawn "
+                  "pipeline from a steam cracker"});
 
   // Validate every vehicle flow against the drawn topology BEFORE anything
   // is built: the gap list is the brief's primary output.
@@ -989,15 +995,19 @@ bool loadHandDrawnWorld(const std::string& jsonPath, const CatalogView& catalog,
       for (const NetStream& s : info->by_mode[mode].out)
         if (!isPseudo(s.material)) outFlow[s.material] += w * s.t_per_t * p.design_rate_t_h;
     }
+    // Tank design rates are FLOWS AT THE TANK: a process consuming material
+    // draws it out of the site's feed tank (design_out), a process producing
+    // material fills the site's product tank (design_in). Transport flows add
+    // the replenishment side separately.
     for (const auto& [material, t_h] : inFlow) {
       const auto t = tankAt.find({static_cast<int>(p.site.v), material});
       if (t == tankAt.end()) continue;
-      out.tanks[static_cast<size_t>(t->second)].design_in_t_h += t_h;
+      out.tanks[static_cast<size_t>(t->second)].design_out_t_h += t_h;
     }
     for (const auto& [material, t_h] : outFlow) {
       const auto t = tankAt.find({static_cast<int>(p.site.v), material});
       if (t == tankAt.end()) continue;
-      out.tanks[static_cast<size_t>(t->second)].design_out_t_h += t_h;
+      out.tanks[static_cast<size_t>(t->second)].design_in_t_h += t_h;
     }
   }
   // Tank capacities were sized in addTank from provisional (zero) flows —
@@ -1116,16 +1126,24 @@ bool loadHandDrawnWorld(const std::string& jsonPath, const CatalogView& catalog,
       continue;
     }
     const double t_d = f.t_h * 24.0;
+    // Round-trip time in hours; the fleet needed is tonnes/day times the
+    // round-trip FRACTION OF A DAY over one vehicle's payload.
     const double rt = 2.0 * km / vc->speed_kmh + 2.0 * vc->capacity_t / vc->load_t_h;
-    const int count = std::max(1, static_cast<int>(std::ceil(kSpare * t_d * rt /
+    const int count = std::max(1, static_cast<int>(std::ceil(kSpare * t_d * (rt / 24.0) /
                                                              vc->capacity_t)));
     for (int v = 0; v < count; ++v) {
       WVehicleSpec vs;
       vs.cls = cls;
-      vs.home = NodeId{modeBase(m) + static_cast<uint32_t>(itF->second)};
+      // The bridge reads home as a SITE index (SiteId{v.home.v}); the engine
+      // resolves the site's own node per mode.
+      vs.home = NodeId{static_cast<uint32_t>(f.from)};
       out.fleet.push_back(vs);
     }
   }
+
+  // The drawn layout carries no day curves: one flat 24-hour curve, which
+  // the bridge normalises to all-1.0 multipliers on every design rate.
+  out.schedules.assign(1, std::vector<float>(24, 1.0f));
 
   return true;
 }

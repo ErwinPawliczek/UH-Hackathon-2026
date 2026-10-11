@@ -58,7 +58,9 @@ class Sim {
 
   // Loads the frozen default world (gulf-basin.json from the engine data dir)
   // and initialises state — the sixsite pattern for the showcase world.
-  static std::unique_ptr<Sim> createFrozen(std::string& error);
+  // The default world: the hand-drawn layout (engine data worlds file),
+  // translated exactly as drawn — no generation, no geometry changes.
+  static std::unique_ptr<Sim> createHandDrawn(std::string& error);
 
   // Config JSON: {"seed": N, "adaptation": b, "world": "default"|"sixsite",
   // "preset": "<named world>", "gen": {…overrides…}}. The default world (no

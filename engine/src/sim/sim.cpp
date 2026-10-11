@@ -2,6 +2,7 @@
 #include "sim/sim.h"
 
 #include "sim/sixsite.h"
+#include "world/worldgen/HandDrawn.h"
 #include "world/worldgen/WorldJson.h"
 
 #include <nlohmann/json.hpp>
@@ -49,22 +50,18 @@ std::unique_ptr<Sim> Sim::createGenerated(uint64_t seed, const worldgen::GenPara
 // The default session world: the frozen gulf-basin file (engine/data/catalog/
 // gulf-basin.json), frozen from generator seed 709 and hand-balanced. No
 // generation at runtime — the file is the world (sixsite pattern).
-std::unique_ptr<Sim> Sim::createFrozen(std::string& error) {
+std::unique_ptr<Sim> Sim::createHandDrawn(std::string& error) {
   crx::Catalog catalog;
   if (!loadCatalogFromDir(CRX_DATA_DIR, catalog, error)) return nullptr;
-  const std::string path = std::string(CRX_DATA_DIR) + "/gulf-basin.json";
-  std::ifstream in(path);
-  if (!in) {
-    error = "cannot open the frozen default world at " + path;
+  crx::worldgen::GeneratedWorld gen;
+  std::vector<crx::worldgen::HandDrawnGap> gaps;
+  const std::string path = std::string(CRX_DATA_DIR) + "/worlds/erwin-world-v1.json";
+  if (!crx::worldgen::loadHandDrawnWorld(path, crx::worldgen::makeCatalogView(catalog), gen, gaps,
+                                         error))
     return nullptr;
-  }
-  std::stringstream buf;
-  buf << in.rdbuf();
-  worldgen::GeneratedWorld w;
-  if (!worldgen::fromWorldJson(buf.str(), w, error)) return nullptr;
   auto world = std::make_shared<World>();
-  if (!buildGeneratedWorld(catalog, w, *world, error)) return nullptr;
-  world->seed = w.seed;
+  if (!buildGeneratedWorld(catalog, gen, *world, error)) return nullptr;
+  world->seed = gen.seed;  // 0: the drawn world is seedless and deterministic
   return fromWorld(world, error);
 }
 
@@ -119,12 +116,10 @@ std::unique_ptr<Sim> Sim::fromWorld(std::shared_ptr<const World> world, std::str
 std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string& error) {
   uint64_t seed = 42;  // §7.1: NULL or missing seed = defaults
   bool adaptation_override = true;
-  std::string world_kind = "default";  // generated world unless told otherwise
-  std::string preset;
+  std::string world_kind = "default";  // hand-drawn world unless told otherwise
   bool have_gen = false;
   worldgen::GenParams params;
-  bool have_seed = false, have_preset = false;  // config-key flags (preset pins the seed)
-  uint64_t pinned_seed = 0;
+  bool have_seed = false;  // config-key flag
   if (config_json != nullptr && config_json[0] != '\0') {
     try {
       const json cfg = json::parse(config_json);
@@ -150,24 +145,16 @@ std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string&
             return nullptr;
           }
           world_kind = it.value().get<std::string>();
-          if (world_kind != "default" && world_kind != "sixsite") {
-            error = "config world must be \"default\" (generated) or \"sixsite\"";
+          if (world_kind != "default" && world_kind != "sixsite" &&
+              world_kind != "generator") {
+            error = "config world must be \"default\" (hand-drawn), \"sixsite\", or \"generator\"";
             return nullptr;
           }
         } else if (it.key() == "preset") {
-          if (!it.value().is_string()) {
-            error = "config preset must be a string";
-            return nullptr;
-          }
-          preset = it.value().get<std::string>();
-          const worldgen::NamedWorld* nw = worldgen::findNamedWorld(preset);
-          if (nw == nullptr) {
-            error = "unknown world preset \"" + preset + "\"";
-            return nullptr;
-          }
-          have_preset = true;
-          pinned_seed = nw->seed;
-          seed = nw->seed;  // a named preset pins its validated seed
+          // Named presets were dropped with the frozen-world experiment.
+          error = "config key \"preset\" is not supported; the default world is the "
+                  "hand-drawn layout (use \"world\": \"sixsite\" or \"generator\")";
+          return nullptr;
         } else if (it.key() == "gen") {
           if (!it.value().is_object()) {
             error = "config gen must be an object";
@@ -238,23 +225,29 @@ std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string&
       return nullptr;
     }
   }
-  if (world_kind == "sixsite" && (have_gen || !preset.empty())) {
-    error = "config gen/preset apply only to the generated default world";
+  if (world_kind == "sixsite" && have_gen) {
+    error = "config gen applies only to the generator world (\"world\": \"generator\")";
     return nullptr;
   }
-  if (have_preset) seed = pinned_seed;  // --seed never overrides a preset (PR #25 plan step 3)
+  if (world_kind != "generator" && have_gen) {
+    error = "config gen applies only to the generator world (\"world\": \"generator\")";
+    return nullptr;
+  }
   std::unique_ptr<Sim> sim;
   if (world_kind == "sixsite") {
     sim = create(seed, error);
-  } else if (have_preset) {
-    sim = createFrozen(error);  // named presets load frozen worlds; --seed never applies
-  } else if (have_seed) {
-    // Seed-only configs build a generated world: the development path for
-    // arbitrary seeds (unsupported for demos by design — README).
+  } else if (world_kind == "generator") {
+    // Development path for arbitrary generator seeds (unsupported for demos
+    // by design — README); requires an explicit world choice.
+    if (!have_seed) {
+      error = "config world \"generator\" requires a seed";
+      return nullptr;
+    }
     sim = have_gen ? createGenerated(seed, params, error) : createGenerated(seed, error);
   } else {
-    // No seed, no preset: the default world is the frozen gulf-basin file.
-    sim = createFrozen(error);
+    // Default (and explicit "default"): the hand-drawn layout — deterministic
+    // by construction; a config seed does not apply to it.
+    sim = createHandDrawn(error);
   }
   if (sim) sim->state().adaptation = adaptation_override;
   return sim;

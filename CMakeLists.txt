@@ -40,7 +40,6 @@ add_library(crx_engine STATIC
   engine/src/world/worldgen/HandDrawn.cpp
   engine/src/world/worldgen/Geo.cpp
   engine/src/world/worldgen/Layout.cpp
-  engine/src/world/worldgen/NamedWorlds.cpp
   engine/src/world/worldgen/Routes.cpp
   engine/src/world/worldgen/Sizing.cpp
   engine/src/world/worldgen/WorldGen.cpp
