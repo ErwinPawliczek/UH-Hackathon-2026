@@ -128,6 +128,8 @@ const LABEL_CSS =
 
 /** Pixels the text sits off the line, to the side it reads above. */
 const OFFSET_PX = 8;
+/** Below this canvas width the names wait for a zoom-in. */
+const NARROW_PX = 500;
 /** Text sizes to try, as a share of full size: a name shrinks before it hides. */
 const SHRINK_STEPS = [1, 0.86, 0.74] as const;
 /** Smallest share of full size a name is drawn at when the camera pulls back. */
@@ -233,6 +235,11 @@ export class PipelineLabels {
     if (this.width <= 0 || this.height <= 0) return;
     // pulled back, the map is smaller on screen: the names shrink with it (never grow past full size)
     const zoomScale = Math.min(1, Math.max(MIN_ZOOM_SCALE, zoom));
+    // on a phone-width map there is no room for them until the reader zooms in
+    if (this.width < NARROW_PX && zoom < 1.3) {
+      for (const item of this.items) item.el.style.visibility = 'hidden';
+      return;
+    }
     const replace = this.frame++ % PLACE_EVERY === 0;
     let taken: Rect[] = [];
     if (replace) {

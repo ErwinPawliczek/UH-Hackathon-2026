@@ -56,6 +56,9 @@ const CONVOY_GAP_ROAD_KM = 5;
 const CONVOY_GAP_WATER_KM = 10;
 /** How far past the framed view the camera may pull back. */
 const ZOOM_OUT_LIMIT = 1.25;
+/** A frame longer than this is slow; a finger's reach round a site centre, in pixels. */
+const SLOW_FRAME_S = 0.03;
+const PICK_SITE_TOUCH_PX = 44;
 /** The build hand-over: how long the camera takes to stand the map up, and how near straight down it starts (radians). */
 const INTRO_MS = 2600;
 const INTRO_POLAR = 0.02;
@@ -117,6 +120,8 @@ export class MapScene {
   /** Viewport height at the last resize, and the camera distance that frames the whole map there. */
   /** the camera's ease from top-down into the framed view, while it runs (see playIntro) */
   private intro: { t0: number; ms: number; fromTarget: THREE.Vector3; toTarget: THREE.Vector3; fromDist: number; toDist: number; toPolar: number } | null = null;
+  /** seconds of consecutive slow frames (see watchFrameTime) */
+  private slowFor = 0;
   private viewHeight = 0;
   private framedDist = 0;
   private readonly ring: THREE.Mesh;
@@ -280,6 +285,8 @@ export class MapScene {
     this.scene.add(this.mineRing);
 
     this.controls = new OrbitControls(this.camera, canvas);
+    // touch: one finger moves the map, two pinch to zoom and twist to turn
+    this.controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
     this.controls.target.set(w / 2, 0, h / 2);
     this.controls.maxPolarAngle = Math.PI * 0.42; // tilt limit ~75°
     this.controls.minPolarAngle = Math.PI * 0.12;
@@ -711,7 +718,7 @@ export class MapScene {
   }
 
   /** Raycast the pointer against unit pads and vehicle meshes. */
-  pick(clientX: number, clientY: number): PickHit | null {
+  pick(clientX: number, clientY: number, coarse = false): PickHit | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.ndc.set(
       ((clientX - rect.left) / rect.width) * 2 - 1,
@@ -740,7 +747,7 @@ export class MapScene {
     // site centre within a click tolerance counts as the cluster.
     const v = new THREE.Vector3();
     let bestSite = -1;
-    let bestDist = 24; // px
+    let bestDist = coarse ? PICK_SITE_TOUCH_PX : 24; // px: a finger gets a wider target
     this.siteLayer.siteAnchors.forEach((anchor, i) => {
       v.set(anchor.x, anchor.topY + 0.85, anchor.z).project(this.camera);
       if (v.z > 1) return; // behind the camera
@@ -858,6 +865,26 @@ export class MapScene {
   /** Advance flow-dash animation; dt in seconds. Kept for the render loop API. */
   animate(dtSec: number): void {
     tickFlowLines(this.flowLines, dtSec);
+    this.watchFrameTime(dtSec);
+  }
+
+  /**
+   * A phone that cannot keep up gets fewer pixels: when frames have taken
+   * over 30 ms for a second running, the pixel ratio steps down from 2 to
+   * 1.5 and stays there.
+   */
+  private watchFrameTime(dtSec: number): void {
+    if (dtSec > SLOW_FRAME_S && dtSec < 1) this.slowFor += dtSec;
+    else this.slowFor = 0;
+    if (this.slowFor < 1) return;
+    this.slowFor = 0;
+    const now = this.renderer.getPixelRatio();
+    const next = now > 1.5 ? 1.5 : now; // no lower: at 1 the map goes soft on a phone
+    if (next === now) return;
+    this.renderer.setPixelRatio(next);
+    const size = this.renderer.getSize(new THREE.Vector2());
+    this.renderer.setSize(size.x, size.y, false);
+    resizeFlowLines(this.flowLines, size.x, size.y);
   }
 
   dispose(): void {

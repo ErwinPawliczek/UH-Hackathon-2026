@@ -105,7 +105,6 @@ export class SiteLabels {
       const owner = document.createElement('span');
       owner.className = 'site-label-owner';
       owner.style.cssText = 'display:none;font-size:10px;letter-spacing:0.04em;text-transform:none;margin-top:2px;';
-      name.style.cssText = 'display:inline-flex;flex-direction:column;';
       const title = document.createElement('span');
       title.textContent = site.name;
       name.textContent = '';

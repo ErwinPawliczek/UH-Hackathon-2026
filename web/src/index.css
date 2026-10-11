@@ -455,6 +455,12 @@ h2 {
 /* The Names switch (ui/namesMode.ts). Icons only: the badge alone, still the
    click target and still in its state colours. Hidden: no plant labels and
    no pipeline names. */
+/* a label's name, with the owner's name under it in a multiplayer room */
+.site-label-name {
+  display: inline-flex;
+  flex-direction: column;
+}
+
 :root[data-names='icons'] .site-label-name {
   display: none;
 }

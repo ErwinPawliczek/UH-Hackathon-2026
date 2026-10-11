@@ -77,14 +77,28 @@ export function SceneCanvas() {
     if (canvas === null) return;
     let downX = 0;
     let downY = 0;
+    const lastTap = { t: 0, x: 0, y: 0 };
     const onDown = (e: PointerEvent) => {
       downX = e.clientX;
       downY = e.clientY;
     };
     const onUp = (e: PointerEvent) => {
       if (e.button !== 0) return;
-      if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return; // drag, not click
-      const hit = sceneRef.current?.pick(e.clientX, e.clientY) ?? null;
+      if (Math.hypot(e.clientX - downX, e.clientY - downY) > (e.pointerType === 'touch' ? 10 : 6)) return; // drag, not click
+      const touch = e.pointerType === 'touch';
+      const hit = sceneRef.current?.pick(e.clientX, e.clientY, touch) ?? null;
+      // a second tap on empty map soon after the first, close by: back to the start view
+      if (touch && hit === null) {
+        const now = performance.now();
+        if (now - lastTap.t < 320 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 36) {
+          sceneRef.current?.resetView();
+          lastTap.t = 0;
+          return;
+        }
+        lastTap.t = now;
+        lastTap.x = e.clientX;
+        lastTap.y = e.clientY;
+      }
       useSim.getState().select(hit);
     };
     canvas.addEventListener('pointerdown', onDown);
@@ -107,7 +121,7 @@ export function SceneCanvas() {
 
   return (
     <>
-      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-label="Simulation map" />
+      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full touch-none select-none" aria-label="Simulation map" />
       {/* from the build animation: the app fades in from the same paper white the drawing faded to */}
       {arriving && <div className="build-arrival pointer-events-none fixed inset-0 z-[70] bg-white" aria-hidden="true" />}
       <div className="absolute bottom-4 right-4 z-10 flex gap-2">
