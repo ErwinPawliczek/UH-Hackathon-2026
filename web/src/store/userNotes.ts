@@ -7,7 +7,7 @@
 // an entry as the visitor's own (the engine numbers its entries from zero).
 
 import type { SimEvent } from '../engine/api';
-import type { WorldSpec } from '../engine/world';
+import type { ProcessSpec, UnitSpec, WorldSpec } from '../engine/world';
 import { VEHICLE_CLASSES, type VehicleClassKey } from '../engine/world';
 import { materialName } from '../ui/materials';
 
@@ -44,6 +44,41 @@ function siteOf(world: WorldSpec | null, ref: unknown): { index: number | undefi
   return { index: undefined, name: typeof ref === 'string' ? ref : 'a site' };
 }
 
+/**
+ * The unit a unit_outage is aimed at, with its process and site: by the
+ * unit's global index when the command carries one (`unit_index`, which is
+ * what the engine goes by too), else by key — but only where the site has
+ * one unit of that key. A fuel depot has four "FD-OUT", one per fuel, so a
+ * key alone does not say which one.
+ */
+function unitOf(
+  world: WorldSpec | null,
+  siteIndex: number | undefined,
+  cmd: Record<string, unknown>,
+): { unit: UnitSpec; process: ProcessSpec; site: number } | null {
+  if (world === null) return null;
+  const all = world.sites.flatMap((s, site) =>
+    (s.processes ?? []).flatMap((process) => process.units.map((unit) => ({ unit, process, site }))));
+  if (typeof cmd.unit_index === 'number') return all.find((x) => x.unit.index === cmd.unit_index) ?? null;
+  const byKey = all.filter((x) => x.site === siteIndex && x.unit.key === cmd.unit);
+  return byKey.length === 1 ? byKey[0] : null;
+}
+
+/**
+ * What an outage took down, in words: the process when the outage stops the
+ * only unit it has ("City jet fuel demand"), else the unit with its process
+ * ("RF-CDU (Crude distillation)"), with the train count when only some of
+ * its trains go ("3 of 6 trains of CA-CELL (Chlor-alkali electrolysis)").
+ */
+function outageWords(found: { unit: UnitSpec; process: ProcessSpec } | null, cmd: Record<string, unknown>): string {
+  const n = typeof cmd.trains === 'number' ? cmd.trains : 1;
+  if (found === null) return `${n} train${n === 1 ? '' : 's'} of ${String(cmd.unit ?? 'a unit')}`;
+  const { unit, process } = found;
+  const whole = n >= unit.trains;
+  if (whole && process.units.length === 1) return process.name;
+  return `${whole ? '' : `${n} of ${unit.trains} trains of `}${unit.key} (${process.name})`;
+}
+
 const hoursWords = (h: unknown) => {
   if (typeof h !== 'number' || !(h > 0)) return '';
   return h % 24 === 0 ? ` for ${h / 24} day${h === 24 ? '' : 's'}` : ` for ${h} h`;
@@ -59,11 +94,15 @@ export function describeCommand(
 ): { type: UserNoteType; text: string; site?: number } | null {
   const site = siteOf(world, cmd.site);
   switch (cmd.type) {
-    case 'unit_outage':
+    case 'unit_outage': {
+      const found = unitOf(world, site.index, cmd);
+      // the unit's own site, when the command names the unit by index: that is the one the engine acts on
+      const at = found === null ? site : siteOf(world, found.site);
       return {
-        type: 'user_outage', site: site.index,
-        text: `You took down ${cmd.trains ?? 1} train${cmd.trains === 1 ? '' : 's'} of ${String(cmd.unit ?? 'a unit')} at ${site.name}${hoursWords(cmd.duration_h)}`,
+        type: 'user_outage', site: at.index,
+        text: `You took down ${outageWords(found, cmd)} at ${at.name}${hoursWords(cmd.duration_h)}`,
       };
+    }
     case 'site_shutdown':
       return { type: 'user_outage', site: site.index, text: `You shut down ${site.name}${hoursWords(cmd.duration_h)}` };
     case 'supply_shock':

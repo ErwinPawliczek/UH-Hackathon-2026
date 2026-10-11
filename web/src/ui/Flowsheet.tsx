@@ -99,6 +99,8 @@ function UnitBlock({
       }}
       title={`${node.unit.name} — ${node.process.name}`}
       data-testid={`pfd-unit-${node.unit.key}`}
+      // the key can repeat within a site (a fuel depot's four FD-OUT); the index never does
+      data-unit-index={node.unitIndex}
       data-alarm={live.alarm ? 'true' : undefined}
     >
       <div className="flex items-baseline justify-between gap-1">
@@ -193,8 +195,12 @@ export function FlowsheetView({
   sheet: Flowsheet;
   world: WorldSpec;
   snap: Snapshot;
-  /** take `trains` trains of a unit down for `hours`; null when the run cannot be commanded */
-  onFailUnit: ((unitKey: string, trains: number, hours: number) => void) | null;
+  /**
+   * Take `trains` trains of a unit down for `hours`; null when the run
+   * cannot be commanded. The unit is the block itself, not its key: a site
+   * can have several units with the same key (a fuel depot's four "FD-OUT").
+   */
+  onFailUnit: ((unit: FlowUnitNode, trains: number, hours: number) => void) | null;
   /**
    * Open "who else can supply this tank" for a tank this site buys by
    * vehicle; the link is shown on those tanks only when this is given.
@@ -273,7 +279,7 @@ export function FlowsheetView({
           node={failingNode}
           onCancel={() => setFailing(null)}
           onFail={(trains, hours) => {
-            onFailUnit(failingNode.unit.key, trains, hours);
+            onFailUnit(failingNode, trains, hours);
             setFailing(null);
           }}
         />
