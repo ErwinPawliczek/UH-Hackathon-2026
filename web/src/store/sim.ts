@@ -1,13 +1,17 @@
 // Client state: zustand store with the sim runtime (world, snapshots, events,
-// selection) and the settings the user can change (backend, seed, scenario,
-// speed). Settings persist to localStorage via the persist middleware; runtime
-// state does not. The engine loop lives in a hook that feeds this store.
+// selection) and the settings the user can change (seed, scenario, speed).
+// Settings persist to localStorage under STORAGE_KEY via the persist
+// middleware; runtime state does not. The engine backend is not a setting:
+// the hosted (HTTP) engine is the default, and only the ?engine= URL
+// parameter — for tests and local development — can pick the in-page stub.
+// The engine loop lives in a hook that feeds this store.
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Snapshot } from '../engine/snapshot';
 import type { SimEvent, BackendKind } from '../engine/api';
 import type { WorldSpec } from '../engine/world';
+import { STORAGE_KEY, dropLegacyPersistedState, backendOverride } from './bootstrap';
 
 export type Selection = { kind: 'site' | 'vehicle'; index: number } | null;
 
@@ -18,14 +22,14 @@ export const TICKS_PER_DAY = 96;
 export const HORIZON_DAYS = 60;
 
 export interface SimState {
-  // settings — persisted
-  backendKind: BackendKind;
-  baseUrl: string;
+  // settings — persisted (seed, scenario, speed); backendKind is runtime-only:
+  // hosted by default, ?engine= at bootstrap, no UI
   seed: number;
   scenario: string;
   speed: number;
 
   // runtime
+  backendKind: BackendKind;
   playing: boolean;
   world: WorldSpec | null;
   snap: Snapshot | null;
@@ -39,8 +43,6 @@ export interface SimState {
   /** Live backend command dispatcher, wired by useSimEngine; null between sessions. */
   sendCommand: ((cmd: Record<string, unknown>) => Promise<unknown>) | null;
 
-  setBackendKind: (kind: BackendKind) => void;
-  setBaseUrl: (url: string) => void;
   setSeed: (seed: number) => void;
   setScenario: (scenario: string) => void;
   setSpeed: (speed: number) => void;
@@ -55,15 +57,21 @@ export interface SimState {
   retryNonce: number;
 }
 
+// Discard the abandoned chain-reaction-* namespace BEFORE the persist
+// middleware hydrates: a visitor saved there last saw the stub default, and
+// that value must not stick now that the hosted engine is the default.
+if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+  dropLegacyPersistedState(window.localStorage);
+}
+
 export const useSim = create<SimState>()(
   persist(
     (set) => ({
-      backendKind: 'stub',
-      baseUrl: '',
       seed: 42,
       scenario: 'none',
       speed: 16,
 
+      backendKind: 'http',
       playing: true,
       world: null,
       snap: null,
@@ -76,8 +84,6 @@ export const useSim = create<SimState>()(
       sendCommand: null,
       retryNonce: 0,
 
-      setBackendKind: (backendKind) => set({ backendKind }),
-      setBaseUrl: (baseUrl) => set({ baseUrl }),
       setSeed: (seed) => set({ seed: Math.max(0, Math.floor(seed)) }),
       setScenario: (scenario) => set({ scenario }),
       setSpeed: (speed) => set({ speed }),
@@ -96,10 +102,8 @@ export const useSim = create<SimState>()(
       retry: () => set((s) => ({ retryNonce: s.retryNonce + 1 })),
     }),
     {
-      name: 'chain-reaction-v1',
+      name: STORAGE_KEY,
       partialize: (s) => ({
-        backendKind: s.backendKind,
-        baseUrl: s.baseUrl,
         seed: s.seed,
         scenario: s.scenario,
         speed: s.speed,
@@ -108,5 +112,9 @@ export const useSim = create<SimState>()(
   ),
 );
 
-/** Persisted settings keys — changing any of them restarts the session. */
-export const SETTING_KEYS = ['backendKind', 'baseUrl', 'seed', 'scenario', 'speed'] as const;
+// Apply the ?engine= override on top of the hosted default (tests and local
+// development select the in-page stub this way; no UI exists for it).
+if (typeof location !== 'undefined') {
+  const override = backendOverride(new URLSearchParams(location.search));
+  if (override !== null) useSim.setState({ backendKind: override });
+}

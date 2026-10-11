@@ -6,6 +6,7 @@ import { useSimEngine } from './store/useSimEngine';
 import { useSim } from './store/sim';
 import { SceneCanvas } from './scene/SceneCanvas';
 import { TopBar } from './ui/TopBar';
+import { EngineErrorOverlay } from './ui/EngineErrorOverlay';
 import { SiteInspector } from './ui/SiteInspector';
 import { VehicleInspector } from './ui/VehicleInspector';
 import { Timeline } from './ui/Timeline';
@@ -47,10 +48,7 @@ export default function App() {
         </div>
       )}
       {world === null && error !== null && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 text-sm" data-testid="fatal-error">
-          <p className="text-alarm" role="alert">{error}</p>
-          <button className="btn" onClick={retry}>Retry</button>
-        </div>
+        <EngineErrorOverlay message={error} onRetry={retry} />
       )}
       {world !== null && snap === null && error !== null && (
         <div className="absolute inset-x-0 top-14 z-20 flex justify-center">

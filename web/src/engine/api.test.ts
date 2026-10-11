@@ -181,6 +181,6 @@ describe('StubBackend', () => {
 describe('createBackend', () => {
   it('builds the right backend kind', () => {
     expect(createBackend('stub').kind).toBe('stub');
-    expect(createBackend('http', { baseUrl: 'http://x' }).kind).toBe('http');
+    expect(createBackend('http').kind).toBe('http');
   });
 });
