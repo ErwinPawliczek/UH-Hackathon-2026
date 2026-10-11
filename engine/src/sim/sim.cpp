@@ -302,9 +302,21 @@ std::string Sim::command(const std::string& json_cmd) {
                         static_cast<size_t>(cls), want, urgency, contract_seller, true);
       };
       const Quote reach = quote(0.0);
-      if (!reach.possible)
+      if (!reach.possible) {
+        // Possible with every edge open? Then a closure is all that is wrong.
+        bool closures = false;
+        for (const uint8_t open : state_.edge_open) closures = closures || !open;
+        if (closures) {
+          const Quote normal =
+              routeClosedQuote(*world_, state_, allOpenPaths(*world_), market_params_, class_nodes,
+                               static_cast<uint32_t>(buyer_tank), static_cast<uint32_t>(seller_tank),
+                               static_cast<size_t>(cls), 0.0, urgency, contract_seller);
+          if (normal.possible)
+            return refuse("route_closed", blockSentence(Quote::Block::RouteClosed, vc.mode));
+        }
         return refuse("not_possible",
                       "that vehicle class cannot carry this material between these two sites");
+      }
       if (reach.blocked == Quote::Block::NoVehicles)
         return refuse("no_vehicles", "there are no vehicles of that class");
       if (reach.blocked == Quote::Block::Unreachable)

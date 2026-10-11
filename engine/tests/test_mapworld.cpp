@@ -1651,3 +1651,104 @@ TEST_CASE("M19: unit_outage by unit index takes down exactly the unit asked for"
   CHECK(send({{"type", "unit_outage"}, {"site", "FUEL_DEPOT"}, {"trains", 1}}).at("ok") == false);
   CHECK(send({{"type", "unit_outage"}, {"unit_index", jet}}).at("ok") == false);  // no trains
 }
+
+TEST_CASE("M20: a tank cut off by a closed route keeps its options, marked route_closed") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  const World& w = sim->world();
+  sim->step(480);
+  const auto send = [&](const json& cmd) { return json::parse(sim->command(cmd.dump())); };
+
+  const json before_list = json::parse(buyTanksJson(*sim));
+  const size_t tanks_before = before_list.at("tanks").size();
+  CHECK(tanks_before == 20);
+  for (const json& t : before_list.at("tanks")) CHECK(t.at("route_closed") == 0);
+  const json before = json::parse(sourcingJson(*sim, "VINYLS", "CHLORINE"));
+  REQUIRE(before.at("options").size() == 1);
+  CHECK(before.at("options")[0].at("feasible_now") == true);
+  CHECK(before.at("options")[0].at("blocked_reason").is_null());
+  const double normal_km = before.at("options")[0].at("km").get<double>();
+  const double normal_h = before.at("options")[0].at("travel_h").get<double>();
+
+  // Close the road into Vinyls for ten days: chlorine has no other way in.
+  const uint32_t road = firstEdgeBetween(*sim, "VINYLS", "CHLOR_ALKALI", crx::Mode::Road);
+  REQUIRE(send({{"type", "route_break"}, {"edge", road}, {"duration_h", 240}}).at("ok") == true);
+  sim->step(2);
+  REQUIRE(!routeOpen(*sim, "CHLOR_ALKALI", "VINYLS", crx::Mode::Road));
+
+  // Still in the picker list, flagged; still one option, priced as the
+  // route normally runs, not feasible, and saying why.
+  const json list = json::parse(buyTanksJson(*sim));
+  CHECK(list.at("tanks").size() == tanks_before);
+  bool listed = false;
+  size_t cut_tanks = 0;
+  for (const json& t : list.at("tanks")) {
+    if (t.at("route_closed").get<int>() > 0) ++cut_tanks;
+    if (t.at("site") == "VINYLS" && t.at("material") == "CHLORINE") {
+      listed = true;
+      CHECK(t.at("options") == 1);
+      CHECK(t.at("route_closed") == 1);
+    }
+  }
+  CHECK(listed);
+  CHECK(cut_tanks >= 1);
+  const json cut = json::parse(sourcingJson(*sim, "VINYLS", "CHLORINE"));
+  REQUIRE(cut.at("options").size() == 1);
+  const json& row = cut.at("options")[0];
+  CHECK(row.at("seller") == "CHLOR_ALKALI");
+  CHECK(row.at("cls") == "TRUCK_PRESS");
+  CHECK(row.at("feasible_now") == false);
+  CHECK(row.at("blocked") == "route_closed");
+  CHECK(row.at("blocked_reason") == "the road to this site is closed");
+  CHECK(row.at("arrives_before_dry") == false);
+  CHECK(row.at("chosen") == false);
+  CHECK(row.at("km").get<double>() == doctest::Approx(normal_km));
+  CHECK(row.at("travel_h").get<double>() == doctest::Approx(normal_h));
+  CHECK(row.at("landed_usd_t").get<double>() > 0.0);
+  CHECK(cut.at("next_pass").at("lots").empty());  // the hourly pass books nothing for it
+
+  // An order placed by hand is refused with the same word and sentence.
+  const json refused = send({{"type", "place_order"}, {"site", "VINYLS"}, {"material", "CHLORINE"},
+                             {"seller", "CHLOR_ALKALI"}, {"cls", "TRUCK_PRESS"}, {"tonnes", 20}});
+  CHECK(refused.at("ok") == false);
+  CHECK(refused.at("blocked") == "route_closed");
+  CHECK(refused.at("error") == "place_order: the road to this site is closed");
+  // What could never work still says so, closure or not.
+  const json never = send({{"type", "place_order"}, {"site", "VINYLS"}, {"material", "CHLORINE"},
+                           {"seller", "CHLOR_ALKALI"}, {"cls", "SHIP_GAS"}, {"tonnes", 20}});
+  CHECK(never.at("blocked") == "not_possible");
+
+  // A tank the closure does not touch is unaffected.
+  const json other = json::parse(sourcingJson(*sim, "PROCESS_INDUSTRIES", "CAUSTIC"));
+  bool any_feasible = false;
+  for (const json& o : other.at("options")) {
+    CHECK(o.at("blocked") != "route_closed");
+    any_feasible = any_feasible || o.at("feasible_now").get<bool>();
+  }
+  CHECK(any_feasible);
+
+  // On water the sentence names the lane: shut the salt barges' river.
+  const uint32_t river = firstEdgeBetween(*sim, "SALT_MINE", "CHLOR_ALKALI", crx::Mode::River);
+  REQUIRE(send({{"type", "route_break"}, {"edge", river}, {"duration_h", 48}}).at("ok") == true);
+  sim->step(2);
+  const json salt = json::parse(sourcingJson(*sim, "CHLOR_ALKALI", "SALT"));
+  bool barge_cut = false, truck_open = false;
+  for (const json& o : salt.at("options")) {
+    if (o.at("cls") == "BARGE_DRY") {
+      barge_cut = o.at("blocked") == "route_closed" &&
+                  o.at("blocked_reason") == "the river lane to this site is closed";
+    }
+    if (o.at("cls") == "TRUCK_BULK") truck_open = o.at("blocked") != "route_closed";
+  }
+  CHECK(barge_cut);
+  CHECK(truck_open);  // the road is still there for salt
+
+  // When the road reopens the option is bookable again and the hand order goes through.
+  sim->step(241 * 4);
+  REQUIRE(routeOpen(*sim, "CHLOR_ALKALI", "VINYLS", crx::Mode::Road));
+  const json after = json::parse(sourcingJson(*sim, "VINYLS", "CHLORINE"));
+  REQUIRE(after.at("options").size() == 1);
+  CHECK(after.at("options")[0].at("blocked") != "route_closed");
+  const json after_list = json::parse(buyTanksJson(*sim));
+  for (const json& t : after_list.at("tanks")) CHECK(t.at("route_closed") == 0);
+}
