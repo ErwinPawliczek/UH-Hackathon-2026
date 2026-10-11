@@ -5,6 +5,7 @@
 #include <doctest/doctest.h>
 
 #include "crx_server.h"
+#include "rooms.h"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -988,4 +989,225 @@ TEST_CASE("the placeholder page is served when no web build exists") {
   REQUIRE(res);
   CHECK(res->status == 200);
   CHECK(res->body.find("Chain Reaction") != std::string::npos);
+}
+
+// --- Multiplayer rooms ------------------------------------------------------
+
+namespace {
+
+struct RoomServer {
+  crx::server::RoomRegistry rooms;
+  httplib::Server svr;
+  int port = 0;
+  std::thread thread;
+
+  explicit RoomServer(bool runClocks, size_t capacity = 4,
+                      std::chrono::steady_clock::duration ttl = std::chrono::minutes(30))
+      : rooms(capacity, ttl, runClocks) {
+    crx::server::registerRoomRoutes(svr, rooms);
+    port = svr.bind_to_any_port("127.0.0.1");
+    thread = std::thread([this] { svr.listen_after_bind(); });
+  }
+  ~RoomServer() {
+    svr.stop();
+    thread.join();
+  }
+};
+
+json postJson(httplib::Client& cli, const std::string& path, const json& body) {
+  const auto res = cli.Post(path, body.dump(), "application/json");
+  REQUIRE(res);
+  return json::parse(res->body);
+}
+
+json getJson(httplib::Client& cli, const std::string& path) {
+  const auto res = cli.Get(path);
+  REQUIRE(res);
+  return json::parse(res->body);
+}
+
+// The first playable site nobody owns yet.
+int freePlant(const json& state) {
+  for (const json& s : state.at("sites"))
+    if (s.at("playable").get<bool>() && s.at("owner").is_null()) return s.at("index").get<int>();
+  return -1;
+}
+
+}  // namespace
+
+TEST_CASE("R1 room: create, join, claim, and the lobby state") {
+  RoomServer ts(false);
+  auto cli = client(ts.port);
+  const json made = postJson(cli, "/api/room", json::object());
+  const std::string code = made.at("code").get<std::string>();
+  CHECK(code.size() == 4);
+  CHECK(made.at("hostToken").get<std::string>().size() >= 16);
+  const std::string base = "/api/room/" + code;
+
+  json state = getJson(cli, base);
+  CHECK(state.at("phase") == "lobby");
+  CHECK(state.at("tick") == 0);
+  CHECK(state.at("players").empty());
+  int playable = 0;
+  for (const json& s : state.at("sites")) playable += s.at("playable").get<bool>() ? 1 : 0;
+  CHECK(playable == 13);  // 9 plants and 4 sources; customers, ports and the gas grid are not
+
+  // The code is not case sensitive; an unknown one is a plain 404.
+  std::string lower = code;
+  for (char& c : lower) c = static_cast<char>(std::tolower(c));
+  CHECK(getJson(cli, "/api/room/" + lower).at("code") == code);
+  const auto missing = cli.Get(code == "ZZZZ" ? "/api/room/YYYY" : "/api/room/ZZZZ");
+  REQUIRE(missing);
+  CHECK(missing->status == 404);
+
+  const json sam = postJson(cli, base + "/join", {{"name", "  Sam "}});
+  const json sam2 = postJson(cli, base + "/join", {{"name", "Sam"}});
+  CHECK(sam.at("name") == "Sam");
+  CHECK(sam2.at("name") == "Sam 2");
+  CHECK(sam.at("token") != sam2.at("token"));
+  CHECK(postJson(cli, base + "/join", {{"name", "   "}}).at("ok") == false);
+  CHECK(postJson(cli, base + "/join", {{"name", std::string(21, 'x')}}).at("ok") == false);
+
+  const int plant = freePlant(state);
+  REQUIRE(plant >= 0);
+  CHECK(postJson(cli, base + "/claim", {{"token", "nope"}, {"site", plant}}).at("ok") == false);
+  CHECK(postJson(cli, base + "/claim", {{"token", sam.at("token")}, {"site", plant}}).at("ok") == true);
+  // Taken: the second player is told by whom.
+  const json taken = postJson(cli, base + "/claim", {{"token", sam2.at("token")}, {"site", plant}});
+  CHECK(taken.at("ok") == false);
+  CHECK(taken.at("error").get<std::string>().find("taken by Sam") != std::string::npos);
+  // A customer cannot be claimed.
+  int customer = -1;
+  for (const json& s : state.at("sites"))
+    if (!s.at("playable").get<bool>()) customer = s.at("index").get<int>();
+  REQUIRE(customer >= 0);
+  CHECK(postJson(cli, base + "/claim", {{"token", sam2.at("token")}, {"site", customer}}).at("ok") == false);
+  CHECK(postJson(cli, base + "/claim", {{"token", sam2.at("token")}, {"site", 9999}}).at("ok") == false);
+
+  state = getJson(cli, base + "?token=" + sam.at("token").get<std::string>());
+  CHECK(state.at("sites").at(static_cast<size_t>(plant)).at("owner") == sam.at("playerId"));
+  CHECK(state.at("players").at(0).at("site") == plant);
+  CHECK(state.at("players").at(0).at("connected") == true);
+  CHECK(state.at("players").at(1).at("site").is_null());
+
+  // In the lobby a player may swap or give the plant up.
+  CHECK(postJson(cli, base + "/claim", {{"token", sam.at("token")}, {"site", nullptr}}).at("ok") == true);
+  state = getJson(cli, base);
+  CHECK(state.at("sites").at(static_cast<size_t>(plant)).at("owner").is_null());
+  CHECK(postJson(cli, base + "/claim", {{"token", sam2.at("token")}, {"site", plant}}).at("ok") == true);
+}
+
+TEST_CASE("R2 room: only the host starts, pauses and sets the speed; the clock moves the run") {
+  RoomServer ts(false);
+  auto cli = client(ts.port);
+  const json made = postJson(cli, "/api/room", json::object());
+  const std::string base = "/api/room/" + made.at("code").get<std::string>();
+  const json host = {{"hostToken", made.at("hostToken")}};
+  const auto hostDo = [&](json extra) {
+    extra.update(host);
+    return postJson(cli, base + "/host", extra);
+  };
+  const std::shared_ptr<crx::server::Room> room = ts.rooms.find(made.at("code").get<std::string>());
+  REQUIRE(room);
+
+  CHECK(postJson(cli, base + "/host", {{"hostToken", "wrong"}, {"action", "start"}}).at("ok") == false);
+  CHECK(hostDo({{"action", "pause"}}).at("ok") == false);  // not running yet
+  CHECK(hostDo({{"action", "scenario"}, {"command", {{"type", "set"}}}}).at("ok") == false);
+
+  // Nothing moves in the lobby.
+  room->beat(5.0);
+  CHECK(getJson(cli, base).at("tick") == 0);
+
+  CHECK(hostDo({{"action", "start"}}).at("ok") == true);
+  CHECK(hostDo({{"action", "start"}}).at("ok") == false);
+  CHECK(getJson(cli, base).at("phase") == "running");
+
+  // Speed 1 = one simulated hour = 4 ticks per real second; fractions carry.
+  room->beat(1.0);
+  CHECK(getJson(cli, base).at("tick") == 4);
+  room->beat(0.125);
+  CHECK(getJson(cli, base).at("tick") == 4);
+  room->beat(0.125);
+  CHECK(getJson(cli, base).at("tick") == 5);
+
+  CHECK(hostDo({{"action", "speed"}, {"speed", 8}}).at("speed") == 8.0);
+  CHECK(hostDo({{"action", "speed"}, {"speed", 1000}}).at("speed") == 64.0);
+  CHECK(hostDo({{"action", "speed"}, {"speed", 0}}).at("speed") == 0.1);
+  CHECK(hostDo({{"action", "speed"}}).at("ok") == false);
+  hostDo({{"action", "speed"}, {"speed", 8}});
+  room->beat(0.5);
+  CHECK(getJson(cli, base).at("tick") == 21);
+
+  CHECK(hostDo({{"action", "pause"}}).at("ok") == true);
+  room->beat(10.0);
+  CHECK(getJson(cli, base).at("tick") == 21);
+  CHECK(getJson(cli, base).at("phase") == "paused");
+  CHECK(hostDo({{"action", "resume"}}).at("ok") == true);
+  room->beat(0.25);
+  CHECK(getJson(cli, base).at("tick") == 29);
+
+  // The snapshot is the engine's own, at the room's tick, with the tick as ETag.
+  const auto snap = cli.Get(base + "/snapshot");
+  REQUIRE(snap);
+  CHECK(snap->status == 200);
+  CHECK(snap->body.compare(0, 4, "CRXS") == 0);
+  CHECK(tickOf(snap->body) == 29);
+  CHECK(snap->get_header_value("ETag") == "\"29\"");
+  const auto same = cli.Get(base + "/snapshot", {{"If-None-Match", "\"29\""}});
+  REQUIRE(same);
+  CHECK(same->status == 304);
+  CHECK(same->body.empty());
+
+  const json world = getJson(cli, base + "/world");
+  CHECK(world.at("sites").size() == getJson(cli, base).at("sites").size());
+
+  // A host scenario is an engine command, applied to the shared run.
+  const json shock = hostDo({{"action", "scenario"},
+                             {"command", {{"type", "demand_shock"}, {"site", "FUEL_DEPOT"}, {"multiplier", 1.3}, {"duration_h", 36}}}});
+  CHECK(shock.at("ok") == true);
+
+  CHECK(hostDo({{"action", "end"}}).at("ok") == true);
+  room->beat(10.0);
+  CHECK(getJson(cli, base).at("tick") == 29);
+  CHECK(getJson(cli, base).at("phase") == "ended");
+  CHECK(hostDo({{"action", "start"}}).at("ok") == false);
+  CHECK(postJson(cli, base + "/join", {{"name", "Late"}}).at("ok") == false);
+}
+
+TEST_CASE("R3 room: the room's own clock thread advances a started room") {
+  RoomServer ts(true);
+  auto cli = client(ts.port);
+  const json made = postJson(cli, "/api/room", json::object());
+  const std::string base = "/api/room/" + made.at("code").get<std::string>();
+  postJson(cli, base + "/host", {{"hostToken", made.at("hostToken")}, {"action", "speed"}, {"speed", 64}});
+  postJson(cli, base + "/host", {{"hostToken", made.at("hostToken")}, {"action", "start"}});
+  uint64_t tick = 0;
+  for (int i = 0; i < 100 && tick < 20; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const auto snap = cli.Get(base + "/snapshot");
+    REQUIRE(snap);
+    tick = tickOf(snap->body);
+  }
+  CHECK(tick >= 20);
+}
+
+TEST_CASE("R4 room: four at once, the idle one makes way, and old rooms expire") {
+  RoomServer ts(false, 2, std::chrono::minutes(30));
+  auto now = std::chrono::steady_clock::now();
+  ts.rooms.setNowSource([&now] { return now; });
+  auto cli = client(ts.port);
+  const std::string a = postJson(cli, "/api/room", json::object()).at("code").get<std::string>();
+  now += std::chrono::minutes(1);
+  const std::string b = postJson(cli, "/api/room", json::object()).at("code").get<std::string>();
+  now += std::chrono::minutes(1);
+  CHECK(getJson(cli, "/api/room/" + a).at("code") == a);  // a is now the fresher one
+  now += std::chrono::minutes(1);
+  const std::string c = postJson(cli, "/api/room", json::object()).at("code").get<std::string>();
+  CHECK(ts.rooms.size() == 2);
+  CHECK(cli.Get("/api/room/" + b)->status == 404);
+  CHECK(cli.Get("/api/room/" + a)->status == 200);
+  now += std::chrono::minutes(31);
+  ts.rooms.reapExpired();
+  CHECK(ts.rooms.size() == 0);
+  CHECK(cli.Get("/api/room/" + c)->status == 404);
 }
