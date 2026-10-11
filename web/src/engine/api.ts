@@ -149,6 +149,19 @@ export interface EconomyReply {
   }[];
 }
 
+/**
+ * GET /api/sim/{id}/market (and /api/room/{code}/market): the market rules at
+ * work right now. Every part is optional on the wire: a server that is a
+ * commit behind may leave fields out, and the view shows what it gets.
+ */
+export interface MarketReply {
+  tick?: number;
+  rules?: { priceAwareBuying?: boolean; demandElasticity?: number; marginControl?: boolean };
+  materials?: { material: string; name?: string; baseUsdPerT: number; paidUsdPerT: number | null; changePct: number }[];
+  customers?: { site: number; name: string; material: string; demandFactor: number; pricePaidUsdPerT: number | null; baseUsdPerT: number; pricedOutUsd?: number; notServedUsd?: number }[];
+  plants?: { site: number; name: string; rate: number; marginUsdPerT: number | null; marginSignal?: number; revenueUsdPerT?: number; feedCostUsdPerT?: number; energyUsdPerT?: number }[];
+}
+
 /** How a plant that sells a material is doing, as the sourcing calls report it. */
 export type SupplierState = 'running' | 'held' | 'restarting' | 'shut_down' | 'no_producer';
 
@@ -259,6 +272,8 @@ export interface SimBackend {
   economy?(id: string, bucketH: number): Promise<EconomyReply>;
   /** GET /api/sim/{id}/sourcing — every buying tank, or with `tank` one tank and its supply options. (Optional, as above.) */
   sourcing?(id: string): Promise<SourcingList>;
+  /** GET /api/sim/{id}/market — prices against base, what customers want and plant margins, in a market world. (Optional, as above.) */
+  market?(id: string): Promise<MarketReply>;
   sourcingTank?(id: string, site: string, material: string): Promise<SourcingDetail>;
   /**
    * POST /api/sim/{id}/rewind — make the session exactly what it was at
