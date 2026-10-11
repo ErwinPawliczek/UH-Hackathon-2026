@@ -2,4 +2,4 @@
 # To publish a new version, change the folder copied below.
 FROM nginx:1.27-alpine
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
-COPY v3/ /usr/share/nginx/html/
+COPY v4/ /usr/share/nginx/html/

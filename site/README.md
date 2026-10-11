@@ -6,7 +6,8 @@ The page served at petrogrid.xyz. One static HTML file, no build step.
 |---|---|
 | `v1/` | First version, kept as exported. |
 | `v2/` | Second version: adds the model, customers and agents sections. |
-| `v3/` | Current version: the problem in five numbers, then the solution. This is what gets deployed. |
+| `v3/` | Third version: the problem in five numbers, then the solution. |
+| `v4/` | Current version, as exported on 2026-10-11 with its preview-width toolbar hidden. This is what gets deployed. |
 | `deploy/` | nginx config for the container. |
 
 ## Deploy
@@ -19,7 +20,7 @@ cd site
 fly deploy
 ```
 
-To publish a new version, add a folder (`v4/`), point the `COPY` line in `Dockerfile` at it, and deploy.
+To publish a new version, add a folder (`v5/`), point the `COPY` line in `Dockerfile` at it, and deploy.
 
 ## Editing
 
