@@ -12,7 +12,7 @@ export function EngineErrorOverlay({
 }) {
   return (
     <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/80" data-testid="fatal-error">
-      <div className="panel flex max-w-md flex-col items-start gap-2 p-6">
+      <div className="chamfer flex max-w-md flex-col items-start gap-2 p-6">
         <h1 className="wordmark text-lg text-alarm" role="alert">
           Engine unavailable
         </h1>

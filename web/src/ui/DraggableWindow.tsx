@@ -1,5 +1,7 @@
 // A floating window: drag it by the title bar, close it with the button in
-// the corner, and it stays inside the viewport. Which windows are open and
+// the corner, and it stays inside the viewport. Its corners are cut at 45
+// degrees (the shared .chamfer class in index.css), so every window in the
+// app has the same shape. Which windows are open and
 // where they sit lives in the windows store, so any panel (the event log,
 // analytics) is one <DraggableWindow id="…"> around its content plus a
 // toggle button that calls useWindows.toggle.
@@ -95,13 +97,15 @@ export function DraggableWindow({
 
   return (
     <section
-      className="panel pointer-events-auto fixed flex flex-col"
+      className="chamfer pointer-events-auto fixed flex flex-col"
       style={{ left: place.x, top: place.y, width, maxHeight, zIndex: BASE_Z + Math.max(0, stack) }}
       role="dialog"
       aria-label={title}
       data-testid={`window-${id}`}
       onPointerDown={() => useWindows.getState().focus(id)}
     >
+      {/* clipped to the window's cut corners: nothing inside can paint past them */}
+      <div className="chamfer-body flex min-h-0 flex-1 flex-col">
       <header
         className="flex cursor-move touch-none select-none items-center gap-2 border-b border-line px-3 py-2"
         onPointerDown={onPointerDown}
@@ -122,6 +126,7 @@ export function DraggableWindow({
         </button>
       </header>
       <div className="min-h-0 flex-1 overflow-auto">{children}</div>
+      </div>
     </section>
   );
 }

@@ -113,7 +113,8 @@ export function DropdownMenu({
         <ul
           id={menuId}
           role="menu"
-          className="panel absolute left-0 top-full z-30 mt-2 min-w-full list-none whitespace-nowrap bg-white p-1"
+          className="chamfer chamfer-sm absolute left-0 top-full z-30 mt-2 min-w-full list-none whitespace-nowrap p-1.5"
+          style={{ '--chamfer-fill': 'var(--white)' } as React.CSSProperties}
           onKeyDown={onMenuKey}
           data-testid={testId === undefined ? undefined : `${testId}-menu`}
         >

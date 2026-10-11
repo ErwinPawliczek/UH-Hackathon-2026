@@ -18,7 +18,12 @@ export interface VehiclePose {
 }
 
 export interface VehicleLayer {
+  /** per class: everything of the vehicle that is always drawn (cab and chassis, hull and deckhouse) */
   meshes: THREE.InstancedMesh[];
+  /** per class: what it carries, drawn only while cargo is on board; null for classes drawn in one piece */
+  cargo: (THREE.InstancedMesh | null)[];
+  /** per class: the point on the vehicle its cargo grows from and shrinks to */
+  pivots: [number, number, number][];
   /**
    * Per class mesh: the global vehicle index of each instance slot. A fleet
    * lists vehicles home by home, so one class's vehicles are not contiguous.
@@ -45,46 +50,71 @@ const DARK = 0.12;
 
 const alongZ = (geo: THREE.BufferGeometry) => geo.rotateX(Math.PI / 2);
 
-/** A road truck: dark cab in front (+z), the class-specific body behind it. */
-function truck(body: THREE.BufferGeometry): THREE.BufferGeometry {
-  return mergeGeometries([
-    part(new THREE.BoxGeometry(0.2, 0.2, 0.13).translate(0, 0.16, 0.185), DARK),
-    part(new THREE.BoxGeometry(0.16, 0.05, 0.36).translate(0, 0.045, -0.07), DARK), // chassis
-    part(body, CARGO),
-  ]);
+/** Tone of a truck's bare chassis and a barge's empty deck: lighter than the cab, so an empty one reads as a flatbed. */
+const BED = 0.55;
+
+/** A vehicle class in two parts: what is always drawn, and the cargo that shows only while it is loaded. */
+export interface VehicleParts {
+  base: THREE.BufferGeometry;
+  cargo: THREE.BufferGeometry | null;
+  /** where the cargo sits: it grows from and shrinks to this point */
+  pivot: [number, number, number];
 }
 
-/** A river barge: low flat hull, cargo on deck, a small pusher house at the stern. */
-function barge(deck: THREE.BufferGeometry[]): THREE.BufferGeometry {
-  return mergeGeometries([
-    part(new THREE.BoxGeometry(0.36, 0.1, 1.1).translate(0, 0.05, 0), HULL),
-    part(new THREE.BoxGeometry(0.22, 0.16, 0.14).translate(0, 0.18, -0.46), DARK),
-    ...deck.map((g) => part(g, CARGO)),
-  ]);
+/** A road truck: dark cab in front (+z) on a bare chassis; the class-specific body is its cargo. */
+function truck(body: THREE.BufferGeometry): VehicleParts {
+  return {
+    base: mergeGeometries([
+      part(new THREE.BoxGeometry(0.2, 0.2, 0.13).translate(0, 0.16, 0.185), DARK),
+      part(new THREE.BoxGeometry(0.17, 0.05, 0.38).translate(0, 0.045, -0.07), BED), // chassis
+      part(new THREE.BoxGeometry(0.19, 0.03, 0.05).translate(0, 0.02, -0.2), DARK), // rear axle
+    ]),
+    cargo: part(body, CARGO),
+    pivot: [0, 0.07, -0.07],
+  };
 }
 
-/** A sea-going ship: hull with a pointed bow, deckhouse aft, cargo on deck. */
-function ship(deck: THREE.BufferGeometry[]): THREE.BufferGeometry {
+/** A river barge: low flat hull and a small pusher house at the stern; what is on deck is its cargo. */
+function barge(deck: THREE.BufferGeometry[], fittings: THREE.BufferGeometry[]): VehicleParts {
+  return {
+    base: mergeGeometries([
+      part(new THREE.BoxGeometry(0.36, 0.1, 1.1).translate(0, 0.05, 0), HULL),
+      part(new THREE.BoxGeometry(0.22, 0.16, 0.14).translate(0, 0.18, -0.46), DARK),
+      ...fittings.map((g) => part(g, BED)),
+    ]),
+    cargo: mergeGeometries(deck.map((g) => part(g, CARGO))),
+    pivot: [0, 0.1, 0.05],
+  };
+}
+
+/** A sea-going ship: hull with a pointed bow, deckhouse aft, cargo on deck. Drawn in one piece. */
+function ship(deck: THREE.BufferGeometry[]): VehicleParts {
   const bow = alongZ(new THREE.ConeGeometry(0.3536, 0.5, 4).rotateY(Math.PI / 4))
     .scale(1, 0.36, 1)
     .translate(0, 0.09, 0.9);
-  return mergeGeometries([
-    part(new THREE.BoxGeometry(0.5, 0.18, 1.5).translate(0, 0.09, -0.1), HULL),
-    part(bow, HULL),
-    part(new THREE.BoxGeometry(0.38, 0.3, 0.24).translate(0, 0.33, -0.68), DARK),
-    ...deck.map((g) => part(g, CARGO)),
-  ]);
+  return {
+    base: mergeGeometries([
+      part(new THREE.BoxGeometry(0.5, 0.18, 1.5).translate(0, 0.09, -0.1), HULL),
+      part(bow, HULL),
+      part(new THREE.BoxGeometry(0.38, 0.3, 0.24).translate(0, 0.33, -0.68), DARK),
+      ...deck.map((g) => part(g, CARGO)),
+    ]),
+    cargo: null,
+    pivot: [0, 0, 0],
+  };
 }
 
 /**
  * One silhouette per vehicle class, so the eight classes read apart at map
  * scale: tank trucks carry a cylinder, pressurised trucks a rounded bullet,
- * bulk trucks a box; barges are low and flat (tanks or open hoppers); ships
+ * bulk trucks a box; barges are low and flat (tanks or filled hoppers); ships
  * have a pointed bow and a deckhouse (flat tanker deck, gas spheres, or
- * hatches). Sized for visibility, not to scale — a truck stays smaller than
- * a unit pad. Forward is +z; the base sits at y = 0.
+ * hatches). An empty truck is a cab on a bare chassis and an empty barge a
+ * bare deck or an open hold: what they carry is a separate part, drawn only
+ * while cargo is on board. Sized for visibility, not to scale — a truck
+ * stays smaller than a unit pad. Forward is +z; the base sits at y = 0.
  */
-export function vehicleGeometry(cls: VehicleClassKey): THREE.BufferGeometry {
+export function vehicleParts(cls: VehicleClassKey): VehicleParts {
   switch (cls) {
     case 'TRUCK_TANK':
       return truck(alongZ(new THREE.CylinderGeometry(0.09, 0.09, 0.36, 12)).translate(0, 0.16, -0.07));
@@ -93,15 +123,28 @@ export function vehicleGeometry(cls: VehicleClassKey): THREE.BufferGeometry {
     case 'TRUCK_BULK':
       return truck(new THREE.BoxGeometry(0.2, 0.2, 0.36).translate(0, 0.17, -0.07));
     case 'BARGE_TANK':
-      return barge([
-        alongZ(new THREE.CylinderGeometry(0.11, 0.11, 0.4, 12)).translate(0, 0.14, 0.26),
-        alongZ(new THREE.CylinderGeometry(0.11, 0.11, 0.4, 12)).translate(0, 0.14, -0.17),
-      ]);
+      return barge(
+        [
+          alongZ(new THREE.CylinderGeometry(0.11, 0.11, 0.4, 12)).translate(0, 0.14, 0.26),
+          alongZ(new THREE.CylinderGeometry(0.11, 0.11, 0.4, 12)).translate(0, 0.14, -0.17),
+        ],
+        // saddles the tanks sit in, left on the bare deck
+        [0.26, -0.17].map((z) => new THREE.BoxGeometry(0.2, 0.025, 0.3).translate(0, 0.1125, z)),
+      );
     case 'BARGE_DRY':
-      return barge([
-        new THREE.BoxGeometry(0.3, 0.1, 0.4).translate(0, 0.15, 0.27),
-        new THREE.BoxGeometry(0.3, 0.1, 0.4).translate(0, 0.15, -0.17),
-      ]);
+      return barge(
+        [
+          new THREE.BoxGeometry(0.26, 0.1, 0.36).translate(0, 0.15, 0.27),
+          new THREE.BoxGeometry(0.26, 0.1, 0.36).translate(0, 0.15, -0.17),
+        ],
+        // the coamings of two holds: open and empty until the cargo fills them
+        [0.27, -0.17].flatMap((z) => [
+          new THREE.BoxGeometry(0.32, 0.06, 0.02).translate(0, 0.13, z + 0.2),
+          new THREE.BoxGeometry(0.32, 0.06, 0.02).translate(0, 0.13, z - 0.2),
+          new THREE.BoxGeometry(0.02, 0.06, 0.4).translate(0.15, 0.13, z),
+          new THREE.BoxGeometry(0.02, 0.06, 0.4).translate(-0.15, 0.13, z),
+        ]),
+      );
     case 'SHIP_TANK':
       return ship([
         new THREE.BoxGeometry(0.42, 0.05, 1.1).translate(0, 0.205, 0.05),
@@ -113,8 +156,14 @@ export function vehicleGeometry(cls: VehicleClassKey): THREE.BufferGeometry {
       return ship([-0.3, 0.1, 0.5].map((z) => new THREE.BoxGeometry(0.38, 0.08, 0.3).translate(0, 0.22, z)));
     default:
       // An unknown class key (a newer engine catalog) still draws, as a truck.
-      return vehicleGeometry('TRUCK_TANK');
+      return vehicleParts('TRUCK_TANK');
   }
+}
+
+/** A class's whole shape, loaded: base and cargo in one geometry. */
+export function vehicleGeometry(cls: VehicleClassKey): THREE.BufferGeometry {
+  const parts = vehicleParts(cls);
+  return parts.cargo === null ? parts.base : mergeGeometries([parts.base, parts.cargo]);
 }
 
 /** One instanced mesh per vehicle class; colour by cargo material. */
@@ -126,24 +175,38 @@ export function buildVehicleLayer(world: WorldSpec): VehicleLayer {
     byClass.set(v.cls, list);
   });
   const meshes: THREE.InstancedMesh[] = [];
+  const cargo: (THREE.InstancedMesh | null)[] = [];
+  const pivots: [number, number, number][] = [];
   const members: number[][] = [];
-  for (const [cls, indices] of byClass) {
+  const instanced = (geo: THREE.BufferGeometry, count: number) => {
     const mesh = new THREE.InstancedMesh(
-      vehicleGeometry(cls),
+      geo,
       new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.1 }),
-      indices.length,
+      count,
     );
-    indices.forEach((vehIdx, k) => {
-      mesh.setColorAt(k, materialColor(world.vehicles[vehIdx].cargo));
-    });
     mesh.frustumCulled = false;
+    return mesh;
+  };
+  for (const [cls, indices] of byClass) {
+    const parts = vehicleParts(cls);
+    const mesh = instanced(parts.base, indices.length);
+    const load = parts.cargo === null ? null : instanced(parts.cargo, indices.length);
+    indices.forEach((vehIdx, k) => {
+      // one-piece classes are tinted by their cargo; the rest keep a neutral body
+      mesh.setColorAt(k, load === null ? materialColor(world.vehicles[vehIdx].cargo) : EMPTY_COLOR);
+      load?.setColorAt(k, materialColor(world.vehicles[vehIdx].cargo));
+    });
     meshes.push(mesh);
+    cargo.push(load);
+    pivots.push(parts.pivot);
     members.push(indices);
   }
-  return { meshes, members };
+  return { meshes, cargo, pivots, members };
 }
 
 const m4 = new THREE.Matrix4();
+const cargoM4 = new THREE.Matrix4();
+const growM4 = new THREE.Matrix4();
 const q4 = new THREE.Quaternion();
 const p3 = new THREE.Vector3();
 const s3 = new THREE.Vector3(1, 1, 1);
@@ -157,9 +220,13 @@ export function updateVehicles(
   terrainY: (xKm: number, yKm: number, vehicle: number) => number,
   /** drawn size of a vehicle, 0 (hidden) to 1; all are full size when omitted */
   shown?: (vehicle: number) => number,
+  /** how much of its cargo part is drawn, 0 (empty) to 1 (loaded); loaded when omitted */
+  loaded?: (vehicle: number) => number,
 ): void {
   layer.meshes.forEach((mesh, j) => {
     const members = layer.members[j];
+    const load = layer.cargo[j];
+    const [px, py, pz] = layer.pivots[j];
     for (let k = 0; k < mesh.count; k++) {
       const pose = poses[members[k]];
       if (pose === undefined) continue;
@@ -169,8 +236,15 @@ export function updateVehicles(
       s3.setScalar(shown === undefined ? 1 : Math.max(0, Math.min(1, shown(members[k]))));
       m4.compose(p3, q4, s3);
       mesh.setMatrixAt(k, m4);
+      if (load !== null) {
+        // the cargo part grows out of the bed as it is loaded and sinks back as it is unloaded
+        const g = loaded === undefined ? 1 : Math.max(0, Math.min(1, loaded(members[k])));
+        growM4.makeScale(g, g, g).setPosition(px * (1 - g), py * (1 - g), pz * (1 - g));
+        load.setMatrixAt(k, cargoM4.multiplyMatrices(m4, growM4));
+      }
     }
     mesh.instanceMatrix.needsUpdate = true;
+    if (load !== null) load.instanceMatrix.needsUpdate = true;
   });
 }
 
@@ -185,15 +259,24 @@ export function liveCargo(world: WorldSpec, snap: Snapshot, v: number): string |
   return materialKeyAt(world, byte);
 }
 
-/** Recolour vehicles from the cargo on board: material class colour, lane grey when empty. */
+/**
+ * Recolour vehicles from the cargo on board. A truck's or barge's cargo part
+ * takes the material's class colour and its body stays lane grey; a ship,
+ * drawn in one piece, is tinted by its cargo and lane grey when empty.
+ */
 export function updateVehicleCargo(layer: VehicleLayer, world: WorldSpec, snap: Snapshot): void {
   layer.meshes.forEach((mesh, j) => {
     const members = layer.members[j];
+    const load = layer.cargo[j];
     for (let k = 0; k < mesh.count; k++) {
       const cargo = liveCargo(world, snap, members[k]);
-      mesh.setColorAt(k, cargo === null ? EMPTY_COLOR : materialColor(cargo));
+      const color = cargo === null ? EMPTY_COLOR : materialColor(cargo);
+      if (load === null) mesh.setColorAt(k, color);
+      // an emptying cargo part keeps its colour while it shrinks away
+      else if (cargo !== null) load.setColorAt(k, color);
     }
     if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
+    if (load !== null && load.instanceColor !== null) load.instanceColor.needsUpdate = true;
   });
 }
 

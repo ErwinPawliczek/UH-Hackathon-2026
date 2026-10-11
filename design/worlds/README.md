@@ -12,7 +12,7 @@ All coordinates are kilometres on a 600 × 400 map, origin top-left, y down.
 | `wKm`, `hKm`, `cellKm` | Map size and the water grid cell size (10 km). |
 | `water` | List of `[col, row]` grid cells that are water. Everything else is land. |
 | `sites` | `{id, name, preset, x, y}`. `preset` is a key from `engine/data/catalog/presets.json`. |
-| `network` | Shared infrastructure, each `{mode, points}` with `mode` one of `road`, `river`, `sea`, `rail`. Each entry is one straight strip or short polyline. Strips of the same mode that share an end point (within 4 km) are joined; together they form that mode's route graph. |
+| `network` | Shared infrastructure, each `{mode, points}` with `mode` one of `road`, `river`, `sea`. Each entry is one straight strip or short polyline. Strips of the same mode that share an end point (within 4 km) are joined; together they form that mode's route graph. |
 | `connections` | Pipelines, each `{from, to, mode: "pipeline", material, points}`. `from` and `to` are site ids; `material` is a catalog material key; `points` is the bent polyline, first point at the source site and last at the target. |
 
 ## Rules the editor applied
@@ -21,7 +21,6 @@ All coordinates are kilometres on a 600 × 400 map, origin top-left, y down.
   gets a road connection, a barge berth (`river`) or a ship berth (`sea`).
 - Roads may cross water (bridges). River and sea lanes stay on water cells.
 - Sea lanes that run to the map edge are where imports and exports enter and leave.
-- `rail` is drawn but the engine has no rail mode yet. Ignore it when loading; do not delete it.
 
 ## This world
 

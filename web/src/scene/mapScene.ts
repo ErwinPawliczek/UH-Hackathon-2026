@@ -14,8 +14,8 @@ import { buildFlowLine, resizeFlowLines, setFlowLineColor, tickFlowLines, type F
 import { MODE_LINE_STYLE, PIPELINE_WIDTH, V3, flowColor, routeLineColor } from './palette';
 import { SiteLabels } from './siteLabels';
 import { PipelineLabels } from './pipelineLabels';
-import { buildRails, resizeRails, type RailLayer } from './rails';
 import { TripOverlay, type VehicleTrip } from './tripOverlay';
+import { buildBridges } from './bridges';
 import { buildSiteLayer, updateInstances, type SiteLayer } from './siteClusters';
 import {
   buildVehicleLayer, classMode, updateVehicleCargo, updateVehicles, waterSpan,
@@ -51,6 +51,8 @@ const PICK_MOVING_PX = 18;
 const PICK_STANDING_PX = 9;
 /** Seconds a vehicle takes to appear or fade out. */
 const VEHICLE_FADE_S = 0.25;
+/** Seconds a truck's or barge's cargo takes to grow onto its bed, or shrink off it. */
+const CARGO_GROW_S = 0.3;
 /** Trucks standing at a site park in rows on its near side, this many per row. */
 const PARK_PER_ROW = 9;
 
@@ -91,7 +93,6 @@ export class MapScene {
   private readonly vehicleLayer: VehicleLayer;
   private readonly labels: SiteLabels;
   private readonly pipelineLabels: PipelineLabels;
-  private readonly rails: RailLayer | null;
   private readonly trip: TripOverlay;
   private readonly flowLines: FlowLine[] = [];
   /** flowLines[i] for i < routeLineCount is world.routes[i]; pipelines follow. */
@@ -112,6 +113,8 @@ export class MapScene {
   private readonly poses: VehiclePose[] = [];
   /** How much of each vehicle is drawn, 0 (hidden) to 1; eases as it appears or fades. */
   private readonly shown: number[] = [];
+  /** How much of each vehicle's cargo part is drawn, 0 (empty) to 1; eases as it loads and unloads. */
+  private readonly loaded: number[] = [];
   private lastFrameMs = 0;
   /** Snapshot and run the vehicles are currently heading for. */
   private motionSnap: Snapshot | null = null;
@@ -204,9 +207,9 @@ export class MapScene {
       });
     });
 
-    // rail lines: drawn as small tracks, nothing runs on them
-    this.rails = buildRails(world, deck, isWater);
-    if (this.rails !== null) this.scene.add(this.rails.group);
+    // roads over water are carried on small bridges
+    const bridges = buildBridges(world, isWater, deck, surface);
+    if (bridges !== null) this.scene.add(bridges);
 
     this.net = new RouteNet(world);
     this.motion = new VehicleMotion(
@@ -221,6 +224,7 @@ export class MapScene {
 
     this.vehicleLayer = buildVehicleLayer(world);
     for (const mesh of this.vehicleLayer.meshes) this.scene.add(mesh);
+    for (const mesh of this.vehicleLayer.cargo) if (mesh !== null) this.scene.add(mesh);
     this.trip = new TripOverlay(this.scene, this.siteLayer.siteAnchors);
 
     // canvas is always in the DOM here; a detached canvas just gets an
@@ -365,12 +369,20 @@ export class MapScene {
       this.shown[v] = now === undefined || instantPlaced ? want : now + Math.sign(want - now) * Math.min(fade, Math.abs(want - now));
     }
     this.shown.length = cur.nVeh;
+    const grow = fade * (VEHICLE_FADE_S / CARGO_GROW_S);
+    for (let v = 0; v < cur.nVeh; v++) {
+      const want = cur.vehPos[5 * v + 4] > 0.02 ? 1 : 0; // array 6: cargo on board over capacity
+      const now = this.loaded[v];
+      this.loaded[v] = now === undefined || instantPlaced ? want : now + Math.sign(want - now) * Math.min(grow, Math.abs(want - now));
+    }
+    this.loaded.length = cur.nVeh;
     updateVehicles(
       this.vehicleLayer,
       this.poses,
       // trucks keep to the road deck over water; vessels ride the water surface
       (x, y, v) => this.vehicleY(v, x, y),
       (v) => this.shown[v] ?? 1,
+      (v) => this.loaded[v] ?? 1,
     );
     if (cur !== this.cargoSnap) {
       updateVehicleCargo(this.vehicleLayer, this.world, cur);
@@ -641,7 +653,6 @@ export class MapScene {
     this.labels.setSize(width, height);
     this.pipelineLabels.setSize(width, height);
     resizeFlowLines(this.flowLines, width, height);
-    resizeRails(this.rails, width, height);
     this.trip.resize(width, height);
     if (!this.userMoved) this.frameMap(height);
   }
