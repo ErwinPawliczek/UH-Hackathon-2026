@@ -48,6 +48,13 @@ int main(int argc, char** argv) {
 
   crx::server::SessionRegistry sessions;
   httplib::Server svr;
+  // A worker thread stays with its connection for as long as the client keeps
+  // it alive, and a room's players poll four times a second, so they never
+  // let go: with the default pool (8 on a small machine) the ninth
+  // connection waited until another had served its 100 requests. One thread
+  // per connection a full room can hold open; idle ones are dropped after 2 s.
+  svr.new_task_queue = [] { return new httplib::ThreadPool(256); };
+  svr.set_keep_alive_timeout(2);
   crx::server::RoomRegistry rooms;
   crx::server::registerRoomRoutes(svr, rooms);
   crx::server::registerRoutes(svr, sessions, webDir);
