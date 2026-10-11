@@ -17,7 +17,7 @@ export const TICKS_PER_DAY = 96;
 /** Simulation horizon in days (§9). */
 export const HORIZON_DAYS = 60;
 
-interface SimState {
+export interface SimState {
   // settings — persisted
   backendKind: BackendKind;
   baseUrl: string;
@@ -36,6 +36,8 @@ interface SimState {
   lastSeq: number;
   selected: Selection;
   error: string | null;
+  /** Live backend command dispatcher, wired by useSimEngine; null between sessions. */
+  sendCommand: ((cmd: Record<string, unknown>) => Promise<unknown>) | null;
 
   setBackendKind: (kind: BackendKind) => void;
   setBaseUrl: (url: string) => void;
@@ -71,6 +73,7 @@ export const useSim = create<SimState>()(
       lastSeq: -1,
       selected: null,
       error: null,
+      sendCommand: null,
       retryNonce: 0,
 
       setBackendKind: (backendKind) => set({ backendKind }),
