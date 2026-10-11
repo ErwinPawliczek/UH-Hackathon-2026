@@ -54,6 +54,11 @@ const CONVOY_SAME_KM = 1;
 /** Spacing between the members of a convoy, in km: enough to tell them apart and pick each at the default view. */
 const CONVOY_GAP_ROAD_KM = 5;
 const CONVOY_GAP_WATER_KM = 10;
+/** How far past the framed view the camera may pull back. */
+const ZOOM_OUT_LIMIT = 1.25;
+/** The framed map should fill this share of the free height; steeper looks to try when it does not (radians from vertical). */
+const FRAME_FILL = 0.74;
+const STEEPER_POLAR = [0.68, 0.62, 0.56, 0.5];
 /** Right on a vehicle: within this many pixels it wins even over a site. */
 const PICK_EXACT_PX = 8;
 /** Seconds a vehicle takes to appear or fade out. */
@@ -106,6 +111,9 @@ export class MapScene {
   private routeLineCount = 0;
   /** False until the visitor moves the camera; until then resizes re-frame the map. */
   private userMoved = false;
+  /** Viewport height at the last resize, and the camera distance that frames the whole map there. */
+  private viewHeight = 0;
+  private framedDist = 0;
   private readonly ring: THREE.Mesh;
   private readonly ringPivot: THREE.Group;
   /** Wet stretch per route (river and sea lanes only; null for roads and dry spurs). */
@@ -281,16 +289,36 @@ export class MapScene {
    * resize until the visitor moves the camera.
    */
   private frameMap(height: number): void {
+    // On a tall viewport the default tilt leaves wide bands above and below
+    // the map: look down more steeply, step by step, until it fills most of
+    // the free height.
+    let framed = this.frameAt(height, VIEW_DIR);
+    for (const polar of STEEPER_POLAR) {
+      if (framed === null || framed.fill >= FRAME_FILL) break;
+      framed = this.frameAt(height, new THREE.Vector3(0, Math.cos(polar), Math.sin(polar))) ?? framed;
+    }
+    if (framed === null) return;
+    const { dist } = framed;
+    // Zooming out stops a little past the framed view, so the map stays the
+    // subject of the screen, and site names stay on all the way out.
+    this.framedDist = dist;
+    this.controls.maxDistance = dist * ZOOM_OUT_LIMIT;
+    this.labels.setMaxDistance(dist * ZOOM_OUT_LIMIT * 1.05);
+    this.controls.update();
+  }
+
+  /** Frame the map looking along `dir`; returns the distance and the share of the free height the map fills. */
+  private frameAt(height: number, dir: THREE.Vector3): { dist: number; fill: number } | null {
     const w = this.world.wKm * SCALE;
     const h = this.world.hKm * SCALE;
     const top = 1 - (2 * TOP_INSET_PX) / Math.max(1, height);
     const bottom = -1 + (2 * BOTTOM_INSET_PX) / Math.max(1, height);
-    if (top - bottom < 0.2) return; // viewport too short to frame anything
-    const side = 0.96;
+    if (top - bottom < 0.2) return null; // viewport too short to frame anything
+    const side = 0.985;
     const corners = [[0, 0], [w, 0], [0, h], [w, h]];
     const v = new THREE.Vector3();
     const bounds = (dist: number, targetZ: number) => {
-      this.camera.position.set(w / 2 + VIEW_DIR.x * dist, VIEW_DIR.y * dist, targetZ + VIEW_DIR.z * dist);
+      this.camera.position.set(w / 2 + dir.x * dist, dir.y * dist, targetZ + dir.z * dist);
       this.camera.lookAt(w / 2, 0, targetZ);
       this.camera.updateMatrixWorld();
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -324,11 +352,28 @@ export class MapScene {
     }
     const dist = hi;
     const targetZ = centredZ(dist);
-    bounds(dist, targetZ); // leaves the camera at the chosen pose
+    const b = bounds(dist, targetZ); // leaves the camera at the chosen pose
     this.controls.target.set(w / 2, 0, targetZ);
-    this.controls.maxDistance = Math.max(160, dist * 1.6);
-    this.labels.setMaxDistance(Math.max(90, dist * 1.8));
-    this.controls.update();
+    return { dist, fill: (b.maxY - b.minY) / (top - bottom) };
+  }
+
+  /** Back to the framed start view: the whole map, centred under the top bar. */
+  resetView(): void {
+    if (this.viewHeight <= 0) return;
+    this.userMoved = false;
+    this.frameMap(this.viewHeight);
+  }
+
+  /** Keep the point the camera orbits on the map, so a pan cannot carry the map off the screen. */
+  private clampPan(): void {
+    const t = this.controls.target;
+    const x = Math.min(this.world.wKm * SCALE, Math.max(0, t.x));
+    const z = Math.min(this.world.hKm * SCALE, Math.max(0, t.z));
+    if (x === t.x && z === t.z && t.y === 0) return;
+    this.camera.position.x += x - t.x;
+    this.camera.position.z += z - t.z;
+    this.camera.position.y -= t.y;
+    t.set(x, 0, z);
   }
 
   /**
@@ -697,11 +742,22 @@ export class MapScene {
     this.pipelineLabels.setSize(width, height);
     resizeFlowLines(this.flowLines, width, height);
     this.trip.resize(width, height);
+    this.viewHeight = height;
     if (!this.userMoved) this.frameMap(height);
+    else {
+      // keep the zoom-out limit in step with the new viewport without moving the visitor's view
+      const pos = this.camera.position.clone();
+      const target = this.controls.target.clone();
+      this.frameMap(height);
+      this.camera.position.copy(pos);
+      this.controls.target.copy(target);
+      this.controls.update();
+    }
   }
 
   render(): void {
     this.controls.update();
+    this.clampPan();
     this.renderer.render(this.scene, this.camera);
     this.labels.update(
       this.camera,
@@ -709,7 +765,10 @@ export class MapScene {
       this.controls.target.y,
       this.controls.target.z,
     );
-    this.pipelineLabels.update(this.camera);
+    this.pipelineLabels.update(
+      this.camera,
+      this.framedDist > 0 ? this.framedDist / this.camera.position.distanceTo(this.controls.target) : 1,
+    );
   }
 
   /** Advance flow-dash animation; dt in seconds. Kept for the render loop API. */
