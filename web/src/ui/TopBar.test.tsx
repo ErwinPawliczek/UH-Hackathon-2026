@@ -35,9 +35,16 @@ describe('TopBar markup', () => {
     expect(html).toContain('data-testid="wordmark"');
     expect(html).toContain('data-testid="clock"');
     expect(html).toContain('data-testid="play-pause"');
-    expect(html).toContain('Simulation speed');
+    expect(html).toContain('data-testid="speed-control"');
     expect(html).toContain('data-testid="seed-input"');
     expect(html).toContain('data-testid="scenario-select"');
+  });
+
+  it('has one speed control with an editable number and no preset speed buttons', () => {
+    expect(html).toContain('data-testid="speed-control"');
+    expect(html).toMatch(/Speed:<\/span><input[^>]*id="speed-input"[^>]*name="speed"/);
+    expect(html).toMatch(/id="speed-input"[^>]*value="1"/);
+    expect(html).not.toMatch(/>(0\.5|1|4|16|64)×</);
   });
 
   it('draws its bottom edge as a 120 degree zigzag, with no straight border', () => {

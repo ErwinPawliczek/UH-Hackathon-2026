@@ -171,6 +171,50 @@ describe('session lifecycle', () => {
     cleanup();
   });
 
+  it('paces steps by speed: one tick per 500 ms at 0.5, fractions carried at 1.5, no burst on a change', async () => {
+    const backend = fakeBackend();
+    const cleanupOpen = openEngineSession({ kind: 'http', seed: 42, scenario: 'none' }, backend);
+    await vi.waitFor(() => expect(engineSession()?.id).toBe('sim-1'));
+    backend.step.mockClear(); // drop the opening step(0)
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const ticksSent = () => backend.step.mock.calls.map((c) => c[1]);
+
+    useSim.getState().setSpeed(0.5);
+    useSim.setState({ playing: true, error: null });
+    const stopLoop = startStepLoop();
+    await wait(1350);
+    // 1350 ms at one step per 500 ms: three steps (at 0, 500, 1000) — never the 5 or 6 of a 250 ms cadence
+    expect(ticksSent().length).toBeGreaterThanOrEqual(2);
+    expect(ticksSent().length).toBeLessThanOrEqual(3);
+    expect(ticksSent().every((ticks) => ticks === 1)).toBe(true);
+
+    // faster mid-run: the shorter interval applies at once, with no catch-up burst
+    backend.step.mockClear();
+    useSim.getState().setSpeed(1.5);
+    await wait(1100);
+    const fast = ticksSent();
+    expect(fast.length).toBeGreaterThanOrEqual(3);
+    expect(fast.length).toBeLessThanOrEqual(5);
+    expect(fast.every((ticks) => ticks === 1 || ticks === 2)).toBe(true); // 1.5 = 1, 2, 1, 2 …
+    const total = fast.reduce((a, b) => a + b, 0);
+    expect(Math.abs(total - 1.5 * fast.length)).toBeLessThanOrEqual(0.5);
+
+    // pausing stops it dead; resuming does not replay the pause
+    useSim.setState({ playing: false });
+    await flush();
+    backend.step.mockClear();
+    await wait(700);
+    expect(backend.step).not.toHaveBeenCalled();
+    useSim.setState({ playing: true });
+    await wait(120);
+    expect(ticksSent().length).toBe(1);
+
+    stopLoop();
+    cleanupOpen();
+    useSim.setState({ playing: false });
+    useSim.getState().setSpeed(1);
+  });
+
   it('going back in time reloads the run and forgets what came after', async () => {
     const backend = fakeBackend();
     backend.step.mockImplementation(async (_id: string, _ticks: number) => decode(encodeStub(42, 288)));
