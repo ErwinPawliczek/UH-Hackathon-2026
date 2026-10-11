@@ -18,6 +18,8 @@ import { useRoom } from '../store/useRoom';
 import { DropdownMenu } from '../ui/DropdownMenu';
 import { SiteBadge } from '../ui/SiteIcon';
 import { SpeedControl } from '../ui/SpeedControl';
+import { SiteWindow } from '../ui/SiteWindow';
+import { VehicleWindow } from '../ui/VehicleWindow';
 import { fmtMoney } from '../ui/economyData';
 import { fmtClock } from '../ui/format';
 import { Qr } from './Qr';
@@ -199,7 +201,7 @@ function Moves({ room }: { room: RoomInfo }) {
     .slice(-40)
     .reverse();
   return (
-    <section className="chamfer pointer-events-auto absolute left-4 top-16 z-30 w-[340px] p-3" style={CARD} data-testid="host-moves">
+    <section className="chamfer pointer-events-auto absolute left-4 top-16 z-[5] w-[340px] p-3" style={CARD} data-testid="host-moves">
       <div className="label mb-1">Moves</div>
       {moves.length === 0 && <p className="text-sm text-muted">Nothing yet. Every price change, cut, shutdown and blocked trade shows up here.</p>}
       <ol className="scroll-steady max-h-[60vh] overflow-auto">
@@ -266,6 +268,11 @@ function Game({ hosting, onLeave }: { hosting: Hosting; onLeave: () => void }) {
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
   const url = joinUrl(hosting.code);
+  // the plant window's Fail unit button works for the host: its command goes out as a host scenario
+  useEffect(() => {
+    useSim.setState({ sendCommand: (cmd) => source.host(hosting.hostToken, { action: 'scenario', command: cmd }) });
+    return () => { useSim.setState({ sendCommand: null }); };
+  }, [source, hosting.hostToken]);
 
   const send = (action: HostAction) => {
     setBusy(true);
@@ -279,6 +286,8 @@ function Game({ hosting, onLeave }: { hosting: Hosting; onLeave: () => void }) {
   return (
     <div className="relative h-dvh w-full overflow-hidden bg-white text-ink" data-testid="host-game">
       {world !== null && <SceneCanvas />}
+      {/* click a plant or a vehicle on the map: the same windows as the main app */}
+      {world !== null && room !== null && room.phase !== 'lobby' && <><VehicleWindow /><SiteWindow /></>}
       {room !== null && room.phase !== 'lobby' && <HostBar room={room} send={send} busy={busy} />}
       {room !== null && room.phase === 'lobby' && <Lobby room={room} url={url} onSources={(allow) => send({ action: 'sources', allow })} onStart={() => { send({ action: 'start' }); window.setTimeout(() => send({ action: 'speed', speed: 8 }), 400); }} busy={busy} />}
       {room !== null && room.phase !== 'lobby' && <Leaderboard source={source} room={room} />}
