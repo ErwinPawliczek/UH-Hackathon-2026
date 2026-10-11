@@ -2,17 +2,29 @@
 // pickers. Engine choice has no UI — visitors run the hosted engine; the
 // in-page stub is selected only via ?engine= for tests and local development.
 //
-// The scenario picker has two forms. On the hosted engine it triggers a real
-// disruption: picking an entry sends that engine command to the live session
-// at once, and the entry stays ticked for the rest of the run. On the in-page
-// stub it is the stub-era scripted-scenario setting (a session restart).
+// The scenario control is one button named "Scenario" that opens a list. On
+// the hosted engine it triggers a real disruption: picking an entry sends
+// that engine command to the live session at once, the entry stays ticked
+// for the rest of the run and the button shows its name. On the in-page stub
+// it is the stub-era scripted-scenario setting (a session restart).
 
 import { useSim, SPEEDS } from '../store/sim';
 import { SCENARIOS } from '../engine/events';
-import { scenariosFor } from '../engine/scenarios';
+import { scenariosFor, type EngineScenario } from '../engine/scenarios';
+import { DropdownMenu } from './DropdownMenu';
 import { fmtClock } from './format';
 import { LOG_WINDOW_AT, LOG_WINDOW_ID } from './EventLog';
 import { useWindows } from './windows';
+
+/**
+ * Text on the scenario button: its own name until a disruption is triggered,
+ * then the latest one's name (and how many more are running with it).
+ */
+export function scenarioButtonLabel(scenarios: EngineScenario[], triggered: string[]): string {
+  const latest = scenarios.find((s) => s.key === triggered[triggered.length - 1]);
+  if (latest === undefined) return 'Scenario';
+  return triggered.length > 1 ? `${latest.label} +${triggered.length - 1}` : latest.label;
+}
 
 export function TopBar() {
   const playing = useSim((s) => s.playing);
@@ -71,41 +83,31 @@ export function TopBar() {
         />
       </label>
 
+      {/* One control: the button is named "Scenario" and opens the list. */}
       {backendKind === 'http' ? (
-        <label className="flex items-center gap-2">
-          <span className="label">Scenario</span>
-          {/* value stays "" so the picker always reads as an action, not a state */}
-          <select
-            id="scenario-select"
-            name="scenario"
-            className="field"
-            value=""
-            disabled={!live || engineScenarios.length === 0}
-            onChange={(e) => {
-              const picked = engineScenarios.find((s) => s.key === e.target.value);
-              if (picked !== undefined) void triggerScenario(picked);
-            }}
-            data-testid="scenario-select"
-          >
-            <option value="">
-              {engineScenarios.length === 0 ? 'No scenarios for this world' : 'Trigger a disruption…'}
-            </option>
-            {engineScenarios.map((s) => (
-              <option key={s.key} value={s.key} disabled={triggered.includes(s.key)}>
-                {triggered.includes(s.key) ? `✓ ${s.label}` : s.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <DropdownMenu
+          label={scenarioButtonLabel(engineScenarios, triggered)}
+          items={engineScenarios.map((s) => ({
+            key: s.key,
+            label: s.label,
+            checked: triggered.includes(s.key),
+            disabled: triggered.includes(s.key),
+          }))}
+          disabled={!live || engineScenarios.length === 0}
+          emptyText="No scenarios for this world"
+          onPick={(key) => {
+            const picked = engineScenarios.find((s) => s.key === key);
+            if (picked !== undefined) void triggerScenario(picked);
+          }}
+          testId="scenario-select"
+        />
       ) : (
-        <label className="flex items-center gap-2">
-          <span className="label">Scenario</span>
-          <select id="scenario-select" name="scenario" className="field" value={scenario} onChange={(e) => setScenario(e.target.value)} data-testid="scenario-select">
-            {SCENARIOS.map((s) => (
-              <option key={s.key} value={s.key}>{s.label}</option>
-            ))}
-          </select>
-        </label>
+        <DropdownMenu
+          label={scenario === 'none' ? 'Scenario' : SCENARIOS.find((s) => s.key === scenario)?.label ?? 'Scenario'}
+          items={SCENARIOS.map((s) => ({ key: s.key, label: s.label, checked: s.key === scenario }))}
+          onPick={setScenario}
+          testId="scenario-select"
+        />
       )}
 
       {/* floating windows: each toggle opens or closes one draggable panel */}

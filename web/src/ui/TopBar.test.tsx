@@ -3,7 +3,21 @@
 
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { TopBar } from './TopBar';
+import { TopBar, scenarioButtonLabel } from './TopBar';
+
+describe('scenarioButtonLabel', () => {
+  const scenarios = [
+    { key: 'a', label: 'Cracker trip (5 days)', site: 'X', command: {} },
+    { key: 'b', label: 'Refinery down (7 days)', site: 'Y', command: {} },
+  ];
+  it('is the control\'s own name until something is triggered', () => {
+    expect(scenarioButtonLabel(scenarios, [])).toBe('Scenario');
+  });
+  it('shows the latest triggered scenario, and how many more are running', () => {
+    expect(scenarioButtonLabel(scenarios, ['a'])).toBe('Cracker trip (5 days)');
+    expect(scenarioButtonLabel(scenarios, ['a', 'b'])).toBe('Refinery down (7 days) +1');
+  });
+});
 
 describe('TopBar markup', () => {
   const html = renderToStaticMarkup(<TopBar />);
@@ -24,5 +38,11 @@ describe('TopBar markup', () => {
     expect(html).toContain('Simulation speed');
     expect(html).toContain('data-testid="seed-input"');
     expect(html).toContain('data-testid="scenario-select"');
+  });
+
+  it('names the scenario control on the control itself, with no separate label or native select', () => {
+    expect(html).toMatch(/data-testid="scenario-select"[^>]*>.*?Scenario/s);
+    expect(html).not.toContain('<select');
+    expect(html).not.toMatch(/<span class="label">Scenario<\/span>/);
   });
 });
