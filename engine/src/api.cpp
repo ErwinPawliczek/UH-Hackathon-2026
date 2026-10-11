@@ -375,7 +375,12 @@ void buildSnapshot(const Sim& sim, std::vector<uint8_t>& snap) {
   for (uint32_t p = 0; p < nProc; ++p) procStatus[p] = static_cast<uint8_t>(st.proc[p].status);
   auto* unitArr = snap.data() + offsets[3];
   for (uint32_t u = 0; u < nUnits; ++u) {
-    const auto& slot = w.catalog.process_types[w.units[u].process.v].units[w.units[u].slot];
+    // Resolve the unit's slot through its process's TYPE: process ids index
+    // w.processes, not the catalog's process_types vector. The previous
+    // lookup used the process id directly, reading another type's unit slots
+    // (and past the end for later units), so the trains-online bytes of the
+    // hosted snapshot were wrong whenever process order ≠ type order.
+    const auto& slot = w.catalog.process_types[w.processes[w.units[u].process.v].type].units[w.units[u].slot];
     const int online = static_cast<int>(slot.trains) - st.unit[u].trains_down;
     unitArr[u] = static_cast<uint8_t>(std::max(0, online));
   }
