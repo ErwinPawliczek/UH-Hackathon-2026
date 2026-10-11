@@ -56,8 +56,8 @@ export function TopBar() {
         {tick === undefined ? '—' : fmtClock(Number(tick))}
       </span>
 
-      {/* Before the first start this is the primary call to action; afterwards Pause / Resume. */}
-      <button className={`btn ${playing || !started ? 'btn-active' : ''}`} onClick={togglePlay} data-testid="play-pause">
+      {/* Start and Resume are the call to action (primary); Pause, while running, reads as the active state. */}
+      <button className={`btn ${playing ? 'btn-active' : 'btn-primary'}`} onClick={togglePlay} data-testid="play-pause">
         {!started ? '▶ Start simulation' : playing ? '⏸ Pause' : '▶ Resume'}
       </button>
 

@@ -97,7 +97,7 @@ export function DropdownMenu({
       <button
         ref={button}
         type="button"
-        className={`btn ${open ? 'btn-open' : ''}`}
+        className={`btn ${open ? 'btn-active' : ''}`}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}

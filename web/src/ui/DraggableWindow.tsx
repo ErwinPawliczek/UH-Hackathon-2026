@@ -92,7 +92,7 @@ export function DraggableWindow({
         <h2 className="label mr-auto">{title}</h2>
         {actions}
         <button
-          className="btn"
+          className="btn btn-glyph"
           onClick={() => useWindows.getState().close(id)}
           aria-label={`Close ${title}`}
           data-testid={`window-${id}-close`}
