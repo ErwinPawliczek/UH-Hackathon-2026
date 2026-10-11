@@ -124,5 +124,145 @@
         "recipes": [ { "in": { "FUEL_OIL": 1.000 }, "out": {},
                        "heat_gj": 0.0, "power_mwh": 0.0 } ] }
     ]
+  },
+  {
+    "key": "PORT_EXPORT_LPG", "name": "Port export (LPG)", "basis": "LPG",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PT-EXP-LPG", "name": "Export draw", "glyph": "jetty", "trains": 1,
+        "recipes": [ { "in": { "LPG": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_NAPHTHA", "name": "Port export (naphtha)", "basis": "NAPHTHA",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PT-EXP-NAPHTHA", "name": "Export draw", "glyph": "jetty", "trains": 1,
+        "recipes": [ { "in": { "NAPHTHA": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_GASOLINE", "name": "Port export (gasoline)", "basis": "GASOLINE",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PT-EXP-GASOLINE", "name": "Export draw", "glyph": "jetty", "trains": 1,
+        "recipes": [ { "in": { "GASOLINE": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_JET", "name": "Port export (jet fuel)", "basis": "JET",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PT-EXP-JET", "name": "Export draw", "glyph": "jetty", "trains": 1,
+        "recipes": [ { "in": { "JET": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_DIESEL", "name": "Port export (diesel)", "basis": "DIESEL",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PT-EXP-DIESEL", "name": "Export draw", "glyph": "jetty", "trains": 1,
+        "recipes": [ { "in": { "DIESEL": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_PROPYLENE", "name": "Port export (propylene)", "basis": "PROPYLENE",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PT-EXP-PROPYLENE", "name": "Export draw", "glyph": "jetty", "trains": 1,
+        "recipes": [ { "in": { "PROPYLENE": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_BENZENE", "name": "Port export (benzene)", "basis": "BENZENE",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PT-EXP-BENZENE", "name": "Export draw", "glyph": "jetty", "trains": 1,
+        "recipes": [ { "in": { "BENZENE": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_SOLVENT", "name": "Port export (solvent)", "basis": "SOLVENT",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PT-EXP-SOLVENT", "name": "Export draw", "glyph": "jetty", "trains": 1,
+        "recipes": [ { "in": { "SOLVENT": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_STYRENE", "name": "Port export (styrene)", "basis": "STYRENE",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PT-EXP-STYRENE", "name": "Export draw", "glyph": "jetty", "trains": 1,
+        "recipes": [ { "in": { "STYRENE": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_CAUSTIC", "name": "Port export (caustic)", "basis": "CAUSTIC",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PT-EXP-CAUSTIC", "name": "Export draw", "glyph": "jetty", "trains": 1,
+        "recipes": [ { "in": { "CAUSTIC": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_PE", "name": "Port export (polyethylene)", "basis": "PE",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PT-EXP-PE", "name": "Export draw", "glyph": "jetty", "trains": 1,
+        "recipes": [ { "in": { "PE": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_PP", "name": "Port export (polypropylene)", "basis": "PP",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PT-EXP-PP", "name": "Export draw", "glyph": "jetty", "trains": 1,
+        "recipes": [ { "in": { "PP": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_PVC", "name": "Port export (PVC)", "basis": "PVC",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PT-EXP-PVC", "name": "Export draw", "glyph": "jetty", "trains": 1,
+        "recipes": [ { "in": { "PVC": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_PS", "name": "Port export (polystyrene)", "basis": "PS",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PT-EXP-PS", "name": "Export draw", "glyph": "jetty", "trains": 1,
+        "recipes": [ { "in": { "PS": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
   }
 ]

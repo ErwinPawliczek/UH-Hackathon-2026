@@ -182,7 +182,7 @@ Features makeFeatures(const GenParams& params, Rng& rng, const Frame& frame) {
 std::vector<SiteSlot> placeSites(const GenParams& params, Rng& rng, const Features& ft,
                                  const Frame& frame) {
   std::vector<SiteSlot> slots;
-  slots.reserve(48);
+  slots.reserve(40);
 
   const auto tooClose = [&](Vec2 p, double min_km) {
     for (const SiteSlot& s : slots)
@@ -211,75 +211,81 @@ std::vector<SiteSlot> placeSites(const GenParams& params, Rng& rng, const Featur
     s.pos = {roundTo(std::clamp(p.x, 1.0, frame.w_km - 1.0), 0.1),
              roundTo(std::clamp(p.y, 1.0, frame.h_km - 1.0), 0.1)};
     s.city = city;
+    // Per-site random details (§6.5): capacity and cover jitter, mean 1.
+    s.capacity_weight = roundTo(rng.uniform(0.85, 1.15), 0.01);
+    s.cover_weight = roundTo(rng.uniform(0.85, 1.15), 0.01);
     slots.push_back(s);
   };
 
-  // Ports on the coast (§6.3: refineries/crackers at ports).
+  // Fixed count skeleton (§6.3), with three seeded count bits — gas plants,
+  // PE plants, styrenics — so seeds vary plant counts in 27–30 sites total.
+  const int gas_plant_count = 2 + static_cast<int>(rng.below(2));
+  const int pe_count = 1 + static_cast<int>(rng.below(2));
+  const int sty_count = 1 + static_cast<int>(rng.below(2));
+
+  // One port on the coast; the country's single export/import terminal (§3.3).
   const Vec2 port_a = frame.coastPoint(ft.port_u[0]);
-  const Vec2 port_b = frame.coastPoint(ft.port_u[1]);
   push("PORT_TERMINAL", std::string("Port ") + kPortNames[0], port_a);
-  push("PORT_TERMINAL", std::string("Port ") + kPortNames[1], port_b);
 
-  // Refineries just inland of the ports; crackers beside them.
-  const Vec2 ref_a = inland(frame, port_a, 5.0);
-  const Vec2 ref_b = inland(frame, port_b, 5.0);
+  // Refineries hugging the coast (marine berths, §6.3), crackers just inland.
+  const Vec2 ref_a = inland(frame, port_a, 3.0);
   push("REFINERY", "Refinery A", ref_a);
+  const double ref_b_u = std::clamp(ft.port_u[0] + (ft.port_u[0] < 0.5 ? 0.06 : -0.06), 0.05, 0.95);
+  const Vec2 ref_b = inland(frame, frame.coastPoint(ref_b_u), 3.0);
   push("REFINERY", "Refinery B", ref_b);
-  const Vec2 crk_a = inland(frame, ref_a, 8.0);
-  const Vec2 crk_b = inland(frame, ref_b, 8.0);
-  push("STEAM_CRACKER", "Cracker A (gas)", crk_a, "gas");
-  push("STEAM_CRACKER", "Cracker B (flex)", crk_b, "flex");
+  const Vec2 crk_a = inland(frame, ref_a, 6.0);
+  const Vec2 crk_b = inland(frame, ref_b, 6.0);
+  push("STEAM_CRACKER_GAS", "Cracker A (gas)", crk_a);
+  push("STEAM_CRACKER_FLEX", "Cracker B (flex)", crk_b);
 
-  // Fields: oil and gas around their basins, salt at the deposit.
+  // Fields: oil and gas around their basins, salt mines at the deposit.
   push("OIL_FIELD", "Oil field A", near(ft.oil_basin, 8.0, 28.0, 10.0));
   push("OIL_FIELD", "Oil field B", near(ft.oil_basin, 8.0, 28.0, 10.0));
   push("GAS_FIELD", "Gas field A", near(ft.gas_basin, 8.0, 28.0, 10.0));
   push("GAS_FIELD", "Gas field B", near(ft.gas_basin, 8.0, 28.0, 10.0));
-  push("GAS_FIELD", "Gas field C", near(ft.gas_basin, 8.0, 28.0, 10.0));
-  push("SALT_MINE", "Salt mine", ft.salt_deposit);
+  push("SALT_MINE", "Salt mine A", near(ft.salt_deposit, 4.0, 16.0, 8.0));
+  push("SALT_MINE", "Salt mine B", near(ft.salt_deposit, 4.0, 16.0, 8.0));
 
   // Gas plants at the gas basin, clear of the wells.
-  push("GAS_PLANT", "Gas plant A", near(ft.gas_basin, 6.0, 20.0, 12.0));
-  push("GAS_PLANT", "Gas plant B", near(ft.gas_basin, 6.0, 20.0, 12.0));
-  push("GAS_PLANT", "Gas plant C", near(ft.gas_basin, 6.0, 20.0, 12.0));
+  for (int i = 0; i < gas_plant_count; ++i)
+    push("GAS_PLANT", std::string("Gas plant ") + suffix(i),
+         near(ft.gas_basin, 6.0, 20.0, 12.0));
 
   // Derivative plants within 25 km of a cracker (§6.3), alternating between
   // the two crackers so no single cluster carries everything.
-  const int cracker_count = 2;
-  int pe_seen = 0;
-  for (int i = 0; i < 3; ++i) {
-    const Vec2 crk = (i % cracker_count == 0) ? crk_a : crk_b;
-    push("POLYETHYLENE", std::string("PE plant ") + suffix(pe_seen++), near(crk, 8.0, 16.0, 6.0));
+  for (int i = 0; i < pe_count; ++i) {
+    const Vec2 crk = (i % 2 == 0) ? crk_a : crk_b;
+    push("POLYETHYLENE", std::string("PE plant ") + suffix(i), near(crk, 8.0, 16.0, 6.0));
   }
-  push("POLYPROPYLENE", "PP plant", near(crk_a, 10.0, 18.0, 6.0));
-  std::array<Vec2, 2> vinyls_pos{};
-  for (int i = 0; i < 2; ++i) {
-    const Vec2 crk = (i % cracker_count == 0) ? crk_a : crk_b;
-    vinyls_pos[static_cast<size_t>(i)] = near(crk, 10.0, 20.0, 6.0);
-    push("VINYLS", std::string("Vinyls plant ") + suffix(i),
-         vinyls_pos[static_cast<size_t>(i)]);
+  push("POLYPROPYLENE", "PP plant", near(crk_b, 10.0, 18.0, 6.0));
+  const Vec2 vinyls_pos = near(crk_a, 10.0, 20.0, 6.0);
+  push("VINYLS", "Vinyls plant", vinyls_pos);
+  // The single chlor-alkali plant next to vinyls (§6.3): one deliberate
+  // single-supplier scenario — a chlorine outage strands the vinyl chain.
+  push("CHLOR_ALKALI", "Chlor-alkali plant", near(vinyls_pos, 3.0, 6.0, 3.0));
+  for (int i = 0; i < sty_count; ++i) {
+    const Vec2 crk = (i % 2 == 0) ? crk_b : crk_a;
+    push("STYRENICS", std::string("Styrenics plant ") + suffix(i), near(crk, 8.0, 14.0, 6.0));
   }
-  // Chlor-alkali next to vinyls (§6.3).
-  push("CHLOR_ALKALI", "Chlor-alkali A", near(vinyls_pos[0], 3.0, 6.0, 3.0));
-  push("CHLOR_ALKALI", "Chlor-alkali B", near(vinyls_pos[1], 3.0, 6.0, 3.0));
-  push("STYRENICS", "Styrenics plant", near(crk_a, 8.0, 14.0, 6.0));
 
   // Gas grid by the largest city.
   Vec2 largest = ft.cities.empty() ? Vec2{frame.w_km / 2, frame.h_km / 2} : ft.cities[0].pos;
   push("GAS_GRID", "Gas grid", near(largest, 6.0, 10.0, 4.0));
 
-  // City sinks: a fuel depot in every city, industrial sinks in the five
-  // largest (§6.3).
+  // City sinks: a fuel depot and one industrial preset in every city (§6.3).
+  const std::array<const char*, 5> industrial = {
+      "PACKAGING", "CONSTRUCTION", "CONSUMER_GOODS", "PAINTS_COATINGS", "PROCESS_INDUSTRIES"};
   for (size_t i = 0; i < ft.cities.size(); ++i) {
     const City& c = ft.cities[i];
     push("FUEL_DEPOT", "Fuel depot " + c.name, near(c.pos, 1.0, 3.0, 3.0), "", static_cast<int>(i));
-  }
-  const std::array<const char*, 5> industrial = {
-      "PACKAGING", "CONSTRUCTION", "CONSUMER_GOODS", "PAINTS_COATINGS", "PROCESS_INDUSTRIES"};
-  for (size_t i = 0; i < industrial.size() && i < ft.cities.size(); ++i) {
-    const City& c = ft.cities[i];
-    push(industrial[i], std::string(industrial[i]) + " (" + c.name + ")",
-         near(c.pos, 2.0, 5.0, 3.0), "", static_cast<int>(i));
+    if (i < industrial.size()) {
+      push(industrial[i], std::string(industrial[i]) + " (" + c.name + ")",
+           near(c.pos, 2.0, 5.0, 3.0), "", static_cast<int>(i));
+    } else {
+      push(industrial[i % industrial.size()],
+           std::string(industrial[i % industrial.size()]) + " (" + c.name + ")",
+           near(c.pos, 2.0, 5.0, 3.0), "", static_cast<int>(i));
+    }
   }
 
   (void)params;  // siting is template-driven; params only bound counts upstream

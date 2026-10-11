@@ -155,7 +155,8 @@
       "tanks": [ { "material": "CAUSTIC", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 } ],
       "bays": [2, 0, 0], "ref_nameplate_t_d": 0 },
 
-    { "key": "PORT_TERMINAL", "name": "Port terminal", "processes": ["PORT_BUNKER_FUEL_OIL"],
+    { "key": "PORT_TERMINAL", "name": "Port terminal", "processes": ["PORT_BUNKER_FUEL_OIL",
+                    "PORT_EXPORT_LPG", "PORT_EXPORT_NAPHTHA", "PORT_EXPORT_GASOLINE", "PORT_EXPORT_JET", "PORT_EXPORT_DIESEL", "PORT_EXPORT_PROPYLENE", "PORT_EXPORT_BENZENE", "PORT_EXPORT_SOLVENT", "PORT_EXPORT_STYRENE", "PORT_EXPORT_CAUSTIC", "PORT_EXPORT_PE", "PORT_EXPORT_PP", "PORT_EXPORT_PVC", "PORT_EXPORT_PS"],
       "tanks": [
         { "material": "CRUDE", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
         { "material": "RAW_GAS", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },

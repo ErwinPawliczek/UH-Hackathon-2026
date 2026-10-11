@@ -29,7 +29,20 @@ add_library(crx_engine STATIC
   engine/src/sim/sim.cpp
   engine/src/sim/sixsite.cpp
   engine/src/sim/validate.cpp
-  engine/src/sim/world.cpp)
+  engine/src/sim/world.cpp
+  # World generation (§6) compiles into the one engine library (outline §1):
+  # session-create builds the default generated world and bridges it to the
+  # sim, so the two halves cannot stay separate link targets.
+  engine/src/world/worldgen/CatalogBridge.cpp
+  engine/src/world/worldgen/CatalogData.cpp
+  engine/src/world/worldgen/Feasibility.cpp
+  engine/src/world/worldgen/Geo.cpp
+  engine/src/world/worldgen/Layout.cpp
+  engine/src/world/worldgen/NamedWorlds.cpp
+  engine/src/world/worldgen/Routes.cpp
+  engine/src/world/worldgen/Sizing.cpp
+  engine/src/world/worldgen/WorldGen.cpp
+  engine/src/world/worldgen/WorldJson.cpp)
 target_include_directories(crx_engine PUBLIC engine/include engine/src)
 target_compile_definitions(crx_engine PRIVATE
   CRX_DATA_DIR="${CMAKE_SOURCE_DIR}/engine/data/catalog")
@@ -78,23 +91,7 @@ target_compile_definitions(crx_catalog_tests PRIVATE
   CRX_CATALOG_DIR="${CMAKE_SOURCE_DIR}/engine/data/catalog")
 add_test(NAME catalog COMMAND crx_catalog_tests)
 
-# ---- crx-worldgen: template layout generator (§6) ----
-add_library(crx_worldgen STATIC
-  engine/src/world/worldgen/CatalogData.cpp
-  engine/src/world/worldgen/Geo.cpp
-  engine/src/world/worldgen/Layout.cpp
-  engine/src/world/worldgen/Routes.cpp
-  engine/src/world/worldgen/Sizing.cpp
-  engine/src/world/worldgen/Feasibility.cpp
-  engine/src/world/worldgen/WorldJson.cpp
-  engine/src/world/worldgen/WorldGen.cpp)
-target_include_directories(crx_worldgen PUBLIC engine/src)
-target_link_libraries(crx_worldgen PUBLIC crx_engine nlohmann_json::nlohmann_json)
-target_compile_options(crx_worldgen PRIVATE
-  $<$<CXX_COMPILER_ID:GNU,Clang>:-ffp-contract=off -Wall -Wextra -Wpedantic>)
-
+# ---- worldgen tests (worldgen is part of crx_engine, §1) ----
 add_executable(crx_worldgen_tests engine/tests/test_worldgen.cpp)
-target_link_libraries(crx_worldgen_tests PRIVATE crx_worldgen doctest::doctest)
+target_link_libraries(crx_worldgen_tests PRIVATE crx_engine doctest::doctest)
 add_test(NAME worldgen COMMAND crx_worldgen_tests)
-
-target_link_libraries(crx-cli PRIVATE crx_worldgen)

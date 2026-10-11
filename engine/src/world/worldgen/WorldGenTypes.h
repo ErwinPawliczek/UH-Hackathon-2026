@@ -32,7 +32,7 @@ enum class TankRole : uint8_t { Feed = 0, Product = 1, Internal = 2, Both = 3 };
 struct GenParams {
   double map_w_km = 600.0;            // map extent, x
   double map_h_km = 400.0;            // map extent, y
-  int    n_cities = 8;                // demand centres with rank-size populations
+  int    n_cities = 5;                // demand centres with rank-size populations
   double demand_scale = 1.0;          // scales every end demand
   double target_utilisation = 0.88;   // design rate = required / count / utilisation
   double cover_multiplier = 1.0;      // scales every tank's cover days

@@ -8,9 +8,14 @@
 //   5. chlor-alkali on chlorine, caustic credited; salt requirement
 //   6. gas plants from the max-ratio raw-gas requirement (methane → gas grid)
 //   7. per-site external nets → greedy supplier matching → flows
-//   8. leftovers to ports (imports/exports via the overseas node)
+//   8. surplus at each port composes the port's export sinks (§3.3: every
+//      product has an outlet — the port buys domestic surplus for export)
 //   9. tank designs from flows and site-internal streams
 //  10. fleet from tonnes moved × round-trip ÷ capacity, +20% padding
+//
+// There is no overseas procurement: the country is sized to be self-sufficient
+// (§6.5). A material whose suppliers cannot cover its consumers is recorded in
+// `unmet_t_d` and fails the feasibility gate instead of silently importing.
 //
 // Count rule (§6.5): capacity = required ÷ count ÷ utilisation, where count
 // comes from the site template. If the implied utilisation exceeds the target
@@ -23,6 +28,7 @@
 #include <cmath>
 #include <functional>
 #include <map>
+#include <set>
 
 namespace crx {
 namespace worldgen {
@@ -123,6 +129,12 @@ Composition composeSite(const CatalogView& catalog, const SiteSlot& slot,
 
 }  // namespace
 
+bool is_city_sink_preset(const std::string& preset) {
+  return preset == "FUEL_DEPOT" || preset == "PACKAGING" || preset == "CONSTRUCTION" ||
+         preset == "CONSUMER_GOODS" || preset == "PAINTS_COATINGS" ||
+         preset == "PROCESS_INDUSTRIES";
+}
+
 SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
                        const DemandConstants& dc, const Features& features,
                        const std::vector<SiteSlot>& slots, const Routes& routes) {
@@ -137,7 +149,11 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
   const std::vector<int> consumer = slotsOf(slots, "CONSUMER_GOODS");
   const std::vector<int> paints = slotsOf(slots, "PAINTS_COATINGS");
   const std::vector<int> procind = slotsOf(slots, "PROCESS_INDUSTRIES");
-  const std::vector<int> crackers = slotsOf(slots, "STEAM_CRACKER");
+  std::vector<int> crackers = slotsOf(slots, "STEAM_CRACKER_GAS");
+  {
+    const std::vector<int> flex = slotsOf(slots, "STEAM_CRACKER_FLEX");
+    crackers.insert(crackers.end(), flex.begin(), flex.end());
+  }
   const std::vector<int> refineries = slotsOf(slots, "REFINERY");
   const std::vector<int> cas = slotsOf(slots, "CHLOR_ALKALI");
   const std::vector<int> gas_plants = slotsOf(slots, "GAS_PLANT");
@@ -163,6 +179,30 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
   const auto perSite = [&](size_t n, double total) {
     return n == 0 ? 0.0 : total / static_cast<double>(n);
   };
+  // Weighted share: this site's slice of the family total, tilted by its
+  // seed-drawn capacity weight (§6.5 — capacities vary, totals hold).
+  const auto shareOf = [&](const std::vector<int>& sites, int site, double total) {
+    double wsum = 0.0;
+    for (int s : sites) wsum += slots[static_cast<size_t>(s)].capacity_weight;
+    if (wsum <= 0.0) return perSite(sites.size(), total);
+    return total * slots[static_cast<size_t>(site)].capacity_weight / wsum;
+  };
+
+  // Per-capita demand rate (t/d per million people) by sink basis material.
+  const auto perCapita = [&](const std::string& basis) {
+    if (basis == "GASOLINE") return dc.gasoline;
+    if (basis == "DIESEL") return dc.diesel;
+    if (basis == "JET") return dc.jet;
+    if (basis == "LPG") return dc.lpg;
+    if (basis == "PE") return dc.pe;
+    if (basis == "PP") return dc.pp * 0.5;  // split between two consumer sinks
+    if (basis == "PVC") return dc.pvc;
+    if (basis == "PS") return dc.ps;
+    if (basis == "STYRENE") return dc.styrene_monomer;
+    if (basis == "SOLVENT") return dc.solvent;
+    if (basis == "CAUSTIC") return dc.caustic;
+    return 0.0;  // METHANE / FUEL_OIL: sized by supply, not per-capita demand
+  };
 
   // ---- 1. End demands (t/d).
   const double gasoline_d = citySum(depots) * dc.gasoline * scale;
@@ -178,12 +218,16 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
   // ---- 2. Polymer chain requirements.
   const ProcessInfo* pe_poly = catalog.process("PE_POLYMERISATION");
   const ProcessInfo* vcm_proc = catalog.process("VCM");
-  const ProcessInfo* pvc_poly = catalog.process("PVC_POLY");
-  const ProcessInfo* sty_proc = catalog.process("STYRENE_PROC");
-  const ProcessInfo* ps_poly = catalog.process("PS_POLY");
+  const ProcessInfo* pvc_poly = catalog.process("PVC");
+  const ProcessInfo* sty_proc = catalog.process("STYRENE");
+  const ProcessInfo* ps_poly = catalog.process("PS");
   const ProcessInfo* electro = catalog.process("ELECTROLYSIS");
   const ProcessInfo* ngl = catalog.process("NGL_RECOVERY");
-  const ProcessInfo* olefins = catalog.process("OLEFINS");
+  const ProcessInfo* olefins_gas = catalog.process("OLEFINS_GAS");
+  const ProcessInfo* olefins_flex = catalog.process("OLEFINS_FLEX");
+  const auto olefinsFor = [&](const std::string& mode) {
+    return mode == "ETHANE" ? olefins_gas : olefins_flex;
+  };
 
   const double vcm_total = pvc_d * recipeIn(*pvc_poly, "DEFAULT", "VCM");
   const double sty_total = ps_d * recipeIn(*ps_poly, "DEFAULT", "STYRENE") + styrene_mon_d;
@@ -204,10 +248,11 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
   for (int site : crackers) {
     Cracker c;
     c.site = site;
-    c.mode = slots[static_cast<size_t>(site)].variant == "flex" ? "FLEX" : "ETHANE";
+    c.mode = slots[static_cast<size_t>(site)].preset == "STEAM_CRACKER_FLEX" ? "FLEX" : "ETHANE";
     cracker_design.push_back(c);
   }
   for (Cracker& c : cracker_design) {
+    const ProcessInfo* olefins = c.mode == "ETHANE" ? olefins_gas : olefins_flex;
     const double yld =
         c.mode == "ETHANE"
             ? recipeOut(*olefins, "ETHANE", "ETHYLENE")
@@ -226,14 +271,16 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
   }
   std::map<std::string, double> cracker_credit;
   for (const Cracker& c : cracker_design) {
+    const ProcessInfo* olefins = olefinsFor(c.mode == "ETHANE" ? "ETHANE" : "FLEX");
+    (void)olefins;
     const double flex_mix[3] = {c.mode == "ETHANE" ? 1.0 : dc.flex_ethane,
                                 c.mode == "ETHANE" ? 0.0 : dc.flex_lpg,
                                 c.mode == "ETHANE" ? 0.0 : dc.flex_naphtha};
-    for (const char* m : {"PROPYLENE", "BENZENE", "GASOLINE", "LPG", "FUEL_OIL"})
-      cracker_credit[m] +=
-          flex_mix[0] * recipeOut(*olefins, "ETHANE", m) * c.feed_t_d +
-          flex_mix[1] * recipeOut(*olefins, "LPG", m) * c.feed_t_d +
-          flex_mix[2] * recipeOut(*olefins, "NAPHTHA", m) * c.feed_t_d;
+    for (const char* m : {"PROPYLENE", "BENZENE", "GASOLINE", "LPG", "FUEL_OIL"}) {
+      cracker_credit[m] += flex_mix[0] * recipeOut(*olefins_gas, "ETHANE", m) * c.feed_t_d +
+                           flex_mix[1] * recipeOut(*olefins_flex, "LPG", m) * c.feed_t_d +
+                           flex_mix[2] * recipeOut(*olefins_flex, "NAPHTHA", m) * c.feed_t_d;
+    }
   }
 
   // ---- 4. Refinery: crude requirement from fuel demands net of credits.
@@ -252,8 +299,9 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
   };
   double crude_req = 0.0;
   for (const auto& [m, d] :
-       {std::pair{"GASOLINE", gasoline_d}, {"DIESEL", diesel_d}, {"JET", jet_d}, {"LPG", lpg_d}})
-    crude_req = std::max(crude_req, crudeFor(m, d));
+       {std::pair{"GASOLINE", gasoline_d}, {std::pair{"DIESEL", diesel_d}},
+        std::pair{"JET", jet_d}, std::pair{"LPG", lpg_d}})
+    crude_req = std::max(crude_req, crudeFor(m.c_str(), d));
   const double refinery_rate = perSite(refineries.size(), crude_req / U);
 
   // ---- 5. Chlor-alkali; salt requirement from the recipe.
@@ -270,7 +318,8 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
   double refinery_lpg = 0.0, refinery_naphtha = 0.0;
   if (!refineries.empty()) {
     std::map<std::string, double> rr;
-    for (const std::string& key : catalog.preset("REFINERY")->process_keys) rr[key] = refinery_rate;
+    for (const std::string& key : catalog.preset("REFINERY")->process_keys)
+      rr[key] = shareOf(refineries, refineries[0], refinery_total);
     const Composition comp = composeSite(catalog, slots[static_cast<size_t>(refineries[0])], rr, {});
     refinery_lpg += comp.traded_net.count("LPG") ? comp.traded_net.at("LPG") : 0.0;
     refinery_naphtha += comp.traded_net.count("NAPHTHA") ? comp.traded_net.at("NAPHTHA") : 0.0;
@@ -288,58 +337,55 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
     const std::string& preset = slots[static_cast<size_t>(site)].preset;
     std::map<std::string, double> d;
     const double pop = popOf(site);
-    if (preset == "FUEL_DEPOT") {
-      d["SINK_GASOLINE"] = pop * dc.gasoline * scale;
-      d["SINK_DIESEL"] = pop * dc.diesel * scale;
-      d["SINK_JET"] = pop * dc.jet * scale;
-      d["SINK_LPG"] = pop * dc.lpg * scale;
-    } else if (preset == "PACKAGING") {
-      d["SINK_PE"] = pop * dc.pe * scale;
-      d["SINK_PP"] = pop * dc.pp * 0.5 * scale;
-    } else if (preset == "CONSUMER_GOODS") {
-      d["SINK_PS"] = pop * dc.ps * scale;
-      d["SINK_PP"] = pop * dc.pp * 0.5 * scale;
-    } else if (preset == "CONSTRUCTION") {
-      d["SINK_PVC"] = pop * dc.pvc * scale;
-    } else if (preset == "PAINTS_COATINGS") {
-      d["SINK_SOLVENT"] = pop * dc.solvent * scale;
-      d["SINK_STYRENE"] = pop * dc.styrene_monomer * scale;
-    } else if (preset == "PROCESS_INDUSTRIES") {
-      d["SINK_CAUSTIC"] = pop * dc.caustic * scale;
-    } else if (preset == "GAS_GRID") {
-      d["SINK_METHANE"] = perSite(grid.size(), methane_made);  // absorbs all made
+    if (preset == "GAS_GRID") {
+      d["GAS_GRID_METHANE"] = shareOf(grid, site, methane_made);  // absorbs all made
     } else if (preset == "OIL_FIELD") {
-      d["CRUDE_SUPPLY"] = perSite(oil_fields.size(), crude_req);
+      // Fields match the refineries' design draw exactly: no crude surplus.
+      d["OIL_PRODUCTION"] = shareOf(oil_fields, site, crude_req / U);
     } else if (preset == "GAS_FIELD") {
-      d["RAW_GAS_SUPPLY"] = perSite(gas_fields.size(), rg_req);
+      d["GAS_PRODUCTION"] = shareOf(gas_fields, site, rg_req);
     } else if (preset == "SALT_MINE") {
-      d["SALT_SUPPLY"] = perSite(salt_mines.size(), salt_req);
+      d["SALT_MINING"] = shareOf(salt_mines, site, salt_req);
     } else if (preset == "GAS_PLANT") {
-      d["NGL_RECOVERY"] = perSite(gas_plants.size(), rg_req / U);
+      d["NGL_RECOVERY"] = shareOf(gas_plants, site, rg_req);
     } else if (preset == "REFINERY") {
-      d["CRUDE_DISTILLATION"] = refinery_rate;
-      d["REFORMING"] = refinery_rate;    // throttled to the CDU cut
-      d["FCC"] = refinery_rate;          // throttled to the CDU cut
-      d["DIESEL_HDT"] = refinery_rate;   // throttled to the CDU cut
-    } else if (preset == "STEAM_CRACKER") {
+      // Refinery keeps utilisation headroom (§6.5): fuel output runs 1/U over
+      // city demand and the surplus exports through the port.
+      d["CRUDE_DISTILLATION"] = shareOf(refineries, site, refinery_total);
+      d["REFORMING"] = d["CRUDE_DISTILLATION"];   // throttled to the CDU cut
+      d["FCC"] = d["CRUDE_DISTILLATION"];         // throttled to the CDU cut
+      d["DIESEL_HDT"] = d["CRUDE_DISTILLATION"];  // throttled to the CDU cut
+    } else if (preset == "STEAM_CRACKER_GAS" || preset == "STEAM_CRACKER_FLEX") {
       const auto it = std::find_if(cracker_design.begin(), cracker_design.end(),
                                    [&](const Cracker& c) { return c.site == site; });
       if (it != cracker_design.end()) {
-        d["OLEFINS"] = it->feed_t_d;
-        d["__mode_OLEFINS"] = 0.0;  // marker; mode resolved below
+        const bool flex = preset == "STEAM_CRACKER_FLEX";
+        d[flex ? "OLEFINS_FLEX" : "OLEFINS_GAS"] = it->feed_t_d;
       }
     } else if (preset == "CHLOR_ALKALI") {
-      d["ELECTROLYSIS"] = ca_rate;
+      d["ELECTROLYSIS"] = shareOf(cas, site, chlorine_req);
     } else if (preset == "POLYETHYLENE") {
-      d["PE_POLYMERISATION"] = perSite(pe_sites.size(), pe_d / U);
+      d["PE_POLYMERISATION"] = shareOf(pe_sites, site, pe_d / U);
     } else if (preset == "POLYPROPYLENE") {
-      d["PP_POLYMERISATION"] = perSite(pp_sites.size(), pp_d / U);
+      d["PP_POLYMERISATION"] = shareOf(pp_sites, site, pp_d / U);
     } else if (preset == "VINYLS") {
-      d["VCM"] = perSite(vinyls.size(), vcm_total / U);
-      d["PVC_POLY"] = perSite(vinyls.size(), pvc_d / U);
+      d["VCM"] = shareOf(vinyls, site, vcm_total / U);
+      d["PVC"] = shareOf(vinyls, site, pvc_d / U);
     } else if (preset == "STYRENICS") {
-      d["STYRENE_PROC"] = perSite(styrenics.size(), sty_total / U);
-      d["PS_POLY"] = perSite(styrenics.size(), ps_d / U);
+      d["STYRENE"] = shareOf(styrenics, site, sty_total / U);
+      d["PS"] = shareOf(styrenics, site, ps_d / U);
+    } else {
+      // City demand sinks: every sink process in the preset runs at its city's
+      // per-capita rate for the process's basis material (§3.3).
+      const PresetInfo* pi = catalog.preset(preset);
+      if (pi != nullptr) {
+        for (const std::string& key : pi->process_keys) {
+          const ProcessInfo* p = catalog.process(key);
+          if (p == nullptr) continue;
+          const double rate = perCapita(p->basis);
+          if (rate > 0.0) d[key] = pop * rate * scale;
+        }
+      }
     }
     return d;
   };
@@ -348,28 +394,39 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
   for (size_t s = 0; s < slots.size(); ++s) {
     std::map<std::string, double> desired = desiredOf(static_cast<int>(s));
     std::map<std::string, std::string> mode_over;
-    if (desired.count("__mode_OLEFINS")) {
-      desired.erase("__mode_OLEFINS");
+    const std::string& preset = slots[s].preset;
+    if (preset == "STEAM_CRACKER_GAS" || preset == "STEAM_CRACKER_FLEX") {
       const auto it = std::find_if(cracker_design.begin(), cracker_design.end(),
                                    [&](const Cracker& c) { return c.site == static_cast<int>(s); });
-      mode_over["OLEFINS"] = it != cracker_design.end() ? it->mode : "ETHANE";
+      if (it != cracker_design.end())
+        mode_over[preset == "STEAM_CRACKER_FLEX" ? "OLEFINS_FLEX" : "OLEFINS_GAS"] = it->mode;
     }
     comps[s] = composeSite(catalog, slots[s], desired, mode_over);
     for (const auto& [key, mm] : comps[s].procs) {
       if (mm.second <= 0.0) continue;
-      out.processes.push_back({static_cast<int>(s), key, mm.first, mm.second / 24.0});
+      const bool curved = is_city_sink_preset(preset);
+      out.processes.push_back({static_cast<int>(s), key, mm.first, mm.second / 24.0, curved});
     }
   }
 
-  // ---- 8. Flows: greedy supplier matching per traded material.
+  // ---- 8. Flows: greedy supplier matching per traded material. Surplus is
+  // routed to the nearest port for export (§3.3); shortfalls are unmet.
   const auto is_city_sink = [&](int site) {
-    const std::string& p = slots[static_cast<size_t>(site)].preset;
-    return p == "FUEL_DEPOT" || p == "PACKAGING" || p == "CONSTRUCTION" ||
-           p == "CONSUMER_GOODS" || p == "PAINTS_COATINGS" || p == "PROCESS_INDUSTRIES";
+    return is_city_sink_preset(slots[static_cast<size_t>(site)].preset);
   };
   const auto addFlow = [&](const std::string& m, int from, int to, double t_d, bool piped) {
     if (t_d > 1e-9) out.flows.push_back({m, from, to, t_d, piped});
   };
+
+  // Port export sinks: basis materials the port can buy for export (§3.3).
+  std::set<std::string> exportable;
+  if (const PresetInfo* port_preset = catalog.preset("PORT_TERMINAL")) {
+    for (const std::string& key : port_preset->process_keys) {
+      const ProcessInfo* p = catalog.process(key);
+      if (p != nullptr && p->boundary == Boundary::Sink && !p->basis.empty())
+        exportable.insert(p->basis);
+    }
+  }
 
   for (const MaterialInfo& mi : catalog.materials) {
     if (mi.kind != MatKind::Traded) continue;
@@ -383,7 +440,6 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
       if (it == comps[s].traded_net.end() || std::abs(it->second) < 1e-9) continue;
       (it->second > 0.0 ? suppliers : consumers).push_back({static_cast<int>(s), std::abs(it->second)});
     }
-    if (consumers.empty()) continue;
     const bool pipable = (mi.modes_mask & (1u << 3)) != 0;
 
     for (const auto& c : consumers) {
@@ -396,6 +452,10 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
       std::vector<Cand> cands;
       for (const auto& s : suppliers) {
         if (s.amt <= 1e-9) continue;
+        // Seed-drawn supplier preference (§6.5): sites with a higher capacity
+        // weight attract flow slightly more, so preferred suppliers vary by
+        // seed while staying near the cost optimum.
+        const double pref = 2.0 - slots[static_cast<size_t>(s.site)].capacity_weight;
         double vehicle_cost = 1e18;
         for (const VehicleClassInfo& v : catalog.vehicles) {
           if (v.carries != mi.phase) continue;
@@ -408,11 +468,12 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
         const bool pipe_ok = pipable && !is_city_sink(c.site);
         if (pipe_ok) {
           const double d = distKM(slots[static_cast<size_t>(s.site)].pos,
-                                  slots[static_cast<size_t>(c.site)].pos);
+                                  slots[static_cast<size_t>(c.site)].pos) *
+                           pref;
           cands.push_back({d, s.site, true, vehicle_cost});
         }
         if (vehicle_cost < 1e18)
-          cands.push_back({1e6 + vehicle_cost, s.site, false, vehicle_cost});
+          cands.push_back({1e6 + vehicle_cost * pref, s.site, false, vehicle_cost});
       }
       std::sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) {
         if (a.rank != b.rank) return a.rank < b.rank;
@@ -429,24 +490,14 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
         need -= take;
         addFlow(mi.key, sup.site, c.site, take, cd.piped);
       }
-      if (need > 1e-6 && !ports.empty()) {
-        // Import: overseas → nearest port, then port → consumer by vehicle.
-        int nearest = idx(ports, 0);
-        double best = 1e18;
-        for (int p : ports) {
-          const double d = distKM(slots[static_cast<size_t>(p)].pos,
-                                  slots[static_cast<size_t>(c.site)].pos);
-          if (d < best) {
-            best = d;
-            nearest = p;
-          }
-        }
-        addFlow(mi.key, kOverseasSite, nearest, need, false);
-        addFlow(mi.key, nearest, c.site, need, false);
-      }
+      if (need > 1e-6) out.unmet_t_d[mi.key] += need;  // §6.5: no import fallback
     }
+    // Supplier surplus → nearest port, which exports it (§3.3). Only materials
+    // the port can actually buy for export route there; anything else (e.g.
+    // chlorine, crude, raw gas, methane) stays at the producing site, where a
+    // full tank throttles production back to demand.
     for (const auto& s : suppliers) {
-      if (s.amt <= 1e-6 || ports.empty()) continue;
+      if (s.amt <= 1e-6 || ports.empty() || !exportable.count(mi.key)) continue;
       int nearest = idx(ports, 0);
       double best = 1e18;
       for (int p : ports) {
@@ -457,12 +508,35 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
           nearest = p;
         }
       }
-      addFlow(mi.key, s.site, nearest, s.amt, pipable && !is_city_sink(nearest));
-      addFlow(mi.key, nearest, kOverseasSite, s.amt, false);
+      addFlow(mi.key, s.site, nearest, s.amt, pipable);
     }
   }
 
-  // ---- 9. Ledger: country-level net requirement (+ = import, − = export).
+  // ---- 8b. Port composition: export sinks and the bunker sink run at the
+  // domestic arrival rates they were assigned above (t/d). This instantiates
+  // the port's consuming processes so every arrival has an in-world outlet.
+  for (int p : ports) {
+    std::map<std::string, double> arrivals;
+    for (const auto& f : out.flows)
+      if (f.to_site == p) arrivals[f.material] += f.t_d;
+    std::map<std::string, double> desired;
+    const PresetInfo* pi = catalog.preset("PORT_TERMINAL");
+    if (pi != nullptr) {
+      for (const std::string& key : pi->process_keys) {
+        const ProcessInfo* proc = catalog.process(key);
+        if (proc == nullptr) continue;
+        const auto it = arrivals.find(proc->basis);
+        if (it != arrivals.end() && it->second > 1e-9) desired[key] = it->second;
+      }
+    }
+    comps[static_cast<size_t>(p)] = composeSite(catalog, slots[static_cast<size_t>(p)], desired, {});
+    for (const auto& [key, mm] : comps[static_cast<size_t>(p)].procs) {
+      if (mm.second <= 0.0) continue;
+      out.processes.push_back({p, key, mm.first, mm.second / 24.0, false});
+    }
+  }
+
+  // ---- 9. Ledger: country-level net requirement (+ = shortfall, − = export).
   for (size_t s = 0; s < slots.size(); ++s)
     for (const auto& [m, t] : comps[s].traded_net) out.net_t_d[m] += t;
 
@@ -503,14 +577,23 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
     const MaterialInfo* mi = catalog.material(key.second);
     const bool internal = mi != nullptr && mi->kind == MatKind::SiteInternal;
     const PresetInfo* preset = catalog.preset(slots[static_cast<size_t>(key.first)].preset);
+    // Exact per-material cover from the preset's tank rules (§4.2), with the
+    // role aggregates as fallback for materials the rules do not name.
+    const double cov_m =
+        preset && preset->cover_by_material.count(key.second)
+            ? preset->cover_by_material.at(key.second)
+            : 0.0;
     const double cov_f = preset ? preset->cover_feed_d : 10.0;
     const double cov_p = preset ? preset->cover_product_d : 10.0;
     const double cov_i = preset ? preset->cover_internal_d : 2.0;
-    const double cov = params.cover_multiplier;
+    const double cov = params.cover_multiplier *
+                       slots[static_cast<size_t>(key.first)].cover_weight;
     const double cap =
         internal
             ? std::max(f.in, f.out) * 24.0 * cov_i * cov
-            : std::max(f.in * 24.0 * cov_p, f.out * 24.0 * cov_f) * cov;
+            : std::max({f.in * 24.0 * cov_p, f.out * 24.0 * cov_f,
+                        cov_m > 0.0 ? std::max(f.in, f.out) * 24.0 * cov_m : 0.0}) *
+                  cov;
     const TankRole role =
         internal                                    ? TankRole::Internal
         : (f.in > 1e-12 && f.out > 1e-12)           ? TankRole::Both
@@ -529,15 +612,8 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
     double best_cost = 1e18, best_arc = 0.0;
     for (const VehicleClassInfo& v : catalog.vehicles) {
       if (v.carries != mi->phase) continue;
-      int a = -1, b = -1;
-      if (f.from_site == kOverseasSite || f.to_site == kOverseasSite) {
-        const int port = f.from_site == kOverseasSite ? f.to_site : f.from_site;
-        a = routes.siteNode(port, Mode::Sea);
-        b = routes.overseas_node;
-      } else {
-        a = routes.siteNode(f.from_site, v.mode);
-        b = routes.siteNode(f.to_site, v.mode);
-      }
+      const int a = routes.siteNode(f.from_site, v.mode);
+      const int b = routes.siteNode(f.to_site, v.mode);
       if (a < 0 || b < 0 || !routes.reachable(a, b, v.mode)) continue;
       const double arc = routes.km(a, b, v.mode);
       const double cost = v.freight_per_t_km * arc;
@@ -548,10 +624,20 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
       }
     }
     if (best == nullptr) continue;
-    const int home = f.from_site == kOverseasSite ? f.to_site : f.from_site;
+    const int home = f.from_site;
     const double trips = f.t_d / best->capacity_t;
     const double rt_h = 2.0 * best_arc / std::max(1.0, best->speed_kmh) +
                         2.0 * best->capacity_t / std::max(1.0, best->load_t_h);
+    const int count = static_cast<int>(std::ceil(trips * rt_h / 24.0 * kFleetPadding));
+    out.fleet.push_back({best->key, home, std::max(1, count)});
+  }
+
+  return out;
+}
+
+}  // namespace worldgen
+}  // namespace crx
+);
     const int count = static_cast<int>(std::ceil(trips * rt_h / 24.0 * kFleetPadding));
     out.fleet.push_back({best->key, home, std::max(1, count)});
   }

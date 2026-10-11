@@ -27,6 +27,7 @@ struct SizingResult {
     std::string type;         // process type key
     std::string mode;         // operating mode key ("DEFAULT" when single)
     double rate_t_h = 0.0;    // design rate, t/h of the process basis
+    bool demand_curved = false;  // city demand sinks ride the demand sinusoid
   };
 
   // One directed material movement. Piped=true → straight pipeline between the
@@ -59,7 +60,8 @@ struct SizingResult {
   std::vector<FlowLine> flows;
   std::vector<TankDesign> tanks;
   std::vector<VehicleLine> fleet;
-  std::map<std::string, double> net_t_d;  // + = imported via ports, − = exported
+  std::map<std::string, double> net_t_d;    // + = shortfall, − = net export
+  std::map<std::string, double> unmet_t_d;  // demand no domestic supplier covers
 };
 
 // Local demand/sizing constants — clearly marked generator data (see above).
@@ -78,6 +80,10 @@ struct DemandConstants {
   // runs 100% ethane). Fixed policy, not search.
   double flex_ethane = 0.30, flex_lpg = 0.50, flex_naphtha = 0.20;
 };
+
+// True when the preset only hosts city demand sinks (curved schedules, and
+// never a pipeline endpoint — §6.4).
+bool is_city_sink_preset(const std::string& preset);
 
 SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
                        const DemandConstants& demands, const Features& features,

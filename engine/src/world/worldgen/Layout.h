@@ -46,6 +46,12 @@ struct SiteSlot {
   std::string preset, name, variant;
   Vec2 pos;
   int city = -1;  // city sinks carry their city index
+  // Seed-drawn per-site weights (§6.5 "random details"): capacity_weight
+  // tilts this site's share of its family's design load and nudges supplier
+  // preference; cover_weight tilts its tank cover days. Both in [0.85, 1.15],
+  // mean 1 — capacities and covers vary by seed while the family totals hold.
+  double capacity_weight = 1.0;
+  double cover_weight = 1.0;
 };
 
 Frame makeFrame(const GenParams& params, Rng& rng);
