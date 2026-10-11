@@ -116,11 +116,13 @@ export function TopBar() {
       {backendKind === 'http' ? (
         <DropdownMenu
           label={scenarioButtonLabel(engineScenarios, triggered)}
-          items={engineScenarios.map((s) => ({
+          items={engineScenarios.map((s, i) => ({
             key: s.key,
             label: s.label,
             checked: triggered.includes(s.key),
             disabled: triggered.includes(s.key),
+            // route closures follow the plant scenarios, under their own divider
+            heading: s.group === 'routes' && engineScenarios[i - 1]?.group !== 'routes' ? 'Routes' : undefined,
           }))}
           disabled={!live || engineScenarios.length === 0}
           emptyText="No scenarios for this world"

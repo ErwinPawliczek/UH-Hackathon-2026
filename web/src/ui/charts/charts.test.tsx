@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { LineChart } from './LineChart';
 import { Sparkline } from './Sparkline';
 import { CHART_COLORS, CHART_OTHER, seriesColor } from './palette';
-import { fmtTick, fmtValue, linePath, linear, nearestIndex, niceCeil, timeMarks, valueMarks } from './scale';
+import { dayMarks, fmtDay, fmtTick, fmtValue, linePath, linear, nearestIndex, niceCeil, timeMarks, valueMarks } from './scale';
 
 describe('chart scales', () => {
   it('rounds an axis top up to a clean number', () => {
@@ -46,6 +46,20 @@ describe('chart scales', () => {
     expect(month.withTime).toBe(false);
     expect(month.ticks.every((t) => t % 96 === 0)).toBe(true);
     expect(month.ticks.length).toBeLessThanOrEqual(7);
+  });
+
+  it('puts day marks on whole days only, however odd the span', () => {
+    expect(dayMarks(1, 6.8)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(dayMarks(0.4, 3.2)).toEqual([1, 2, 3]);
+    expect(dayMarks(1, 30)).toEqual([5, 10, 15, 20, 25, 30]);
+    expect(dayMarks(1, 60).every((d) => Number.isInteger(d))).toBe(true);
+    expect(dayMarks(1, 60).length).toBeLessThanOrEqual(7);
+  });
+
+  it('writes a day as a mark and as a readout', () => {
+    expect(fmtDay(5, false)).toBe('D5');
+    expect(fmtDay(5, true)).toBe('Day 5');
+    expect(fmtDay(5.5, true)).toBe('Day 5.5');
   });
 
   it('finds the sample nearest the pointer', () => {
@@ -108,6 +122,30 @@ describe('LineChart', () => {
     expect(html).toContain(CHART_COLORS[0]);
     expect(html).toContain(CHART_COLORS[1]);
     expect(html).toContain('fill-opacity="0.14"'); // the min–max band
+  });
+
+  it('in days mode marks whole days and never a fraction', () => {
+    const days = [1, 2, 3, 4, 5, 6, 6.8]; // a part-day at the end, as a run in progress has
+    const html = renderToStaticMarkup(
+      <LineChart unit="$" xUnit="days" x={days} series={[{ label: 'Margin', values: [1, 2, 3, 4, 5, 6, 6.5] }]} />,
+    );
+    for (const d of [1, 2, 3, 4, 5, 6]) expect(html).toContain(`>D${d}<`);
+    expect(html).not.toMatch(/>D\d+\.\d</); // no "D6.8" on the axis
+    // the table for screen readers names days, not clock times
+    expect(html).toContain('Day 5');
+    expect(html).not.toContain('00:00');
+  });
+
+  it('leaves tick-based charts as they were: marks by day and time, clock times in the table', () => {
+    const short = renderToStaticMarkup(
+      <LineChart unit="t/h" x={[96, 192, 288, 384]} series={[{ label: 'Crude', values: [1, 2, 3, 4] }]} />,
+    );
+    expect(short).toContain('>D2 00:00<'); // a three-day span: marks every 12 h, with the time
+    const long = renderToStaticMarkup(
+      <LineChart unit="t/h" x={[96, 960, 1920, 2880]} series={[{ label: 'Crude', values: [1, 2, 3, 4] }]} />,
+    );
+    expect(long).toContain('>D11<'); // a month: marks on days alone
+    expect(long).toContain('D11 00:00'); // the table still carries the time
   });
 
   it('draws reference lines with their labels and says so when there is no history', () => {

@@ -15,7 +15,7 @@
 
 import { useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { CHART_INK, seriesColor } from './palette';
-import { fmtTick, fmtValue, linePath, linear, nearestIndex, niceCeil, timeMarks, valueMarks } from './scale';
+import { dayMarks, fmtDay, fmtTick, fmtValue, linePath, linear, nearestIndex, niceCeil, timeMarks, valueMarks } from './scale';
 
 export interface ChartSeries {
   label: string;
@@ -33,7 +33,11 @@ export interface LineChartProps {
   series: ChartSeries[];
   /** shared x positions, for series that bring none of their own */
   x?: number[];
-  /** what x is: sim ticks (15 simulated minutes; labelled by day and time) or days */
+  /**
+   * what x is: sim ticks (15 simulated minutes; marks by day, or day and time
+   * on a short span; readout "D5 06:00") or days (marks on whole days, "D5";
+   * readout "Day 5") — use days for one value per day
+   */
   xUnit?: 'ticks' | 'days';
   /** unit of the values, shown on the axis and in the readout (e.g. "t/h", "%", "$") */
   unit: string;
@@ -73,9 +77,12 @@ export function LineChart({
   const top = yMax ?? niceCeil(Math.max(yMin + 1e-9, ...allY, ...refLines.map((r) => r.value)));
   const sx = linear(x0, x1 === x0 ? x0 + 1 : x1, M.left, width - M.right);
   const sy = linear(yMin, top, height - M.bottom, M.top);
-  const fmtX = (v: number, withTime: boolean) => (xUnit === 'days' ? `D${Math.round(v * 10) / 10}` : fmtTick(v, withTime));
+  // In days mode x is already a day number: marks sit on whole days ("D5")
+  // and a readout names the day ("Day 5"). In ticks mode a mark is a day, or
+  // a day and time when the span is short, and a readout always has the time.
+  const fmtX = (v: number, readout: boolean) => (xUnit === 'days' ? fmtDay(v, readout) : fmtTick(v, readout));
   const xMarks = xUnit === 'days'
-    ? { ticks: valueMarks(x0, x1, 4), withTime: false }
+    ? { ticks: dayMarks(x0, x1), withTime: false }
     : timeMarks(x0, x1);
   const yMarks = valueMarks(yMin, top, 4);
 

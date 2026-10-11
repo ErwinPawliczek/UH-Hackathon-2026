@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { clampToViewport, useWindows } from './windows';
 import { logRows } from './EventLog';
-import { notableEvents } from './eventKinds';
+import { eventLabel, eventMark, isRoutineEvent, notableEvents } from './eventKinds';
 import type { SimEvent } from '../engine/events';
 
 describe('windows store', () => {
@@ -59,5 +59,24 @@ describe('event log rows and notable events', () => {
 
   it('keeps only notable events for markers', () => {
     expect(notableEvents(events, 50).map((e) => e.seq)).toEqual([1, 3]);
+  });
+});
+
+describe('event kinds', () => {
+  const ev = (type: string): SimEvent => ({ seq: 1, tick: 5, type, text: '' });
+
+  it('treats route closures and reopenings as notable, with their own mark', () => {
+    expect(isRoutineEvent(ev('route_break'))).toBe(false);
+    expect(isRoutineEvent(ev('route_reopened'))).toBe(false);
+    expect(eventMark(ev('route_break'))).toEqual({ color: 'var(--alarm)', shape: 'diamond' });
+    expect(eventMark(ev('route_reopened'))).toEqual({ color: 'var(--blue)', shape: 'diamond' });
+    expect(eventLabel(ev('route_reopened'))).toBe('route reopened');
+    expect(notableEvents([ev('route_break'), ev('delivered'), ev('route_reopened')], 10).map((e) => e.type))
+      .toEqual(['route_break', 'route_reopened']);
+  });
+
+  it('keeps plant events on bars: red for bad states, blue for the rest', () => {
+    expect(eventMark(ev('unit_failed'))).toEqual({ color: 'var(--alarm)', shape: 'bar' });
+    expect(eventMark(ev('unit_repaired'))).toEqual({ color: 'var(--blue)', shape: 'bar' });
   });
 });

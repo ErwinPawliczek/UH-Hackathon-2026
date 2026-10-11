@@ -15,6 +15,8 @@ export interface MenuItem {
   /** shown ticked — already chosen */
   checked?: boolean;
   disabled?: boolean;
+  /** a section title printed above this entry, after a divider */
+  heading?: string;
 }
 
 export function DropdownMenu({
@@ -120,6 +122,9 @@ export function DropdownMenu({
         >
           {items.map((item, i) => (
             <li key={item.key} role="none">
+              {item.heading !== undefined && (
+                <div className="label mx-1 mb-0.5 mt-1.5 border-t border-line px-1 pt-1.5" role="presentation">{item.heading}</div>
+              )}
               <button
                 ref={(el) => { itemEls.current[i] = el; }}
                 type="button"

@@ -33,10 +33,34 @@ describe('scenariosFor', () => {
     expect(scenariosFor(sixsite).map((s) => s.key)).toEqual(['steam_cracker_compressor', 'gas_field_half_output']);
   });
 
-  it('every scenario is a complete engine command for its own site', () => {
+  it('offers a route closure only where that route index exists with the expected mode', () => {
+    const base = worldWithKeys(['REFINERY']);
+    const route = (mode: 'road' | 'river' | 'sea') => ({ mode, ends: ['A', 'B'] as [string, string], sites: [null, null] as [null, null], points: [] });
+    // a map whose routes 29, 43 and 78 are a road, a river lane and a sea lane, as on the default world
+    const routes = Array.from({ length: 80 }, (_, i) => route(i === 43 ? 'river' : i === 78 ? 'sea' : 'road'));
+    const keysOf = (w: WorldSpec) => scenariosFor(w).filter((s) => s.group === 'routes').map((s) => s.key);
+    expect(keysOf({ ...base, routes })).toEqual(['river_closed_salt', 'sea_lane_closed_fuel_depot', 'road_closed_vinyls']);
+    // a re-exported map where index 43 is now a road: the river closure is not offered
+    const moved = routes.map((r, i) => (i === 43 ? route('road') : r));
+    expect(keysOf({ ...base, routes: moved })).toEqual(['sea_lane_closed_fuel_depot', 'road_closed_vinyls']);
+    // a small world with no such indices: none of them
+    expect(keysOf({ ...base, routes: routes.slice(0, 6) })).toEqual([]);
+    // plant scenarios are unaffected, and come first
+    const all = scenariosFor({ ...base, routes });
+    expect(all[0].group).toBe('plants');
+    expect(all.findIndex((s) => s.group === 'routes')).toBe(all.filter((s) => s.group === 'plants').length);
+  });
+
+  it('every scenario is a complete engine command for what it targets', () => {
     for (const s of ENGINE_SCENARIOS) {
-      expect(s.command.site).toBe(s.site);
       expect(typeof s.command.duration_h).toBe('number');
+      if (s.route !== undefined) {
+        expect(s.command).toMatchObject({ type: 'route_break', edge: s.route.edge });
+        expect(s.site).toBeNull();
+        expect(s.group).toBe('routes');
+        continue;
+      }
+      expect(s.command.site).toBe(s.site);
       if (s.command.type === 'unit_outage') {
         expect(typeof s.command.unit).toBe('string');
         expect(Number.isInteger(s.command.trains)).toBe(true);
