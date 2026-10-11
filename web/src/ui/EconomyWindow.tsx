@@ -21,6 +21,7 @@ import { useSim } from '../store/sim';
 import { DraggableWindow } from './DraggableWindow';
 import { SiteBadge } from './SiteIcon';
 import { EconomySupply } from './EconomySupply';
+import { EconomyOverview } from './EconomyOverview';
 import { EconomyPrices } from './EconomyPrices';
 import { EconomyProcurement, EconomyProduction } from './EconomyTabs';
 import { ECONOMY_WINDOW_AT, ECONOMY_WINDOW_ID, useEconomyView, type EconomyTab } from './economyView';
@@ -34,20 +35,22 @@ const WIDTH = 720;
 export const FORECAST_DAYS = 30;
 
 const TABS: { key: EconomyTab; label: string }[] = [
+  { key: 'overview', label: 'Overview' },
   { key: 'prices', label: 'Prices' },
-  { key: 'procurement', label: 'Procurement' },
-  { key: 'production', label: 'Production' },
-  { key: 'impact', label: 'Disruption impact' },
-  { key: 'supply', label: 'Supply options' },
+  { key: 'spending', label: 'Spending' },
 ];
+
+const DETAIL_TITLE = { impact: 'Disruption impact', plants: 'Every plant, day by day', supply: 'Supply options' } as const;
 
 export function EconomyWindow() {
   const open = useWindows((s) => s.windows[ECONOMY_WINDOW_ID]?.open === true);
   const tab = useEconomyView((s) => s.tab);
+  const detail = useEconomyView((s) => s.detail);
   const setTab = useEconomyView((s) => s.setTab);
+  const showDetail = useEconomyView((s) => s.showDetail);
   return (
     <DraggableWindow id={ECONOMY_WINDOW_ID} title="Economy" width={WIDTH} maxHeight="80vh" at={ECONOMY_WINDOW_AT}>
-      {/* the tabs stay put while a long tab scrolls under them */}
+      {/* the tabs stay put while a long page scrolls under them */}
       <div className="sticky top-0 z-10 flex gap-1.5 border-b border-line bg-panel px-3 py-2" role="tablist" aria-label="Economy views">
         {TABS.map((t) => (
           <button
@@ -62,11 +65,22 @@ export function EconomyWindow() {
           </button>
         ))}
       </div>
+      {tab === 'overview' && detail === null && <EconomyOverview open={open} />}
+      {tab === 'overview' && detail !== null && (
+        <>
+          <div className="flex items-baseline gap-3 px-4 pt-2.5">
+            <button className="cursor-pointer text-sm font-medium text-blue underline decoration-dotted underline-offset-2 hover:text-blue-strong" onClick={() => showDetail(null)} data-testid="economy-back">
+              ← Overview
+            </button>
+            <span className="label">{DETAIL_TITLE[detail]}</span>
+          </div>
+          {detail === 'impact' && <ImpactTab open={open} />}
+          {detail === 'plants' && <EconomyProduction open={open} />}
+          {detail === 'supply' && <EconomySupply open={open} />}
+        </>
+      )}
       {tab === 'prices' && <EconomyPrices open={open} />}
-      {tab === 'procurement' && <EconomyProcurement open={open} />}
-      {tab === 'production' && <EconomyProduction open={open} />}
-      {tab === 'impact' && <ImpactTab open={open} />}
-      {tab === 'supply' && <EconomySupply open={open} />}
+      {tab === 'spending' && <EconomyProcurement open={open} />}
     </DraggableWindow>
   );
 }
@@ -139,7 +153,7 @@ function Quiet({ f }: { f: ForecastReply }) {
       <div className="text-xl font-semibold text-ink">Nothing is broken.</div>
       <p className="mt-1 max-w-[60ch] text-sm text-muted">
         Over the next {f.days} days the network runs as planned. Break something from the Scenario menu, or fail a
-        unit in a site&apos;s panel, and this tab shows what it will cost and what stops next.
+        unit in a site&apos;s panel, and this page shows what it will cost and what stops next.
       </p>
     </div>
   );
