@@ -496,7 +496,7 @@ const GROUP_SUBHEAD = { 0: 1, 1: 2, 2: 3 };
 const HOW = [
   {
     title: "One tick is 15 minutes",
-    body: "Every tick, each tank reads its three numbers, each plant sets its rate and every tank and pipeline moves. On the hour, tanks place orders. Pickups, deliveries and shutdowns fire when they happen.",
+    body: "Every tick, each tank reads its three numbers, each plant sets its rate, pipelines move and every tank moves. On the hour, tanks place orders and loads are dispatched. Pickups, deliveries and shutdowns fire when they happen.",
     figure: "clock"
   },
   {
@@ -516,7 +516,7 @@ const HOW = [
   },
   {
     title: "When and how much to buy",
-    body: "A tank not fed by pipeline buys for itself, once an hour: as soon as Urgency is above zero, enough to get back to 70% full, in whole vehicle loads, waiting until a lot fills at least 80% of the vehicle. A truck carries 20 to 25 t, a barge 1,500 to 2,000 t, a ship a few thousand tonnes.",
+    body: "A tank not fed by pipeline buys for itself, once an hour: as soon as Urgency is above zero, enough to get back to 70% full, in whole vehicle loads, waiting until a lot fills at least 80% of the vehicle. A truck carries 20 to 25 t, a barge 1,500 or 2,000 t, a ship 12,000 to 40,000 t.",
     figure: "buy"
   },
   // ── The market (from "9-market-model.md"): price comes from stock, and price changes behaviour ──
@@ -541,13 +541,13 @@ const HOW = [
   {
     group: 2,
     title: "Price decides how much customers consume",
-    body: "Customers want less as the price they have been paying rises: normal demand \xD7 (price \xF7 base) to the power \u22120.2, kept between 60% and 120% of normal. Lost sales split in two: priced out, and not delivered. The damage figure counts both.",
+    body: "Customers want less as the price they have been paying rises: normal demand \xD7 (price \xF7 base) to the power \u22120.2, kept between 60% and 120% of normal. Lost sales split in two: priced out, and not delivered. The multiplayer damage summary counts both.",
     figure: "demand"
   },
   {
     group: 2,
     title: "Price decides how hard a plant runs",
-    body: "Once an hour every plant compares what a tonne fetches with what it costs: product value minus feed and energy. Below half its normal margin it slows, down to its minimum rate at no margin. It never shuts down for price alone.",
+    body: "Once an hour every plant compares what a tonne fetches with what it costs: product value minus feed and energy. Below half its normal margin it slows, down to its minimum rate at no margin. It never shuts down for price alone, and in normal running this rarely binds.",
     figure: "margin"
   },
   {
@@ -980,12 +980,13 @@ const LANES = [
     { id: "read", text: "Every tank reads Feed, Room, Urgency" },
     { id: "rate", text: "Every plant sets its rate" },
     { id: "move", text: "Every tank moves: (in \u2212 out) \xD7 0.25 h" },
-    { id: "trucks", text: "Vehicles on the road move on" },
-    { id: "pipe", text: "Pipelines move what the receiver draws" }
+    { id: "pipe", text: "Pipelines move what the receiver draws" },
+    { id: "trucks", text: "Vehicles on the road move on" }
   ] },
   { title: "Every hour", note: "every 4th tick", rows: [
     { id: "order", text: "Tanks with Urgency > 0 order" },
-    { id: "price", text: "Each order: cheapest delivered cost wins" }
+    { id: "price", text: "Each order: cheapest delivered cost wins" },
+    { id: "dispatch", text: "Ordered loads are dispatched" }
   ] },
   { title: "Separate events", note: "", rows: [
     { id: "pickup", text: "Pickup: seller's pickup gap updates" },
@@ -1037,7 +1038,7 @@ function runTicker(root, ms = 900) {
     orders = 0;
     truck = null;
   };
-  const EVENTS = /* @__PURE__ */ new Set(["order", "price", "pickup", "deliver", "stop", "restart"]);
+  const EVENTS = /* @__PURE__ */ new Set(["order", "price", "dispatch", "pickup", "deliver", "stop", "restart"]);
   const hold = /* @__PURE__ */ new Map();
   const fire = (ids) => {
     hold.forEach((n, id) => n <= 1 ? hold.delete(id) : hold.set(id, n - 1));
@@ -1049,7 +1050,7 @@ function runTicker(root, ms = 900) {
     [...ids, ...hold.keys()].forEach((id) => rows.get(id)?.classList.add("is-fired"));
   };
   const step = () => {
-    const t = k * 0.25, q = k % 4, ids = ["read", "rate", "move"];
+    const t = k * 0.25, q = k % 4, ids = ["read", "rate", "pipe", "move"];
     if (truck && t >= truck.leave && t - 0.25 < truck.leave) ids.push("pickup");
     if (truck && t >= truck.arrive) {
       level = Math.min(CAP, level + LOAD);
@@ -1058,13 +1059,12 @@ function runTicker(root, ms = 900) {
     }
     if (truck) ids.push("trucks");
     if (q === 0) {
-      ids.push("pipe");
       const cover = (level + (truck ? LOAD : 0)) / TRIP;
       if (!truck && urgency(cover) > 0 && TARGET - level >= 0.8 * LOAD) {
         orders++;
         const leave = t + 0.25;
         truck = { leave, arrive: leave + TRIP + (orders === HOLDUP_ORDER ? HOLDUP : 0) };
-        ids.push("order", "price");
+        ids.push("order", "price", "dispatch");
       }
     }
     const g = feed(level);
@@ -1542,7 +1542,7 @@ function modelFor(site) {
       ]),
       urgencyChart(),
       sawtoothChart(),
-      prose("Typical lot: a truck 20 to 25 t, a barge 1,500 to 2,000 t, a ship a few thousand tonnes.")
+      prose("Vehicle loads: a truck 20 to 25 t, a barge 1,500 or 2,000 t, a ship 12,000 to 40,000 t.")
     ));
   }
   const sells = site.kind !== "Customer", buys = site.kind !== "Source";
@@ -1573,7 +1573,7 @@ function modelFor(site) {
     eq("margin per tonne of feed = \u03A3 product price \xD7 yield \u2212 \u03A3 feed price \xD7 usage \u2212 energy ($8/GJ heat, $80/MWh power)"),
     eq("plant rate = design rate \xD7 the lowest ( Feed , Room , margin signal ), never below its minimum rate for margin alone"),
     marginChart(),
-    prose("Full rate while the margin is at least half of normal; down to the minimum rate at no margin. It never shuts down for price alone."),
+    prose("Full rate while the margin is at least half of normal; down to the minimum rate at no margin. It never shuts down for price alone, and in normal running this rarely binds."),
     eq("asking price = the higher of ( asking price + base \xD7 cost rise , cost floor \xD7 ( 1 \u2212 how full its tank is ) )"),
     prose("An empty tank will not sell below cost; a full one may, to keep running. Pipeline feed is priced at its maker's cost, so a price rise moves down the chain about one stage an hour.")
   );
@@ -2224,7 +2224,6 @@ if (!matchMedia("(prefers-reduced-motion: reduce)").matches) runTraffic(document
 (function(){const timers=new Map();addEventListener("scroll",(e)=>{for(const el of (e.target===document?[document.documentElement,document.body]:[e.target])){if(!(el instanceof Element))continue;el.classList.add("is-scrolling");clearTimeout(timers.get(el));timers.set(el,setTimeout(()=>{el.classList.remove("is-scrolling");timers.delete(el);},700));}},{capture:true,passive:true});})();
 </script>
 
-
 <!-- Sources: a small pop-up at the very bottom of the page -->
 <style>
 .cite-wrap{position:absolute;left:0;right:0;bottom:14px;display:flex;justify-content:center;z-index:40;pointer-events:none}
@@ -2275,5 +2274,6 @@ b.addEventListener("click",()=>set(p.hidden));x.addEventListener("click",()=>{se
 addEventListener("keydown",(e)=>{if(e.key==="Escape"&&!p.hidden){set(false);b.focus();}});
 addEventListener("pointerdown",(e)=>{if(!p.hidden&&!p.contains(e.target)&&e.target!==b)set(false);});})();
 </script>
+
 
 </body></html>
