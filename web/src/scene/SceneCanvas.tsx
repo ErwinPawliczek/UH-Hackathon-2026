@@ -40,8 +40,8 @@ export function SceneCanvas() {
       last = now;
       const st = useSim.getState();
       if (st.snap !== null) {
-        // real time between snapshots: the store says so once it has slower speeds
-        const stepMs = (st as { stepIntervalMs?: number }).stepIntervalMs ?? 250;
+        // real time between snapshots (longer below speed 1)
+        const stepMs = st.stepIntervalMs ?? 250;
         const f = st.playing ? Math.min(1, (now - st.snapAt) / stepMs) : 1;
         scene.applySnapshot(st.snap, st.prevSnap, f, st.selected, now, st.runEpoch, stepMs);
       }
