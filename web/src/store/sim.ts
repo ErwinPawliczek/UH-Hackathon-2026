@@ -1,5 +1,5 @@
 // Client state: zustand store with the sim runtime (world, snapshots, events,
-// selection) and the settings the user can change (seed, scenario, speed).
+// selection) and the settings the user can change (scenario, speed).
 // Settings persist to localStorage under STORAGE_KEY via the persist
 // middleware; runtime state does not. The engine backend is not a setting:
 // the hosted (HTTP) engine is the default, and only the ?engine= URL
@@ -12,7 +12,10 @@ import type { Snapshot } from '../engine/snapshot';
 import type { SimEvent, BackendKind, VehicleDetail } from '../engine/api';
 import type { WorldSpec } from '../engine/world';
 import { scenarioSite, type EngineScenario } from '../engine/scenarios';
-import { DEFAULT_WORLD, STORAGE_KEY, dropLegacyPersistedState, backendOverride, worldFromParams } from './bootstrap';
+import {
+  DEFAULT_SEED, DEFAULT_WORLD, STORAGE_KEY, dropLegacyPersistedState, backendOverride, seedFromParams,
+  worldFromParams,
+} from './bootstrap';
 
 export type Selection = { kind: 'site' | 'vehicle'; index: number } | null;
 
@@ -64,7 +67,8 @@ const SETTINGS_VERSION = 1;
 export const TICKS_PER_DAY = 96;
 
 export interface SimState {
-  // settings — persisted (seed, scenario, speed); backendKind is runtime-only:
+  // settings — persisted (scenario, speed); the seed is fixed (42) unless the
+  // ?seed= URL parameter overrides it, and backendKind is runtime-only:
   // hosted by default, ?engine= at bootstrap, no UI
   seed: number;
   scenario: string;
@@ -161,7 +165,7 @@ if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined')
 export const useSim = create<SimState>()(
   persist(
     (set, get) => ({
-      seed: 42,
+      seed: DEFAULT_SEED,
       scenario: 'none',
       speed: DEFAULT_SPEED,
 
@@ -257,13 +261,14 @@ export const useSim = create<SimState>()(
       // its interval with it.
       // A saved speed outside the range (or not a number) resets to the default.
       merge: (persisted, current) => {
-        const merged = { ...current, ...(persisted as Partial<SimState>) };
+        // The seed is never restored: a run opens on the default seed (or the
+        // ?seed= one), whatever an older build saved in this browser.
+        const merged = { ...current, ...(persisted as Partial<SimState>), seed: current.seed };
         const saved = typeof merged.speed === 'number' ? merged.speed : NaN;
         const speed = saved >= MIN_SPEED && saved <= MAX_SPEED ? clampSpeed(saved) ?? DEFAULT_SPEED : DEFAULT_SPEED;
         return { ...merged, speed, stepIntervalMs: stepIntervalFor(speed) };
       },
       partialize: (s) => ({
-        seed: s.seed,
         scenario: s.scenario,
         speed: s.speed,
       }),
@@ -273,10 +278,10 @@ export const useSim = create<SimState>()(
 
 // Apply the ?engine= override on top of the hosted default (tests and local
 // development select the in-page stub this way; no UI exists for it), and
-// the ?world= choice of map.
+// the ?world= choice of map and the ?seed= testing override.
 if (typeof location !== 'undefined') {
   const params = new URLSearchParams(location.search);
   const override = backendOverride(params);
   if (override !== null) useSim.setState({ backendKind: override });
-  useSim.setState({ worldName: worldFromParams(params) });
+  useSim.setState({ worldName: worldFromParams(params), seed: seedFromParams(params) });
 }
