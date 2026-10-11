@@ -83,6 +83,12 @@ double crx_lost_sales_usd(const crx_sim* sim);
    over the site's units, and null while margin control is off. */
 const char* crx_market(const crx_sim* sim);
 
+/* One site against the model's curves (the Economics tab): the constants in
+   force, each of its tanks on the feed / room / urgency curves, offers and
+   asks, customer appetite, and what holds the plant back. NULL when `site`
+   is not a site index. Reply valid until the next call. */
+const char* crx_site_econ(const crx_sim* sim, uint32_t site);
+
 /* One site's trading partners as JSON: {"site","name","buyers":[{"site",
    "key","name","materials":[..],"blocked"}],"suppliers":[same]}: who can buy
    its products, who can supply its feeds, and which the trade_block command

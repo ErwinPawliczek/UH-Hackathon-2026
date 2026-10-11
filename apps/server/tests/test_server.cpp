@@ -1785,3 +1785,28 @@ TEST_CASE("R12 market view: the same document for a session and a room, with mar
   }
   CHECK(!r.at("materials").empty());  // falls back to the average of all lots so far
 }
+
+TEST_CASE("R13 site economics: served for a session and a room") {
+  TestServer ss;
+  auto scli = client(ss.port);
+  const std::string id = createSession(scli, R"({"seed":42,"world":"erwin-market-v1"})");
+  REQUIRE(scli.Post("/api/sim/" + id + "/step", R"({"ticks":96})", "application/json"));
+  const json a = getJson(scli, "/api/sim/" + id + "/site-econ?site=5");
+  CHECK(a.at("site") == 5);
+  CHECK(a.at("name") == "Refinery");
+  CHECK(a.at("rules").at("marginControl") == true);
+  CHECK(a.at("plant").at("limitedBy").contains("kind"));
+  CHECK(scli.Get("/api/sim/" + id + "/site-econ?site=999")->status == 400);
+  CHECK(scli.Get("/api/sim/" + id + "/site-econ")->status == 400);
+  CHECK(scli.Get("/api/sim/nope/site-econ?site=1")->status == 404);
+
+  RoomServer ts(false);
+  auto cli = client(ts.port);
+  const json made = postJson(cli, "/api/room", json::object());
+  const std::string base = "/api/room/" + made.at("code").get<std::string>();
+  const json b = getJson(cli, base + "/site-econ?site=5");
+  CHECK(b.at("name") == "Refinery");
+  CHECK(b.at("rules").at("marginControl") == false);
+  CHECK(!b.at("tanks").empty());
+  CHECK(cli.Get(base + "/site-econ?site=999")->status == 400);
+}

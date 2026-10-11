@@ -87,6 +87,21 @@ struct Quote {
 
 // Nodes where each vehicle class has a vehicle right now (one list per
 // catalog class): a class with no list has no vehicles in this world.
+// What a seller tank asks per tonne right now: the fill rule, then cost
+// pass-through and the cost floor (margin control), then the site's markup.
+double sellerAsk(const World& world, const State& state, const MarketParams& params,
+                 uint32_t seller_tank, double seller_fill);
+
+// The buying rule at a given best-offer price (ask / base price): the cover,
+// in lead times, under which the tank orders, and the fill it orders up to.
+// Without price-aware buying this is the fixed rule (2.5 lead times, the
+// tank's own target) whatever the price. Under one lead time of cover a tank
+// buys up to its own target at any price.
+struct BuyRule {
+  double cover_limit, fill;
+};
+BuyRule buyRule(const MarketParams& params, double target_frac, double ratio);
+
 std::vector<std::vector<uint32_t>> classNodes(const World& world, const State& state);
 
 // Prices one (seller tank, class) for a buyer tank wanting `want` tonnes at

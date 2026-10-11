@@ -74,6 +74,13 @@ std::string summaryJson(const World& world, const State& state);
 // and losses, each plant's rate and margin. See api.h crx_market for the shape.
 std::string marketJson(const Sim& sim);
 
+// One site against the model's curves, for the Economics tab: the constants
+// in force, where each of its tanks sits on the feed / room / urgency curves,
+// what its buying tanks are offered and its selling tanks ask, its customer
+// lines' appetite, and what holds its plant back. Every number comes from
+// the function the engine itself acts on. Empty when `site` is not a site.
+std::string siteEconJson(const Sim& sim, uint32_t site);
+
 std::string economyJson(const World& world, const State& state, const Recorder& rec,
                         uint32_t bucket_h);
 

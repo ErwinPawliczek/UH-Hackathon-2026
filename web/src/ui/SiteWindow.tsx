@@ -39,6 +39,7 @@ import { DraggableWindow } from './DraggableWindow';
 import { openSupplyOptions } from './economyView';
 import { FlowsheetView } from './Flowsheet';
 import { SiteBadge } from './SiteIcon';
+import { SiteEconomics } from './SiteEconomics';
 import { SITE_LIMITED } from './eventKinds';
 import {
   buildFlowsheet, fmtHours, fmtTph, streamLabel, unitLive, type FlowUnitNode, type Flowsheet,
@@ -481,6 +482,9 @@ export function SiteWindow() {
   const sheet = useMemo(() => (world === null || siteIdx === null ? null : buildFlowsheet(world, siteIdx)), [world, siteIdx]);
   const hist = useHistories(sheet, siteIdx);
   useEffect(() => setFailure(null), [siteIdx]);
+  // every site opens on its process flow
+  const [view, setView] = useState<'process' | 'economics'>('process');
+  useEffect(() => setView('process'), [siteIdx]);
 
   // When the window opens on a plant with a unit down, the diagram starts
   // scrolled to that unit (a big site's diagram is wider than the window);
@@ -548,7 +552,12 @@ export function SiteWindow() {
       ) : undefined}
     >
       <div className="flex flex-col gap-3 p-3 text-xs" data-testid="site-window">
-        {sheet === null ? (
+        {/* the window opens on the process; Economics is the model's rules with this site marked on them */}
+        <div className="flex gap-1" role="tablist" aria-label="What to show for this site">
+          <button type="button" role="tab" aria-selected={view === 'process'} className={`btn ${view === 'process' ? 'btn-active' : ''}`} onClick={() => setView('process')} data-testid="site-tab-process">Process</button>
+          <button type="button" role="tab" aria-selected={view === 'economics'} className={`btn ${view === 'economics' ? 'btn-active' : ''}`} onClick={() => setView('economics')} data-testid="site-tab-economics">Economics</button>
+        </div>
+        {view === 'economics' ? <SiteEconomics site={siteIdx} open width={width - WINDOW_CHROME} /> : sheet === null ? (
           <p className="text-muted">This engine does not describe the process flows for this site, so there is no diagram to draw.</p>
         ) : (
           <>
