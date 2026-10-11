@@ -5,6 +5,8 @@
 // (old Tailwind classes here) lands with the parallel v3-light-chrome PR — new
 // components use the v3 CSS variables.
 
+import { SiteBadge } from './SiteIcon';
+import { presetLabel } from './siteIcons';
 import type { CSSProperties } from 'react';
 import { siteRanges } from '../engine/world';
 import { useSim, type SimState } from '../store/sim';
@@ -92,9 +94,10 @@ export function SiteInspectorView({ siteIdx, world, snap, sendCommand }: {
 
   return (
     <section className="panel pointer-events-auto max-h-[calc(100vh-9rem)] w-80 overflow-y-auto p-4 text-xs" data-testid="site-inspector">
-      <header className="mb-2 flex items-center justify-between">
-        <h2 className="font-body text-base font-semibold text-ink">{site.name}</h2>
-        <span className="label">{site.preset}</span>
+      <header className="mb-2 flex items-center gap-2">
+        <SiteBadge preset={site.preset} icon={18} down={snap.siteStatus[siteIdx] === 3} />
+        <h2 className="min-w-0 flex-1 truncate font-body text-base font-semibold text-ink">{site.name}</h2>
+        <span className="label shrink-0" title={site.preset}>{presetLabel(site.preset)}</span>
       </header>
 
       <div className="mb-4">
