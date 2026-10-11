@@ -443,8 +443,12 @@ export function SiteWindow() {
 
   const failUnit = sendCommand === null
     ? null
-    : (unitKey: string, trains: number, hours: number) => {
-      void sendCommand({ type: 'unit_outage', site: siteIdx, unit: unitKey, trains, duration_h: hours })
+    : (unit: FlowUnitNode, trains: number, hours: number) => {
+      // `unit_index` is the unit's global index and is what the engine goes
+      // by: a key alone is ambiguous where a site has several units of the
+      // same key. The key still goes along, for engines that predate the
+      // index and for the wording of log entries.
+      void sendCommand({ type: 'unit_outage', site: siteIdx, unit: unit.unit.key, unit_index: unit.unitIndex, trains, duration_h: hours })
         .then((reply) => {
           const r = (typeof reply === 'object' && reply !== null ? reply : {}) as { ok?: boolean; error?: string };
           setFailure(r.ok === false ? `The engine refused: ${r.error ?? 'unknown reason'}` : null);
