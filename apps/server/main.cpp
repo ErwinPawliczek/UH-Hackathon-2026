@@ -5,6 +5,7 @@
 //   --web-dir P   or CRX_WEB_DIR   — built front end to serve at / (default web/dist)
 
 #include "crx_server.h"
+#include "rooms.h"
 
 #include <httplib.h>
 
@@ -47,6 +48,8 @@ int main(int argc, char** argv) {
 
   crx::server::SessionRegistry sessions;
   httplib::Server svr;
+  crx::server::RoomRegistry rooms;
+  crx::server::registerRoomRoutes(svr, rooms);
   crx::server::registerRoutes(svr, sessions, webDir);
 
   svr.set_logger([](const httplib::Request& req, const httplib::Response& res) {
@@ -57,10 +60,11 @@ int main(int argc, char** argv) {
   // reap in create(); sessions idle past the 2-minute TTL are freed (bounded
   // work, no cancellation ceremony at shutdown).
   std::atomic<bool> stop{false};
-  std::thread reaper([&sessions, &stop] {
+  std::thread reaper([&sessions, &rooms, &stop] {
     while (!stop.load(std::memory_order_relaxed)) {
       std::this_thread::sleep_for(std::chrono::seconds(30));
       sessions.reapExpired();
+      rooms.reapExpired();
     }
   });
 
