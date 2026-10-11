@@ -39,7 +39,7 @@ One-time setup:
 ```sh
 brew install flyctl            # or: curl -L https://fly.io/install.sh | sh
 fly auth login
-fly apps create chain-reaction # or any name; keep it in sync with fly.toml
+fly apps create petrogrid # keep it in sync with fly.toml
 ```
 
 Every deploy (from the repo root, so the build context includes `engine/`,
@@ -84,7 +84,7 @@ one CNAME record is all the DNS needs.
 
    | Type  | Name   | Value                     | Notes |
    |-------|--------|---------------------------|-------|
-   | CNAME | `demo` | `chain-reaction.fly.dev.` | demo subdomain → Fly app |
+   | CNAME | `demo` | `petrogrid.fly.dev.` | demo subdomain → Fly app |
 
 3. Verify propagation, then `https://demo.petrogrid.xyz` should serve the
    demo. Until DNS propagates, `https://<app>.fly.dev` always works — the
@@ -95,5 +95,5 @@ one CNAME record is all the DNS needs.
 - Sessions are in memory only (cap 16, 10-minute inactivity expiry, §7.4):
   a redeploy or restart wipes them by design. A run is reproduced by
   replaying the same seed and commands.
-- The Fly machine suspends when idle (`auto_stop_machines = "suspend"`); the
-  first visitor after idle pays a short cold start.
+- The Fly machine stays up (`auto_stop_machines = false`, `min_machines_running
+  = 1`): the demo is always warm, at the cost of a continuously running machine.

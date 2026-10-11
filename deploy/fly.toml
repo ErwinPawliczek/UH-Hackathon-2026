@@ -8,8 +8,8 @@
 #   fly deploy . --config deploy/fly.toml
 # See README.md for the full steps and the custom-domain DNS records.
 
-app = "chain-reaction"          # change to the real app name after `fly apps create`
-primary_region = "ams"          # Amsterdam; change to a region near the demo
+app = "petrogrid"
+primary_region = "dfw"          # Dallas–Fort Worth; demo audience is US-centric
 
 [build]
   dockerfile = "deploy/Dockerfile"
@@ -21,9 +21,9 @@ primary_region = "ams"          # Amsterdam; change to a region near the demo
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "suspend"   # suspend keeps demo cold starts fast
+  auto_stop_machines = false      # demo stays up: no idle stop, no cold starts
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
 
 [[vm]]
   size = "shared-cpu-1x"
