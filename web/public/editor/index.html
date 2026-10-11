@@ -251,7 +251,7 @@ const MODES = {
 /* pipelines take their material's flow colour: gas blue-light, olefins blue, crude and fuels ink */
 const PIPE_COLOR = {RAW_GAS:'#79aef2',METHANE:'#79aef2',ETHANE:'#79aef2',LPG:'#79aef2',CHLORINE:'#79aef2',ETHYLENE:'#1764d6',PROPYLENE:'#1764d6',CRUDE:'#0a0a0a',NAPHTHA:'#0a0a0a',GASOLINE:'#0a0a0a',JET:'#0a0a0a',DIESEL:'#0a0a0a'};
 const NET_MODES = ['road','river','sea'], CARRY = {road:'T',river:'B',sea:'S'};
-const SNAP = 12, W_KM = 600, H_KM = 400, CELL = 10, COLS = W_KM/CELL, ROWS = H_KM/CELL;
+const EDGE = 60, SNAP = 12, W_KM = 600, H_KM = 400, CELL = 10, COLS = W_KM/CELL, ROWS = H_KM/CELL;
 const KEY = 'petrogrid-layout-v2', RUN_KEY = 'petrogrid-run-custom';
 const HINTS = {
   select:'Drag a site to move it. Click a road, lane or pipeline to pick it, then drag its points. Double-click a pipeline to add a bend. Right-click to erase or remove.',
@@ -278,13 +278,14 @@ function toast(text){const t=$('toast');t.textContent=text;t.style.display='bloc
    names and bends where it has them; its water, roads and lanes as they are (rail is dropped). */
 function conform(obj){
   const out = blank(), src = obj && typeof obj === 'object' ? obj : {};
-  const pts = list => Array.isArray(list) ? list.filter(p => Array.isArray(p) && isFinite(p[0]) && isFinite(p[1])).map(p => [Math.max(0,Math.min(W_KM,+p[0])),Math.max(0,Math.min(H_KM,+p[1]))]) : [];
+  /* lanes may run up to 60 km past the map edge */
+  const pts = list => Array.isArray(list) ? list.filter(p => Array.isArray(p) && isFinite(p[0]) && isFinite(p[1])).map(p => [Math.max(-EDGE,Math.min(W_KM+EDGE,+p[0])),Math.max(-EDGE,Math.min(H_KM+EDGE,+p[1]))]) : [];
   out.water = Array.isArray(src.water) ? src.water.filter(c => Array.isArray(c) && c[0]>=0 && c[1]>=0 && c[0]<COLS && c[1]<ROWS).map(c => [c[0]|0,c[1]|0]) : [];
   const theirs = new Map((Array.isArray(src.sites) ? src.sites : []).map(s => [s.id, s]));
   let kept = 0;
   out.sites = DEFAULT.sites.map(d => {const t = theirs.get(d.id), same = t && t.preset === d.preset;
     if (same) kept++;
-    return {id:d.id, name:same && typeof t.name === 'string' && t.name.trim() ? t.name.trim().slice(0,40) : d.name, preset:d.preset,
+    return {id:d.id, name:same && typeof t.name === 'string' && t.name.trim() ? t.name.trim().slice(0,60) : d.name, preset:d.preset,
       x:same && isFinite(t.x) ? Math.max(0,Math.min(W_KM,Math.round(t.x))) : d.x, y:same && isFinite(t.y) ? Math.max(0,Math.min(H_KM,Math.round(t.y))) : d.y};});
   const lines = [...(Array.isArray(src.network) ? src.network : []), ...(Array.isArray(src.connections) ? src.connections.filter(c => c.mode !== 'pipeline') : [])];
   out.network = lines.filter(n => NET_MODES.includes(n.mode)).map(n => ({mode:n.mode, points:pts(n.points)})).filter(n => n.points.length >= 2);
@@ -444,18 +445,22 @@ function localProblems(acc){const errors = [], set = waterSet();
   return {errors, warnings, dry};}
 
 /* ---------- panels ---------- */
-function refresh(noEdit){if (!noEdit) save(); draw(); const acc = access(S);
+/* A site is on a network only if one of its POINTS is within reach. Where a strip passes a site without one, put a point there. */
+function tieSites(){for (const s of S.sites) for (const mode of NET_MODES){let near = false, hit = null, bd = SNAP;
+  for (const n of S.network){if (n.mode !== mode) continue; if (n.points.some(q => Math.hypot(q[0]-s.x, q[1]-s.y) <= SNAP)){near = true; break;} const h = segHit(n.points, [s.x, s.y]); if (h && h.d < bd){bd = h.d; hit = {n, h};}}
+  if (!near && hit) hit.n.points.splice(hit.h.k, 0, [hit.h.pt[0], hit.h.pt[1]]);}}
+function refresh(noEdit){if (!noEdit){tieSites(); save();} draw(); const acc = access(S);
   const el = $('sel');
   if (!sel){el.innerHTML = '<p class="hint">Nothing selected. Click a site, a road, a lane or a pipeline.</p>';}
   else if (sel.t === 'site'){const s = siteById(sel.id), P = PRESETS[s.preset];
     const got = m => S.sites.some(o => o.id !== s.id && PRESETS[o.preset].makes.includes(m) && canMove(m, o.id, s.id, acc));
     const sent = m => S.sites.some(o => o.id !== s.id && (PRESETS[o.preset].anything || PRESETS[o.preset].needs.includes(m) || (PRESETS[o.preset].optional || []).includes(m)) && canMove(m, s.id, o.id, acc));
-    el.innerHTML = `<input type="text" id="nm" maxlength="40" aria-label="Site name" value="${s.name.replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"><p class="hint">${label(s.preset)} · <span class="mono">${s.x}, ${s.y} km</span></p>
+    el.innerHTML = `<input type="text" id="nm" maxlength="60" aria-label="Site name" value="${s.name.replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"><p class="hint">${label(s.preset)} · <span class="mono">${s.x}, ${s.y} km</span></p>
       <p style="margin:8px 0 2px">Reached by<br>${NET_MODES.map(m => `<span class="tag ${acc[m].site[s.id] !== undefined ? 'done' : ''}">${MODES[m].label.toLowerCase()}</span>`).join('')}</p>
       <p style="margin:8px 0 2px">Needs<br>${P.needs.map(m => `<span class="tag ${got(m) ? 'done' : 'miss'}">${word(m)}</span>`).join('') || '<span class="hint">nothing</span>'}${(P.optional || []).map(m => `<span class="tag ${got(m) ? 'done' : ''}">${word(m)} (optional)</span>`).join('')}</p>
       <p style="margin:8px 0 2px">Makes<br>${P.makes.map(m => `<span class="tag ${sent(m) ? 'done' : 'miss'}">${word(m)}</span>`).join('') || (P.anything ? '<span class="hint">takes any surplus</span>' : '<span class="hint">nothing</span>')}</p>
       <p class="hint">Blue: a supplier or customer can reach it. Red: no way there yet.</p>`;
-    $('nm').oninput = e => {s.name = e.target.value.slice(0,40) || label(s.preset); save(); draw(); queueCheck();};}
+    $('nm').oninput = e => {s.name = e.target.value.slice(0,60) || label(s.preset); save(); draw(); queueCheck();};}
   else {const c = selLine(); let len = 0; for (let i = 1; i < c.points.length; i++) len += Math.hypot(c.points[i][0]-c.points[i-1][0], c.points[i][1]-c.points[i-1][1]);
     if (sel.t === 'conn'){const a = siteById(c.from), b = siteById(c.to); el.innerHTML = `<p style="margin:0"><b>${cap(word(c.material))} pipeline</b></p><p class="hint">${a.name} to ${b.name} · <span class="mono">${len.toFixed(0)} km</span> · ${c.points.length-2} bend${c.points.length === 3 ? '' : 's'}</p><p class="hint">Drag a bend to move it. Double-click the line to add one; right-click a bend to remove it.</p>`;}
     else el.innerHTML = `<p style="margin:0"><b>${MODES[c.mode].label}</b></p><p class="hint"><span class="mono">${len.toFixed(0)} km</span> · drag its points; Delete erases it.</p>`;}
@@ -516,7 +521,7 @@ function showCheck(busy){const el = $('result'), run = $('run'), panel = $('chec
   if (c.warnings && c.warnings.length) h += '<ul style="margin-top:6px">' + c.warnings.map(w => `<li class="warn">${esc(w.text)}</li>`).join('') + '</ul>';
   if (c.ok && !t) h += `<p class="hint">${c.local ? 'The 30-day trial was not run: the server check is not available, so this is the builder’s own check.' : 'The 30-day trial was not run.'}</p>`;
   else if (c.local) h += '<p class="hint">The server check is not available: this is the builder’s own check.</p>';
-  if (c.summary) h += `<p class="hint mono" style="margin-top:6px">${[['roadKm','km road'],['riverKm','km river'],['seaKm','km sea'],['vehicles','vehicles']].filter(([k]) => isFinite(c.summary[k])).map(([k,u]) => `${Math.round(c.summary[k]).toLocaleString('en-US')} ${u}`).join(' · ')}</p>`;
+  if (c.ok && c.summary) h += `<p class="hint mono" style="margin-top:6px">${[['roadKm','km road'],['riverKm','km river'],['seaKm','km sea'],['vehicles','vehicles']].filter(([k]) => isFinite(c.summary[k])).map(([k,u]) => `${Math.round(c.summary[k]).toLocaleString('en-US')} ${u}`).join(' · ')}</p>`;
   if (!fresh) h += `<p class="hint">${busy || 'Edited since: checking again…'}</p>`;
   el.innerHTML = h; panel.classList.toggle('bad', !c.ok);
   el.querySelectorAll('.err:not([disabled])').forEach(b => b.onclick = () => {const e = c.errors[+b.dataset.i]; ring = {id:e.site}; sel = {t:'site', id:e.site}; refresh(true);});
