@@ -310,6 +310,11 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
       }
       bookLot(world, state, req.tank, best.seller_tank, best.cls, lot_t, best.price,
               best.freight_usd, best.eta_h, best.km, req.urgency);
+      if (params.demand_elasticity > 0.0) {
+        // What this buyer has been paying lately, for its customers' appetite.
+        double& paid = state.tank[req.tank].paid_avg;
+        paid = paid <= 0.0 ? best.price : paid + params.paid_avg_weight * (best.price - paid);
+      }
 
       out.orders_created += 1;
       out.tons_ordered += lot_t;

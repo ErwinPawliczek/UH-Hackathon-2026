@@ -66,6 +66,17 @@ void stepProduction(const World& world, State& state, const std::vector<ControlD
     const double rate = state.proc[p].rate_t_h;
     const double demand_dt = type.boundary == Boundary::Sink ? control[p].target * dt : 0.0;
 
+    // Priced out: what the customer would have taken at the base price but
+    // does not want at the price it pays. Not unmet demand; counted apart.
+    if (type.boundary == Boundary::Sink && state.demand_factor[p] < 1.0 && demand_dt > 1e-9) {
+      const double priced_out = demand_dt / state.demand_factor[p] - demand_dt;
+      const double usd = priced_out * feedPrice(world, proc);
+      state.cum_priced_out_t += priced_out;
+      state.cum_priced_out_usd += usd;
+      state.site_trade[proc.site.v].priced_out_t += priced_out;
+      state.site_trade[proc.site.v].priced_out_usd += usd;
+    }
+
     if (rate <= 1e-9) {
       // A stopped sink still books its demand as unmet (service-level KPI).
       if (type.boundary == Boundary::Sink && demand_dt > 1e-9) {

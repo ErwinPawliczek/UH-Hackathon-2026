@@ -120,6 +120,7 @@ uint64_t hashState(const World& world, const State& state) {
     h.mixF64(t.caution);
     h.mixU64(t.next_eta_tick);
     h.mixU64(t.last_pickup_tick);
+    if (t.paid_avg != 0.0) h.mixF64(t.paid_avg);
     // Rejected product is state only where a tank can reject: worlds without
     // the flag hash exactly as they always have.
     if (i < world.tanks.size() && world.tanks[i].reject_when_full) h.mixF64(t.rejected_t);

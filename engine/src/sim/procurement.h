@@ -56,6 +56,10 @@ struct MarketParams {
   double price_cheap_ratio = 0.9, price_dear_ratio = 1.1;
   double price_cheap_fill = 0.9, price_dear_fill = 0.5;
   double price_cheap_cover = 4.0, price_dear_cover = 1.5;
+  // Demand elasticity (see State::demand_elasticity): customers want less
+  // when what they pay is above the base price, more when below.
+  double demand_elasticity = 0.0, demand_min_frac = 0.6, demand_max_frac = 1.2;
+  double paid_avg_weight = 0.2;  // weight of each new lot in the rolling price paid
 };
 
 // One way of filling a lot: a seller tank and a vehicle class, priced as the

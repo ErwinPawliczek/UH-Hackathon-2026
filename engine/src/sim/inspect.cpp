@@ -838,6 +838,10 @@ std::string summaryJson(const World& world, const State& state) {
     const int status = down ? 3 : restarting ? 4 : holding ? 1 : limited ? 5 : 0;
     stopped_now += (status == 3 || status == 4) ? 1 : 0;
     const Ledger& l = state.ledger[s];
+    // A customer's appetite now: wanted / base demand, the lowest of its lines.
+    double factor = 1.0;
+    for (size_t p = 0; p < world.processes.size(); ++p)
+      if (world.processes[p].site.v == s) factor = std::min(factor, state.demand_factor[p]);
     sites.push_back({{"site", s},
                      {"key", world.sites[s].key},
                      {"name", world.sites[s].name},
@@ -845,7 +849,13 @@ std::string summaryJson(const World& world, const State& state) {
                      {"status", status},
                      {"stoppedHours", state.site_trade[s].stopped_h},
                      {"outputT", customer ? l.consumed_t : l.produced_t},
-                     {"lostSalesUsd", state.site_trade[s].unmet_usd}});
+                     // Lost sales = not served (wanted, not delivered) plus
+                     // priced out (not wanted at the price paid).
+                     {"lostSalesUsd", state.site_trade[s].unmet_usd + state.site_trade[s].priced_out_usd},
+                     {"notServedUsd", state.site_trade[s].unmet_usd},
+                     {"pricedOutUsd", state.site_trade[s].priced_out_usd},
+                     {"pricedOutT", state.site_trade[s].priced_out_t},
+                     {"demandFactor", factor}});
   }
   json pipes = json::array();
   for (size_t i = 0; i < world.pipelines.size(); ++i) {
@@ -870,7 +880,10 @@ std::string summaryJson(const World& world, const State& state) {
   return json{{"tick", state.tick},
               {"prices", prices},
               {"economy",
-               {{"lostSalesUsd", state.cum_unmet_usd},
+               {{"lostSalesUsd", state.cum_unmet_usd + state.cum_priced_out_usd},
+                {"notServedUsd", state.cum_unmet_usd},
+                {"pricedOutUsd", state.cum_priced_out_usd},
+                {"pricedOutT", state.cum_priced_out_t},
                 {"deliveredT", state.cum_demand_t - state.cum_unmet_t},
                 {"plantsStoppedNow", stopped_now}}},
               {"sites", sites},

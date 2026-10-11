@@ -129,6 +129,17 @@ void stepControl(const World& world, State& state, const std::vector<TankSignals
       // Sink path: demand curve × shock, clipped by stock on hand.
       const double shock = shockFactor(state, proc.site.v, EventDef::Type::DemandShock);
       double demand = proc.design_rate_t_h * scheduleFactor(world, proc, state.tick) * shock;
+      // Demand elasticity: customers want less of what has become dear.
+      state.demand_factor[p] = 1.0;
+      if (state.demand_elasticity > 0.0 && !views[p].feeds.empty()) {
+        const uint32_t feed = views[p].feeds.front().v;
+        const double base = world.catalog.materials[world.tanks[feed].material].base_price;
+        const double paid = state.tank[feed].paid_avg;
+        if (paid > 0.0 && base > 0.0)
+          state.demand_factor[p] = std::clamp(std::pow(paid / base, -state.demand_elasticity),
+                                              state.demand_min, state.demand_max);
+        demand *= state.demand_factor[p];
+      }
       if (computeRMax(world, proc, state) <= kRateEps) demand = 0.0;  // units down
       double stock = std::numeric_limits<double>::infinity();
       for (const TankId t : views[p].feeds)
