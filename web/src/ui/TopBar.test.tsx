@@ -36,7 +36,8 @@ describe('TopBar markup', () => {
     expect(html).toContain('data-testid="clock"');
     expect(html).toContain('data-testid="play-pause"');
     expect(html).toContain('data-testid="speed-control"');
-    expect(html).toContain('data-testid="seed-input"');
+    expect(html).not.toContain('data-testid="seed-input"'); // the seed has no UI
+    expect(html).not.toContain('>Seed<');
     expect(html).toContain('data-testid="scenario-select"');
   });
 

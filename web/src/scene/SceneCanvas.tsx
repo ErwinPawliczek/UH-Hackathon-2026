@@ -6,6 +6,7 @@
 import { useEffect, useRef } from 'react';
 import { useSim } from '../store/sim';
 import { MapScene, viewFromParams } from './mapScene';
+import type { VehicleTrip } from './tripOverlay';
 
 export function SceneCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -19,10 +20,10 @@ export function SceneCanvas() {
     if (canvas === null || world === null) return;
     const scene = new MapScene(canvas, world, viewFromParams(new URLSearchParams(window.location.search)));
     sceneRef.current = scene;
-    // `?debug` exposes the scene to the console and to capture scripts
-    if (new URLSearchParams(window.location.search).has('debug')) {
-      (window as unknown as { __petrogridScene?: MapScene }).__petrogridScene = scene;
-    }
+    // `?debug` exposes the scene to the console and to capture scripts, which
+    // may also hand it a trip to draw (window.__petrogridTrip)
+    const debug = new URLSearchParams(window.location.search).has('debug');
+    if (debug) (window as unknown as { __petrogridScene?: MapScene }).__petrogridScene = scene;
 
     const ro = new ResizeObserver(() => {
       const parent = canvas.parentElement;
@@ -44,6 +45,11 @@ export function SceneCanvas() {
         const stepMs = st.stepIntervalMs ?? 250;
         const f = st.playing ? Math.min(1, (now - st.snapAt) / stepMs) : 1;
         scene.applySnapshot(st.snap, st.prevSnap, f, st.selected, now, st.runEpoch, stepMs);
+        // the selected vehicle's trip, once the UI has fetched it (absent on older stores)
+        const trip =
+          (st as unknown as { selectedVehicleDetail?: VehicleTrip | null }).selectedVehicleDetail ??
+          (debug ? ((window as unknown as { __petrogridTrip?: VehicleTrip }).__petrogridTrip ?? null) : null);
+        scene.showTrip(trip, st.selected);
       }
       scene.animate(dt);
       scene.render();

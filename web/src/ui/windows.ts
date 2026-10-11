@@ -73,12 +73,12 @@ export const useWindows = create<WindowsState>()((set) => {
         if (cur === undefined) return { windows: s.windows, order: s.order };
         return { windows: { ...s.windows, [id]: { ...cur, open: false } }, order: s.order };
       }),
+    // also places a window that was never toggled (one opened by a selection)
     move: (id, x, y) =>
-      update((s) => {
-        const cur = s.windows[id];
-        if (cur === undefined) return { windows: s.windows, order: s.order };
-        return { windows: { ...s.windows, [id]: { ...cur, x, y } }, order: s.order };
-      }),
+      update((s) => ({
+        windows: { ...s.windows, [id]: { open: s.windows[id]?.open ?? false, x, y } },
+        order: s.order,
+      })),
     focus: (id) => update((s) => ({ windows: s.windows, order: toFront(s.order, id) })),
   };
 });

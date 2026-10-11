@@ -16,7 +16,7 @@ import { decode } from '../engine/snapshot';
 import { encodeStub } from '../engine/stub';
 import { stubWorld } from '../engine/world';
 import { useSim } from './sim';
-import type { SimConfig, SimEvent } from '../engine/api';
+import type { SimConfig, SimEvent, VehicleDetail } from '../engine/api';
 
 /** A SimBackend whose every method is a mock; ids increment per create. */
 function fakeBackend() {
@@ -32,6 +32,10 @@ function fakeBackend() {
     kpis: vi.fn(async () => [] as number[]),
     series: vi.fn(async () => [] as number[]),
     rewind: vi.fn(async (_id: string, tick: number) => ({ tick })),
+    vehicle: vi.fn(async (_id: string, index: number) => ({
+      index, cls: 'TRUCK_BULK', capacityT: 25, status: 'idle', cargo: null, order: null,
+      at: { site: 0 }, legDestination: null, path: [], remainingKm: 0, tripKm: 0,
+    }) as VehicleDetail),
     release: vi.fn(async (_id: string) => undefined),
   };
 }

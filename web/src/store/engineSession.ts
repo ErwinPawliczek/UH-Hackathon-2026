@@ -87,6 +87,7 @@ async function rewindSession({ id, backend }: LiveSession, tick: number): Promis
         lastSeq: log.length > 0 ? log[log.length - 1].seq : -1,
         triggered: kept,
         triggeredAt: Object.fromEntries(kept.map((key) => [key, s.triggeredAt[key]])),
+        selectedVehicleDetail: null, // refetched for the moment gone back to
         playing: false,
         error: null,
       };
@@ -136,6 +137,8 @@ async function openSessionFor(
     prevSnap: null,
     snap: null,
     sendCommand: (cmd) => serial(() => backend.command(id, cmd)),
+    fetchVehicle: (index) => serial(() => backend.vehicle(id, index)),
+    selectedVehicleDetail: null,
     rewindTo: (tick) => rewindSession({ id, backend }, tick),
   });
   const snap = await backend.step(id, 0);
@@ -168,7 +171,7 @@ export function openEngineSession(
   return () => {
     cancelled = true;
     releaseCurrent();
-    useSim.setState({ sendCommand: null, rewindTo: null });
+    useSim.setState({ sendCommand: null, rewindTo: null, fetchVehicle: null, selectedVehicleDetail: null });
   };
 }
 

@@ -84,7 +84,6 @@ describe('store boot', () => {
       JSON.stringify({ state: { seed: 7, scenario: 'none', speed: 64 }, version: 1 }),
     );
     const { useSim } = await importStore();
-    expect(useSim.getState().seed).toBe(7);
     expect(useSim.getState().speed).toBe(64);
     // The backend kind is deliberately absent from the persisted shape.
     expect(useSim.getState().backendKind).toBe('http');
@@ -96,8 +95,28 @@ describe('store boot', () => {
       JSON.stringify({ state: { seed: 7, scenario: 'none', speed: 16 }, version: 0 }),
     );
     const { useSim } = await importStore();
-    expect(useSim.getState().seed).toBe(7);
+    expect(useSim.getState().scenario).toBe('none');
     expect(useSim.getState().speed).toBe(1);
+  });
+
+  it('opens on seed 42 whatever seed an older build saved in this browser', async () => {
+    storage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ state: { seed: 7, scenario: 'none', speed: 4 }, version: 1 }),
+    );
+    const { useSim } = await importStore();
+    expect(useSim.getState().seed).toBe(42);
+    expect(useSim.getState().speed).toBe(4); // the other saved settings still apply
+  });
+
+  it('takes a seed from ?seed= for testing, and ignores one that is not a whole number', async () => {
+    globals.location = { search: '?seed=7' };
+    expect((await importStore()).useSim.getState().seed).toBe(7);
+  });
+
+  it.each(['?seed=abc', '?seed=-3', '?seed=1.5', '?seed='])('ignores %s and stays on 42', async (search) => {
+    globals.location = { search };
+    expect((await importStore()).useSim.getState().seed).toBe(42);
   });
 
   it('starts at speed 1 and clamps whatever is set to 0.1–64, one decimal', async () => {
@@ -171,7 +190,7 @@ describe('store boot', () => {
     const { useSim } = await importStore();
     expect(useSim.getState().speed).toBe(1);
     expect(useSim.getState().stepIntervalMs).toBe(250);
-    expect(useSim.getState().seed).toBe(7); // the rest of the saved settings is kept
+    expect(useSim.getState().scenario).toBe('none'); // the rest of the saved settings is kept
   });
 
   it('opens paused and not started; the first play starts the run', async () => {
@@ -193,6 +212,6 @@ describe('store boot', () => {
     const persisted = JSON.parse(storage.getItem(STORAGE_KEY) ?? '{}') as {
       state: Record<string, unknown>;
     };
-    expect(persisted.state).toEqual({ seed: 9, scenario: 'none', speed: 1 });
+    expect(persisted.state).toEqual({ scenario: 'none', speed: 1 }); // the seed is never saved
   });
 });
