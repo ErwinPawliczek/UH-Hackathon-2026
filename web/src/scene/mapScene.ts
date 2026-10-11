@@ -8,13 +8,16 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { Selection } from '../store/sim';
 import type { Snapshot } from '../engine/snapshot';
-import type { WorldSpec } from '../engine/world';
+import { VEHICLE_CLASSES, routePointAt, sampleHeight, type WorldSpec } from '../engine/world';
 import { buildHexBoard, deckYAt, surfaceYAt, mapToWorld, SCALE } from './terrainMesh';
 import { buildFlowLine, resizeFlowLines, setFlowLineColor, tickFlowLines, type FlowLine } from './lines';
 import { MODE_LINE_STYLE, PIPELINE_WIDTH, V3, flowColor, routeLineColor } from './palette';
 import { SiteLabels } from './siteLabels';
 import { buildSiteLayer, updateInstances, type SiteLayer } from './siteClusters';
-import { buildVehicleLayer, lerpPose, updateVehicleCargo, updateVehicles, type VehicleLayer } from './instances';
+import {
+  buildVehicleLayer, classMode, lerpPose, updateVehicleCargo, updateVehicles, waterSpan,
+  type VehicleLayer, type VehiclePose, type WaterSpan,
+} from './instances';
 
 export interface PickHit {
   kind: 'site' | 'vehicle';
@@ -24,6 +27,20 @@ export interface PickHit {
 /** Screen pixels the top bar and the timeline strip cover — the map is framed between them. */
 const TOP_INSET_PX = 64;
 const BOTTOM_INSET_PX = 84;
+/** Vehicle statuses (§4.4 VehStatus) at which a vehicle stands at a site: idle, queueing, loading, unloading. */
+const AT_SITE = new Set([0, 2, 3, 5, 6]);
+/** Trucks standing at a site park in rows on its near side, this many per row. */
+const PARK_PER_ROW = 9;
+
+/** Where a river or sea vessel lies when it is at a site: on that site's lane, at the water's edge. */
+interface Berth {
+  route: number;
+  /** arc length (km) of the berth along the route */
+  s: number;
+  /** direction along the route that leads away from the site */
+  away: 1 | -1;
+}
+
 /** Default view direction from the orbit target to the camera (tilted, looking north). */
 const VIEW_DIR = new THREE.Vector3(0, 42, 38).normalize();
 
@@ -58,6 +75,10 @@ export class MapScene {
   private userMoved = false;
   private readonly ring: THREE.Mesh;
   private readonly ringPivot: THREE.Group;
+  /** Wet stretch per route (river and sea lanes only; null for roads and dry spurs). */
+  private readonly routeSpans: (WaterSpan | null)[];
+  /** Berth per `${site}:${mode}`. */
+  private readonly berths = new Map<string, Berth>();
   /** Last snapshot the vehicle cargo colours were taken from. */
   private cargoSnap: Snapshot | null = null;
   private readonly raycaster = new THREE.Raycaster();
@@ -119,6 +140,27 @@ export class MapScene {
       this.flowLines.push(flow);
       this.scene.add(flow.line);
     }
+
+    // Vessels are drawn on the wet stretch of their lane only; each site's
+    // berth is the water's edge on a lane that ends at it.
+    const isWater = (x: number, y: number) => sampleHeight(world.terrain, x, y) < world.terrain.seaLevelM;
+    this.routeSpans = world.routes.map((r) => (r.mode === 'road' ? null : waterSpan(r.points, isWater)));
+    world.routes.forEach((route, r) => {
+      const span = this.routeSpans[r];
+      if (span === null) return;
+      route.sites.forEach((site, end) => {
+        if (site === null) return;
+        const berth: Berth = { route: r, s: end === 0 ? span.s0 : span.s1, away: end === 0 ? 1 : -1 };
+        const key = `${site}:${route.mode}`;
+        const known = this.berths.get(key);
+        // several lanes may end at one site: keep the berth nearest to it
+        const dist = (b: Berth) => {
+          const at = routePointAt(world.routes[b.route].points, b.s);
+          return Math.hypot(at.x - world.sites[site].x, at.y - world.sites[site].y);
+        };
+        if (known === undefined || dist(berth) < dist(known)) this.berths.set(key, berth);
+      });
+    });
 
     this.siteLayer = buildSiteLayer(world);
     this.scene.add(this.siteLayer.pads, this.siteLayer.rings, this.siteLayer.tanks);
@@ -231,14 +273,72 @@ export class MapScene {
       const line = this.flowLines[i];
       setFlowLineColor(line, cur.edgeOpen[i] === 0 ? V3.alarm : line.color);
     }
-    const poses: { x: number; y: number; dirX: number; dirY: number }[] = [];
-    for (let v = 0; v < cur.nVeh; v++) poses.push(lerpPose(this.world, cur, prev, v, f));
+    const poses: VehiclePose[] = [];
+    for (let v = 0; v < cur.nVeh; v++) poses.push(lerpPose(this.world, cur, prev, v, f, this.clampToWater));
+    this.parkVehicles(cur, poses);
     updateVehicles(this.vehicleLayer, poses, (x, y) => surfaceYAt(this.world, x, y));
     if (cur !== this.cargoSnap) {
       updateVehicleCargo(this.vehicleLayer, this.world, cur);
       this.cargoSnap = cur;
     }
     this.syncRing(selection, poses);
+  }
+
+  /** Keep a vessel's drawn progress on the wet stretch of its lane. */
+  private readonly clampToWater = (routeId: number, p: number): number => {
+    const span = this.routeSpans[routeId];
+    if (span === null || span === undefined || span.length <= 0) return p;
+    return Math.min(span.s1, Math.max(span.s0, p * span.length)) / span.length;
+  };
+
+  /**
+   * Vehicles standing at a site all report the site's own position. Draw
+   * them where they would stand instead: trucks parked in rows on the site's
+   * near side, vessels moored one behind another at the site's berth.
+   */
+  private parkVehicles(snap: Snapshot, poses: VehiclePose[]): void {
+    const world = this.world;
+    const parked = new Map<string, number>();
+    for (let v = 0; v < poses.length && v < world.vehicles.length; v++) {
+      if (!AT_SITE.has(snap.vehStatus[2 * v])) continue;
+      const pose = poses[v];
+      const site = world.sites.findIndex((s) => Math.abs(s.x - pose.x) < 1 && Math.abs(s.y - pose.y) < 1);
+      if (site < 0) continue;
+      const cls = world.vehicles[v].cls;
+      const mode = classMode(cls);
+      const key = `${site}:${mode}`;
+      const slot = parked.get(key) ?? 0;
+      parked.set(key, slot + 1);
+
+      if (mode === 'road') {
+        const anchor = this.siteLayer.siteAnchors[site];
+        const row = Math.floor(slot / PARK_PER_ROW);
+        const col = slot % PARK_PER_ROW;
+        // an arc on the south side of the cluster (towards the default camera)
+        const angle = Math.PI / 2 + (col / (PARK_PER_ROW - 1) - 0.5) * Math.PI * 0.8;
+        const radiusKm = (anchor.clusterR + 0.42 + 0.56 * row) / SCALE;
+        poses[v] = {
+          x: world.sites[site].x + Math.cos(angle) * radiusKm,
+          y: world.sites[site].y + Math.sin(angle) * radiusKm,
+          dirX: Math.cos(angle),
+          dirY: Math.sin(angle),
+        };
+        continue;
+      }
+
+      const berth = this.berths.get(key);
+      if (berth === undefined) continue; // no wet lane ends here: leave the engine pose
+      const span = this.routeSpans[berth.route];
+      if (span === null) continue;
+      // half a hull out from the water's edge so the bow is not on the bank,
+      // then one hull and a gap per vessel already moored here
+      const hullKm = VEHICLE_CLASSES[cls]?.sceneLength ?? 12;
+      const offsetKm = hullKm / 2 + 4 + slot * (hullKm + 4);
+      const s = Math.min(span.s1, Math.max(span.s0, berth.s + berth.away * offsetKm));
+      const at = routePointAt(world.routes[berth.route].points, s);
+      // bow towards the site
+      poses[v] = { x: at.x, y: at.y, dirX: -berth.away * at.dirX, dirY: -berth.away * at.dirY };
+    }
   }
 
   private syncRing(selection: Selection, poses: { x: number; y: number }[]): void {

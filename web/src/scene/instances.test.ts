@@ -6,7 +6,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Snapshot } from '../engine/snapshot';
 import { stubWorld, type WorldSpec } from '../engine/world';
-import { buildVehicleLayer, lerpPose, liveCargo, sampleRoute, type VehiclePose } from './instances';
+import {
+  buildVehicleLayer, classMode, lerpPose, liveCargo, sampleRoute, vehicleGeometry, waterSpan,
+  type VehiclePose,
+} from './instances';
+import { VEHICLE_CLASSES, type VehicleClassKey } from '../engine/world';
 
 /** Lean v2-shaped snapshot with nVeh vehicles; movement arrays optional. */
 function makeSnap(nVeh: number, opts?: { route?: number[]; progress?: number[] }): Snapshot {
@@ -136,5 +140,60 @@ describe('liveCargo', () => {
     expect(liveCargo(engineWorld, snap, 1)).toBe('BENZENE');
     // without an engine material list the snapshot indexes the traded-material table
     expect(liveCargo(world, snap, 1)).toBe('SALT');
+  });
+});
+
+describe('waterSpan', () => {
+  // water is everything east of x = 10
+  const isWater = (x: number) => x > 10;
+
+  it('finds the wet stretch of a lane that starts on land', () => {
+    const span = waterSpan([[0, 0], [30, 0]], isWater);
+    expect(span).not.toBeNull();
+    expect(span!.length).toBeCloseTo(30, 6);
+    expect(span!.s0).toBeGreaterThan(10);
+    expect(span!.s0).toBeLessThanOrEqual(11);
+    expect(span!.s1).toBeCloseTo(30, 6);
+  });
+
+  it('measures along a bent lane and reports none when it never touches water', () => {
+    const bent = waterSpan([[20, 0], [20, 10], [0, 10]], isWater);
+    expect(bent!.s0).toBeCloseTo(0, 6);
+    expect(bent!.s1).toBeGreaterThanOrEqual(19);
+    expect(bent!.s1).toBeLessThan(20);
+    expect(waterSpan([[0, 0], [5, 5]], isWater)).toBeNull();
+  });
+
+  it('lets lerpPose hold a vessel on the wet stretch', () => {
+    const snap = makeSnap(1, { route: [0], progress: [0.0] });
+    const lane: WorldSpec = {
+      ...world,
+      routes: [{ mode: 'river', ends: ['A', 'B'], sites: [0, null], points: [[0, 0], [30, 0]] }],
+    };
+    const span = waterSpan(lane.routes[0].points, isWater)!;
+    const clamp = (_r: number, p: number) => Math.min(span.s1, Math.max(span.s0, p * span.length)) / span.length;
+    const pose = lerpPose(lane, snap, null, 0, 1, clamp);
+    expect(pose.x).toBeGreaterThan(10); // not at the site on the bank
+    expect(lerpPose(lane, snap, null, 0, 1).x).toBeCloseTo(0, 6); // unclamped: the lane's dry end
+  });
+});
+
+describe('vehicle classes', () => {
+  it('maps classes to their transport mode', () => {
+    expect(classMode('TRUCK_PRESS')).toBe('road');
+    expect(classMode('BARGE_DRY')).toBe('river');
+    expect(classMode('SHIP_GAS')).toBe('sea');
+  });
+
+  it('gives every class its own silhouette, with tones for the instance colour to tint', () => {
+    const counts = new Set<number>();
+    for (const cls of Object.keys(VEHICLE_CLASSES) as VehicleClassKey[]) {
+      const geo = vehicleGeometry(cls);
+      expect(geo.getAttribute('color').count).toBe(geo.getAttribute('position').count);
+      geo.computeBoundingBox();
+      expect(geo.boundingBox!.min.y).toBeGreaterThan(-1e-3); // sits on the surface
+      counts.add(geo.getAttribute('position').count * 1000 + Math.round(geo.boundingBox!.max.y * 100));
+    }
+    expect(counts.size).toBe(Object.keys(VEHICLE_CLASSES).length);
   });
 });
