@@ -3,9 +3,10 @@
 // shows. Kept apart from the React components so it can be tested on its own.
 
 import { useEffect, useRef, useState } from 'react';
-import type { ForecastReply, SimBackend } from '../engine/api';
+import type { EconomyReply, ForecastReply, SimBackend } from '../engine/api';
 import { sessionRequest } from '../store/engineSession';
 import { useSim } from '../store/sim';
+import { materialName, materialTitle } from './materials';
 
 export const TICKS_PER_DAY = 96;
 
@@ -95,33 +96,10 @@ export function nothingBroken(f: ForecastReply): boolean {
   return f.disruptions === 0 && Math.abs(f.delta.cost_usd) < 1 && f.countdown.length === 0;
 }
 
-/**
- * Material keys in plain words, as they read inside a sentence. (Local until
- * the shared ui/materials map lands; swap to that one then.)
- */
-const MATERIAL_WORDS: Record<string, string> = {
-  CRUDE: 'crude oil', RAW_GAS: 'raw gas', SALT: 'salt', METHANE: 'methane', ETHANE: 'ethane', LPG: 'LPG',
-  NAPHTHA: 'naphtha', GASOLINE: 'gasoline', JET: 'jet fuel', DIESEL: 'diesel', FUEL_OIL: 'fuel oil',
-  SOLVENT: 'solvent', BENZENE: 'benzene', ETHYLENE: 'ethylene', PROPYLENE: 'propylene', CHLORINE: 'chlorine',
-  CAUSTIC: 'caustic soda', STYRENE: 'styrene', PE: 'polyethylene', PP: 'polypropylene', PVC: 'PVC', PS: 'polystyrene',
-  VCM: 'vinyl chloride', HEAVY_NAPHTHA: 'heavy naphtha', GASOIL: 'gas oil', VGO: 'vacuum gas oil',
-};
-
-/** A material key as words: "FUEL_OIL" → "fuel oil"; an unknown key in lower case with spaces. */
-export function materialWords(key: string): string {
-  return MATERIAL_WORDS[key] ?? key.toLowerCase().replace(/_/g, ' ');
-}
-
-/** The same, to start a label: "Fuel oil", "LPG". */
-export function materialTitle(key: string): string {
-  const words = materialWords(key);
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
 /** "Polyethylene shuts down in 6 days 18 hours" / "Gas grid runs dry of methane in 3 hours" / "… is already shut down". */
 export function countdownSentence(row: ForecastReply['countdown'][number]): string {
   const dry = row.kind === 'runs_dry';
-  const what = materialWords(row.what);
+  const what = materialName(row.what);
   if (row.already) return dry ? `${row.name} is already out of ${what}` : `${row.name} is already shut down`;
   const when = fmtDuration(row.hours_from_now);
   return dry ? `${row.name} runs dry of ${what} in ${when}` : `${row.name} shuts down in ${when}`;
@@ -214,4 +192,212 @@ export function useForecast(open: boolean, days: number): Polled<ForecastReply> 
     if (backend.forecast === undefined) return Promise.reject(new Error('This view needs the hosted engine.'));
     return backend.forecast(id, days);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Procurement and production: the run so far, from GET /economy
+// ---------------------------------------------------------------------------
+
+
+/** Hours per bucket the Economy window asks for: one value per simulated day. */
+export const ECONOMY_BUCKET_H = 24;
+
+/** The run so far in daily buckets: fetched when a tab that needs it opens, then once per simulated day. */
+export function useEconomy(open: boolean): Polled<EconomyReply> {
+  const day = useSim((s) => Math.floor(Number(s.snap?.tick ?? 0) / TICKS_PER_DAY));
+  return useSessionData(open, `${day}`, (backend, id) => {
+    if (backend.economy === undefined) return Promise.reject(new Error('This view needs the hosted engine.'));
+    return backend.economy(id, ECONOMY_BUCKET_H);
+  });
+}
+
+export const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
+
+/** Running total of a per-bucket series. */
+export function cumulative(values: number[]): number[] {
+  let acc = 0;
+  return values.map((v) => (acc += v));
+}
+
+/** The tick each bucket starts at: the x of its value on a chart (bucket 0 is day 1). */
+export function bucketTicks(reply: Pick<EconomyReply, 'buckets' | 'bucketH'>): number[] {
+  return Array.from({ length: reply.buckets }, (_, i) => i * reply.bucketH * 4);
+}
+
+/**
+ * How many buckets are complete. The last bucket of a reply is still filling
+ * unless the run stands exactly on a bucket boundary; a per-day chart leaves
+ * it out so its last point is a whole day, not a dip.
+ */
+export function fullBuckets(reply: Pick<EconomyReply, 'buckets' | 'bucketH' | 'tick'>): number {
+  const partial = reply.tick % (reply.bucketH * 4) !== 0;
+  return partial ? Math.max(1, reply.buckets - 1) : reply.buckets;
+}
+
+export type Measure = 'usd' | 't';
+export type Span = 'daily' | 'total';
+
+export interface MaterialRow {
+  key: string;
+  label: string;
+  spendUsd: number;
+  orderedT: number;
+  freightUsd: number;
+  lots: number;
+  /** latest price against par (1 = par), when the engine reports it */
+  priceIndex: number | null;
+  /** per-bucket series in the chosen measure */
+  perBucket: number[];
+}
+
+/** Every chemical that has been ordered, biggest spend first. */
+export function materialRows(reply: EconomyReply, measure: Measure): MaterialRow[] {
+  return reply.materials
+    .map((m) => ({
+      key: m.key,
+      label: materialTitle(m.key),
+      spendUsd: sum(m.spendUsd),
+      orderedT: sum(m.orderedT),
+      freightUsd: sum(m.freightUsd),
+      lots: sum(m.lots),
+      priceIndex: m.priceIndex !== undefined && m.priceIndex.length > 0 ? m.priceIndex[m.priceIndex.length - 1] : null,
+      perBucket: measure === 'usd' ? m.spendUsd : m.orderedT,
+    }))
+    .sort((a, b) => b.spendUsd - a.spendUsd || a.key.localeCompare(b.key));
+}
+
+export interface PlottedSeries {
+  key: string;
+  label: string;
+  /** palette slot, or -1 for the folded "Other" line */
+  slot: number;
+  values: number[];
+}
+
+/**
+ * The lines of the procurement chart: one per chemical that holds a colour
+ * slot, in slot order, then one "Other" line summing every chemical that
+ * does not (when `other` is on and there are any).
+ */
+export function procurementSeries(
+  rows: MaterialRow[],
+  slots: ReadonlyMap<string, number>,
+  other: boolean,
+  span: Span,
+): PlottedSeries[] {
+  const shape = (v: number[]) => (span === 'total' ? cumulative(v) : v);
+  const shown = rows
+    .filter((r) => slots.has(r.key))
+    .sort((a, b) => (slots.get(a.key) ?? 0) - (slots.get(b.key) ?? 0))
+    .map((r) => ({ key: r.key, label: r.label, slot: slots.get(r.key) ?? 0, values: shape(r.perBucket) }));
+  const rest = rows.filter((r) => !slots.has(r.key));
+  if (other && rest.length > 0) {
+    const n = Math.max(...rest.map((r) => r.perBucket.length));
+    const total = Array.from({ length: n }, (_, i) => sum(rest.map((r) => r.perBucket[i] ?? 0)));
+    shown.push({ key: '__other__', label: `Other (${rest.length})`, slot: -1, values: shape(total) });
+  }
+  return shown;
+}
+
+/** How many colour slots a chart has: chemicals beyond these fold into "Other". */
+export const SLOT_COUNT = 7;
+
+/** Give `key` the lowest free slot, or take its slot away; unchanged when every slot is taken. */
+export function toggleSlot(slots: ReadonlyMap<string, number>, key: string): Map<string, number> {
+  const next = new Map(slots);
+  if (next.has(key)) {
+    next.delete(key);
+    return next;
+  }
+  const taken = new Set(next.values());
+  for (let s = 0; s < SLOT_COUNT; s++) {
+    if (!taken.has(s)) {
+      next.set(key, s);
+      break;
+    }
+  }
+  return next;
+}
+
+/** The first colours of a run: the biggest chemicals by spend, in that order. */
+export function defaultSlots(rows: MaterialRow[]): Map<string, number> {
+  return new Map(rows.slice(0, SLOT_COUNT).map((r, i) => [r.key, i]));
+}
+
+/** Vehicle classes in plain words, in the order the fleet is listed. */
+const CLASS_WORDS: Record<string, string> = {
+  TRUCK_TANK: 'Tank trucks', TRUCK_PRESS: 'Pressurised trucks', TRUCK_BULK: 'Bulk trucks',
+  BARGE_TANK: 'Tank barges', BARGE_DRY: 'Dry barges',
+  SHIP_TANK: 'Tankers', SHIP_GAS: 'Gas carriers', SHIP_DRY: 'Bulk carriers',
+};
+export const classWords = (cls: string) => CLASS_WORDS[cls] ?? cls.toLowerCase().replace(/_/g, ' ');
+
+/** Freight per vehicle type: dollars of freight, or tonnes carried, per bucket or as a running total. */
+export function classSeries(reply: EconomyReply, measure: Measure, span: Span): { label: string; values: number[] }[] {
+  return reply.byClass.map((c) => {
+    const v = measure === 'usd' ? c.freightUsd : c.tonnes;
+    return { label: classWords(c.cls), values: span === 'total' ? cumulative(v) : v };
+  });
+}
+
+/**
+ * Lowest rate each process can hold, as a share of design (the engine
+ * catalog's turndown). Used when the reply does not carry it.
+ */
+const TURNDOWN: Record<string, number> = {
+  NGL_RECOVERY: 0.4, CRUDE_DISTILLATION: 0.6, REFORMING: 0.5, FCC: 0.6, DIESEL_HDT: 0.5,
+  OLEFINS_GAS: 0.65, OLEFINS_FLEX: 0.65, ELECTROLYSIS: 0.3, PE_POLYMERISATION: 0.5, PP_POLYMERISATION: 0.5,
+  VCM: 0.6, PVC: 0.3, STYRENE: 0.6, PS: 0.5,
+};
+
+export interface PlantChart {
+  key: string;
+  title: string;
+  siteIndex: number;
+  /** percentages of design, one per bucket */
+  mean: number[];
+  min: number[];
+  max: number[];
+  /** lowest stable rate as a percentage of design; 0 when it has none (a field, a mine) */
+  turndownPct: number;
+  /** per bucket: the mean was zero, or under the lowest stable rate */
+  low: boolean[];
+  stoppedDays: number;
+  belowMinDays: number;
+}
+
+/** One small chart per plant process, in site order: the daily low-to-high band and its mean. */
+export function plantCharts(reply: EconomyReply): PlantChart[] {
+  const perSite = new Map<number, number>();
+  for (const p of reply.plants) perSite.set(p.site_index, (perSite.get(p.site_index) ?? 0) + 1);
+  return [...reply.plants]
+    .sort((a, b) => a.site_index - b.site_index || a.index - b.index)
+    .map((p) => {
+      const turndown = p.turndown ?? TURNDOWN[p.process] ?? 0;
+      const stopped = p.rateMean.map((r) => r <= 0.005);
+      const below = p.rateMean.map((r, i) => !stopped[i] && turndown > 0 && r < turndown - 1e-6);
+      return {
+        key: `${p.site}/${p.process}`,
+        title: (perSite.get(p.site_index) ?? 1) > 1 ? `${p.name} · ${p.process_name}` : p.name,
+        siteIndex: p.site_index,
+        mean: p.rateMean.map((r) => r * 100),
+        min: p.rateMin.map((r) => r * 100),
+        max: p.rateMax.map((r) => r * 100),
+        turndownPct: turndown * 100,
+        low: stopped.map((s, i) => s || below[i]),
+        stoppedDays: stopped.filter(Boolean).length,
+        belowMinDays: below.filter(Boolean).length,
+      };
+    });
+}
+
+/** "$19.7 M" style money for axis marks and readouts (same as fmtMoney, kept short). */
+export const fmtAxisMoney = (usd: number) => fmtMoney(usd).replace(' ', '');
+/** Tonnes for axis marks and readouts: "108K t", "640 t". */
+export function fmtAxisTonnes(t: number): string {
+  const a = Math.abs(t);
+  if (a >= 1e6) return `${(t / 1e6).toFixed(1)}M t`;
+  if (a >= 1e4) return `${Math.round(t / 1e3)}K t`;
+  if (a >= 1e3) return `${(t / 1e3).toFixed(1)}K t`;
+  return `${Math.round(t)} t`;
 }
