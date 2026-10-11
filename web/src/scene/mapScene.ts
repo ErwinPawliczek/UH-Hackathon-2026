@@ -14,7 +14,6 @@ import { buildFlowLine, resizeFlowLines, setFlowLineColor, tickFlowLines, type F
 import { MODE_LINE_STYLE, PIPELINE_WIDTH, V3, flowColor, routeLineColor } from './palette';
 import { SiteLabels } from './siteLabels';
 import { PipelineLabels } from './pipelineLabels';
-import { buildRails, resizeRails, type RailLayer } from './rails';
 import { TripOverlay, type VehicleTrip } from './tripOverlay';
 import { buildBridges } from './bridges';
 import { buildSiteLayer, updateInstances, type SiteLayer } from './siteClusters';
@@ -94,7 +93,6 @@ export class MapScene {
   private readonly vehicleLayer: VehicleLayer;
   private readonly labels: SiteLabels;
   private readonly pipelineLabels: PipelineLabels;
-  private readonly rails: RailLayer | null;
   private readonly trip: TripOverlay;
   private readonly flowLines: FlowLine[] = [];
   /** flowLines[i] for i < routeLineCount is world.routes[i]; pipelines follow. */
@@ -212,10 +210,6 @@ export class MapScene {
     // roads over water are carried on small bridges
     const bridges = buildBridges(world, isWater, deck, surface);
     if (bridges !== null) this.scene.add(bridges);
-
-    // rail lines: drawn as small tracks, nothing runs on them
-    this.rails = buildRails(world, deck, isWater);
-    if (this.rails !== null) this.scene.add(this.rails.group);
 
     this.net = new RouteNet(world);
     this.motion = new VehicleMotion(
@@ -659,7 +653,6 @@ export class MapScene {
     this.labels.setSize(width, height);
     this.pipelineLabels.setSize(width, height);
     resizeFlowLines(this.flowLines, width, height);
-    resizeRails(this.rails, width, height);
     this.trip.resize(width, height);
     if (!this.userMoved) this.frameMap(height);
   }
