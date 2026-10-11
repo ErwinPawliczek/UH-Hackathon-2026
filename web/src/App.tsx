@@ -2,6 +2,7 @@
 // floating windows over it (a selected site or vehicle opens its own
 // window), and shows loading/error states.
 
+import { useNarrow, useSheet } from './ui/narrow';
 import { EDITOR_PATH, leaveCustomMap } from './store/customMap';
 import { useEffect } from 'react';
 import { useSimEngine } from './store/useSimEngine';
@@ -42,9 +43,18 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  const narrow = useNarrow();
+  const sheetOpen = useSheet((s) => s.current !== null);
+  const sheetFull = useSheet((s) => s.full);
+
   return (
     <div className="relative h-dvh w-full overflow-hidden bg-white text-ink">
-      <SceneCanvas />
+      {/* On a phone the map keeps to the part of the screen above an open panel, so it stays visible and usable. */}
+      {narrow ? (
+        <div className="absolute inset-x-0 top-0" style={{ bottom: sheetOpen ? (sheetFull ? 'calc(100dvh - 48px)' : '62dvh') : 0 }} data-testid="phone-map">
+          <SceneCanvas />
+        </div>
+      ) : <SceneCanvas />}
       <TopBar />
       <EventLog />
       <RewindWindow />
@@ -55,7 +65,7 @@ export default function App() {
 
       {/* A new run waits here, paused at day 0, until the visitor starts it. */}
       {world !== null && snap !== null && !started && error === null && roomCode === null && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-8 z-10 flex flex-col items-center gap-2">
+        <div className="pointer-events-none absolute inset-x-0 bottom-8 z-10 flex flex-col items-center gap-2 narrow:bottom-20">
           {queued > 0 && (
             <p className="chamfer chamfer-sm px-3 py-1.5 text-xs text-ink" data-testid="scenario-queued">
               {queued === 1 ? 'A scenario is' : `${queued} scenarios are`} queued: {queued === 1 ? 'it begins' : 'they begin'} when you start.

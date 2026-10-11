@@ -39,6 +39,7 @@ import { DraggableWindow } from './DraggableWindow';
 import { openSupplyOptions } from './economyView';
 import { FlowsheetView } from './Flowsheet';
 import { SiteBadge } from './SiteIcon';
+import { useNarrow } from './narrow';
 import { SiteEconomics } from './SiteEconomics';
 import { SITE_LIMITED } from './eventKinds';
 import {
@@ -476,6 +477,7 @@ export function SiteWindow() {
   const sendCommand = useSim((s) => s.sendCommand);
   const select = useSim((s) => s.select);
   const [wide, setWide] = useState(false);
+  const narrow = useNarrow();
   const [failure, setFailure] = useState<string | null>(null);
 
   const siteIdx = selected !== null && selected.kind === 'site' ? selected.index : null;
@@ -508,8 +510,9 @@ export function SiteWindow() {
   // Widening makes room for the whole diagram and, for a plant with both
   // inputs and outputs, for its two flow charts side by side.
   const wideWidth = sheet === null ? WIDTH : Math.max(sheet.width + WINDOW_CHROME, hasBothFlows(sheet) ? SIDE_BY_SIDE_WIDTH : 0);
-  const canWiden = wideWidth > WIDTH;
-  const width = wide && canWiden ? Math.max(WIDTH, Math.min(viewport - 32, wideWidth)) : WIDTH;
+  // on a phone the window is a sheet the width of the screen: nothing to widen, and charts take that width
+  const canWiden = !narrow && wideWidth > WIDTH;
+  const width = narrow ? viewport : wide && canWiden ? Math.max(WIDTH, Math.min(viewport - 32, wideWidth)) : WIDTH;
 
   const failUnit = sendCommand === null
     ? null
