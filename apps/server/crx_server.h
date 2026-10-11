@@ -33,8 +33,14 @@ namespace server {
 // eviction and the TTL sweep read it under the registry lock, and the two
 // locks are never held together.
 struct Session {
-  Session(crx_sim* handle, std::chrono::steady_clock::time_point now)
-      : sim(handle), lastUsed(now.time_since_epoch().count()) {}
+  using CommandLog = std::vector<std::pair<uint64_t, std::string>>;
+
+  Session(crx_sim* handle, std::chrono::steady_clock::time_point now, std::string configJson = {},
+          CommandLog history = {})
+      : sim(handle),
+        lastUsed(now.time_since_epoch().count()),
+        config(std::move(configJson)),
+        commands(std::move(history)) {}
   ~Session();
   Session(const Session&) = delete;
   Session& operator=(const Session&) = delete;
@@ -42,6 +48,13 @@ struct Session {
   crx_sim* sim;
   std::mutex mutex;
   std::atomic<std::chrono::steady_clock::rep> lastUsed;  // steady_clock ticks
+
+  // Replay log for POST /rewind: the config the run was created from and
+  // every accepted command with the tick the run was at when it arrived. The
+  // engine is deterministic, so replaying these rebuilds any earlier tick
+  // exactly. Guarded by `mutex`.
+  std::string config;
+  CommandLog commands;
 };
 
 // In-memory session table (§7.4): capped at `capacity` (least-recently-used
@@ -72,6 +85,13 @@ class SessionRegistry {
   // calls DELETE /api/sim/{id} whenever it replaces or leaves a session.
   // Returns false when the id is unknown (already released or never existed).
   bool release(const std::string& id);
+
+  // Takes the session back to an earlier tick of its own run: a fresh engine
+  // is built from the session's config, the commands issued before that tick
+  // are replayed at their ticks, and the run is stepped to the tick. Commands
+  // issued at or after it are forgotten.
+  enum class RewindStatus { kOk, kNotFound, kAhead, kFailed };
+  RewindStatus rewind(const std::string& id, uint64_t tick);
 
   // Runs fn(session) with the session locked and its last-use stamp touched.
   // Returns false when the id is unknown. The shared_ptr is copied out under
@@ -104,7 +124,7 @@ class SessionRegistry {
 
  private:
   std::string nextIdLocked();
-  CreateResult insertNew(crx_sim* sim);
+  CreateResult insertNew(crx_sim* sim, std::string config, Session::CommandLog commands);
 
   size_t capacity_;
   std::chrono::steady_clock::duration ttl_;

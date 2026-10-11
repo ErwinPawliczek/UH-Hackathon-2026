@@ -115,7 +115,8 @@ std::string SessionRegistry::nextIdLocked() {
   return buf;
 }
 
-SessionRegistry::CreateResult SessionRegistry::insertNew(crx_sim* sim) {
+SessionRegistry::CreateResult SessionRegistry::insertNew(crx_sim* sim, std::string config,
+                                                         Session::CommandLog commands) {
   std::shared_ptr<Session> victim;
   std::string id;
   {
@@ -131,7 +132,8 @@ SessionRegistry::CreateResult SessionRegistry::insertNew(crx_sim* sim) {
       sessions_.erase(lru);
     }
     id = nextIdLocked();
-    sessions_.emplace(id, std::make_shared<Session>(sim, nowFn_()));
+    sessions_.emplace(id, std::make_shared<Session>(sim, nowFn_(), std::move(config),
+                                                    std::move(commands)));
   }
   // Eviction takes the registry's reference away with no lock held: the
   // engine handle is freed at once unless a request still holds a reference,
@@ -144,7 +146,7 @@ SessionRegistry::CreateResult SessionRegistry::create(const std::string& configJ
   reapExpired();  // free capped-out slots that have gone idle
   crx_sim* sim = crx_create(configJson.empty() ? nullptr : configJson.c_str());
   if (sim == nullptr) return {CreateStatus::kBadConfig, {}};
-  return insertNew(sim);
+  return insertNew(sim, configJson, {});
 }
 
 SessionRegistry::CreateResult SessionRegistry::forkFrom(const std::string& parentId) {
@@ -157,12 +159,16 @@ SessionRegistry::CreateResult SessionRegistry::forkFrom(const std::string& paren
     parent = it->second;  // keep the parent alive even if evicted next
   }
   crx_sim* child = nullptr;
+  std::string config;
+  Session::CommandLog commands;
   {
     std::lock_guard<std::mutex> sessionLock(parent->mutex);
     child = crx_fork(parent->sim);
+    config = parent->config;  // the fork shares the parent's past, so it can rewind into it
+    commands = parent->commands;
   }
   if (child == nullptr) return {CreateStatus::kBadConfig, {}};
-  return insertNew(child);
+  return insertNew(child, std::move(config), std::move(commands));
 }
 
 bool SessionRegistry::release(const std::string& id) {
@@ -179,6 +185,41 @@ bool SessionRegistry::release(const std::string& id) {
   // until its engine call finishes.
   doomed.reset();
   return true;
+}
+
+SessionRegistry::RewindStatus SessionRegistry::rewind(const std::string& id, uint64_t tick) {
+  std::shared_ptr<Session> s;
+  {
+    std::lock_guard<std::mutex> lock(globalMutex_);
+    const auto it = sessions_.find(id);
+    if (it == sessions_.end()) return RewindStatus::kNotFound;
+    s = it->second;
+  }
+  std::lock_guard<std::mutex> sessionLock(s->mutex);
+  s->lastUsed = nowFn_().time_since_epoch().count();
+  if (tick > crx_tick(s->sim)) return RewindStatus::kAhead;
+
+  crx_sim* fresh = crx_create(s->config.empty() ? nullptr : s->config.c_str());
+  if (fresh == nullptr) return RewindStatus::kFailed;
+  const auto stepTo = [fresh](uint64_t target) {
+    while (crx_tick(fresh) < target) {
+      const uint64_t gap = target - crx_tick(fresh);
+      crx_step(fresh, static_cast<uint32_t>(std::min<uint64_t>(gap, 1u << 20)));
+    }
+  };
+  Session::CommandLog kept;
+  for (const auto& entry : s->commands) {
+    if (entry.first >= tick) break;  // issued at or after the moment asked for
+    stepTo(entry.first);
+    crx_command(fresh, entry.second.c_str());
+    kept.push_back(entry);
+  }
+  stepTo(tick);
+
+  crx_destroy(s->sim);
+  s->sim = fresh;
+  s->commands = std::move(kept);
+  return RewindStatus::kOk;
 }
 
 void SessionRegistry::reapExpired() {
@@ -263,13 +304,43 @@ void registerRoutes(httplib::Server& svr, SessionRegistry& sessions, const std::
            [&sessions](const httplib::Request& req, httplib::Response& res) {
              std::string reply;
              const bool found = sessions.withSession(req.matches[1].str(), [&](Session& s) {
+               const uint64_t at = crx_tick(s.sim);
                reply = crx_command(s.sim, req.body.c_str());
+               // Remember accepted commands so a rewind can replay them.
+               const json::json parsed = json::json::parse(reply, nullptr, false);
+               if (parsed.is_object() && parsed.value("ok", false)) s.commands.emplace_back(at, req.body);
              });
              if (!found) {
                sendJson(res, 404, jsonError("unknown session"));
                return;
              }
              sendJson(res, 200, std::move(reply));
+           });
+
+  // Back in time: {"tick": N} returns the session to tick N of its own run.
+  svr.Post("/api/sim/" + id + "/rewind",
+           [&sessions](const httplib::Request& req, httplib::Response& res) {
+             uint64_t tick = 0;
+             const json::json body = json::json::parse(req.body, nullptr, false);
+             if (!body.is_object() || !body.contains("tick") || !body["tick"].is_number_unsigned()) {
+               sendJson(res, 400, jsonError("body must be {\"tick\":N} with N a non-negative integer"));
+               return;
+             }
+             tick = body["tick"].get<uint64_t>();
+             switch (sessions.rewind(req.matches[1].str(), tick)) {
+               case SessionRegistry::RewindStatus::kOk:
+                 sendJson(res, 200, json::json{{"ok", true}, {"tick", tick}}.dump());
+                 break;
+               case SessionRegistry::RewindStatus::kNotFound:
+                 sendJson(res, 404, jsonError("unknown session"));
+                 break;
+               case SessionRegistry::RewindStatus::kAhead:
+                 sendJson(res, 400, jsonError("tick is ahead of where this run has reached"));
+                 break;
+               default:
+                 sendJson(res, 500, jsonError("the run could not be rebuilt"));
+                 break;
+             }
            });
 
   svr.Post("/api/sim/" + id + "/fork",
