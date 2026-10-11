@@ -10,6 +10,7 @@ import { EngineErrorOverlay } from './ui/EngineErrorOverlay';
 import { SiteInspector } from './ui/SiteInspector';
 import { VehicleInspector } from './ui/VehicleInspector';
 import { RewindWindow } from './ui/RewindWindow';
+import { SitesKey } from './ui/SitesKey';
 import { EventLog } from './ui/EventLog';
 
 function InspectorPanel() {
@@ -45,6 +46,7 @@ export default function App() {
       <InspectorPanel />
       <EventLog />
       <RewindWindow />
+      <SitesKey />
 
       {/* A new run waits here, paused at day 0, until the visitor starts it. */}
       {world !== null && snap !== null && !started && error === null && (

@@ -1,6 +1,9 @@
-// Site labels: the site's name above every site cluster, always on. Rendered
-// with CSS2DRenderer so text stays crisp; the overlay and every label are
-// pointer-events: none, so picking is untouched. Labels hide past a camera
+// Site labels: above every site cluster, always on, a small hexagon badge
+// with the icon of the site's kind (ui/siteIcons) and the site's name. The
+// badge also carries the plant's state: alarm red with a white icon while a
+// plant is shut down, a red outline while it restarts, blue while it holds
+// at minimum. Rendered with CSS2DRenderer so text stays crisp; the overlay
+// and every label are pointer-events: none, so picking is untouched. Labels hide past a camera
 // distance threshold to avoid clutter when zoomed out, and a label that
 // would cover a neighbour's steps one row up or down (or hides if no row is
 // free) so a dense corner of the map stays readable.
@@ -10,6 +13,8 @@
 import * as THREE from 'three';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import type { WorldSpec } from '../engine/world';
+import { useSim } from '../store/sim';
+import { siteBadgeSvg } from '../ui/siteIcons';
 import type { SiteAnchor } from './siteClusters';
 
 /** Hide labels beyond this camera distance to the orbit target (default; see setMaxDistance). */
@@ -17,14 +22,29 @@ const LABEL_MAX_DISTANCE = 90;
 /** Re-place labels every this many frames — the camera moves slowly against label size. */
 const DECLUTTER_EVERY = 6;
 /** Rows a label may take, in label heights above its anchor, in order of preference. */
-const LABEL_ROWS = [0, 1, -1, 2] as const;
+const LABEL_ROWS = [0, 1, -1, 2, -2] as const;
+/** Icon size inside a label's badge, in pixels. */
+const BADGE_ICON_PX = 16;
 
 const LABEL_CSS =
   'font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;' +
   'font-size:12px;line-height:1;font-weight:500;text-transform:uppercase;' +
   'letter-spacing:0.14em;color:#5f656c;background:rgba(255,255,255,0.85);' +
-  'border:1px solid #e4e7ea;border-radius:4px;padding:2px 5px 1px 6px;' +
-  'pointer-events:none;white-space:nowrap;user-select:none;';
+  'border:1px solid #e4e7ea;border-radius:4px;padding:1px 7px 1px 2px;' +
+  'display:inline-flex;align-items:center;gap:5px;white-space:nowrap;';
+
+/**
+ * Label look per site state (the snapshot's site status: 0 running, 1/2
+ * holding, 3 shut down, 4 restarting), as CSS custom properties the badge
+ * SVG reads, plus the label's own border and text colour.
+ */
+const STATE_STYLE: Record<number, { fill: string; line: string; ink: string; accent: string; border: string; text: string }> = {
+  0: { fill: '#ffffff', line: '#0a0a0a', ink: '#0a0a0a', accent: '#1764d6', border: '#e4e7ea', text: '#5f656c' },
+  1: { fill: '#e8f0fc', line: '#1764d6', ink: '#0a0a0a', accent: '#1764d6', border: '#79aef2', text: '#5f656c' },
+  2: { fill: '#e8f0fc', line: '#1764d6', ink: '#0a0a0a', accent: '#1764d6', border: '#79aef2', text: '#5f656c' },
+  3: { fill: '#d1372f', line: '#d1372f', ink: '#ffffff', accent: '#ffffff', border: '#d1372f', text: '#d1372f' },
+  4: { fill: '#ffffff', line: '#d1372f', ink: '#0a0a0a', accent: '#d1372f', border: '#d1372f', text: '#5f656c' },
+};
 
 export class SiteLabels {
   private readonly renderer: CSS2DRenderer;
@@ -37,6 +57,11 @@ export class SiteLabels {
   private height = 0;
   private frame = 0;
   private readonly projected = new THREE.Vector3();
+  /** Site index of each label, and the state its badge currently shows. */
+  private readonly labelSite: number[] = [];
+  private readonly shown: number[] = [];
+  /** The styled box inside each label: badge and name in a row. */
+  private readonly boxes: HTMLElement[] = [];
 
   constructor(container: HTMLElement, world: WorldSpec, anchors: SiteAnchor[]) {
     this.renderer = new CSS2DRenderer();
@@ -56,8 +81,20 @@ export class SiteLabels {
       if (anchor === undefined) return;
       const el = document.createElement('span');
       el.className = 'site-label';
-      el.style.cssText = LABEL_CSS;
-      el.textContent = site.name;
+      el.style.cssText = 'pointer-events:none;user-select:none;';
+      // CSS2DRenderer owns the root element's display (it toggles it to hide
+      // a label), so the row layout lives on a box inside it: the badge (a
+      // trusted SVG string from the icon set), then the name as text.
+      const box = document.createElement('span');
+      box.style.cssText = LABEL_CSS;
+      box.innerHTML = siteBadgeSvg(site.preset, BADGE_ICON_PX);
+      const name = document.createElement('span');
+      name.textContent = site.name;
+      box.appendChild(name);
+      el.appendChild(box);
+      this.boxes.push(box);
+      this.labelSite.push(s);
+      this.shown.push(0);
       const label = new CSS2DObject(el);
       // anchor above the cluster, clear of the raised pads and glyphs
       label.position.set(anchor.x, anchor.topY + 0.85, anchor.z);
@@ -77,6 +114,7 @@ export class SiteLabels {
   update(camera: THREE.Camera, targetX: number, targetY: number, targetZ: number): void {
     if (this.scene === null) return;
     this.target.set(targetX, targetY, targetZ);
+    this.syncStates();
     const visible = camera.position.distanceTo(this.target) <= this.maxDistance;
     if (!visible) {
       for (const label of this.labels) label.visible = false;
@@ -84,6 +122,25 @@ export class SiteLabels {
       this.declutter(camera);
     }
     this.renderer.render(this.scene, camera);
+  }
+
+  /** Restyle the badges whose site changed state since the last frame. */
+  private syncStates(): void {
+    const status = useSim.getState().snap?.siteStatus;
+    if (status === undefined) return;
+    for (let i = 0; i < this.labels.length; i++) {
+      const state = status[this.labelSite[i]] ?? 0;
+      if (state === this.shown[i]) continue;
+      this.shown[i] = state;
+      const look = STATE_STYLE[state] ?? STATE_STYLE[0];
+      const el = this.boxes[i];
+      el.style.setProperty('--badge-fill', look.fill);
+      el.style.setProperty('--badge-line', look.line);
+      el.style.setProperty('--icon-ink', look.ink);
+      el.style.setProperty('--icon-accent', look.accent);
+      el.style.borderColor = look.border;
+      el.style.color = look.text;
+    }
   }
 
   /**
@@ -97,8 +154,9 @@ export class SiteLabels {
 
   /**
    * Place labels without overlap: nearest sites first, each label takes the
-   * first free row among its own position, one row up, one row down and two
-   * rows up; a label with no free row is hidden until the view changes.
+   * first free row among its own position, one row up, one row down, two
+   * rows up and two rows down; a label with no free row is hidden until the
+   * view changes.
    */
   private declutter(camera: THREE.Camera): void {
     const boxes: { x0: number; y0: number; x1: number; y1: number }[] = [];
@@ -116,8 +174,8 @@ export class SiteLabels {
       }
       const el = label.element;
       // jsdom and not-yet-laid-out labels report 0: fall back to an estimate
-      const w = el.offsetWidth || 12 + 9 * (el.textContent?.length ?? 8);
-      const h = el.offsetHeight || 18;
+      const w = el.offsetWidth || 42 + 9 * (el.textContent?.length ?? 8);
+      const h = el.offsetHeight || 26;
       const cx = (p.x * 0.5 + 0.5) * this.width;
       const cy = (-p.y * 0.5 + 0.5) * this.height;
       let placed = false;

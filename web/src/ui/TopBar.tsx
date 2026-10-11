@@ -17,6 +17,7 @@ import { SpeedControl } from './SpeedControl';
 import { fmtClock } from './format';
 import { LOG_WINDOW_AT, LOG_WINDOW_ID } from './EventLog';
 import { REWIND_WINDOW_AT, REWIND_WINDOW_ID } from './RewindWindow';
+import { SITES_WINDOW_AT, SITES_WINDOW_ID } from './SitesKey';
 import { useWindows } from './windows';
 
 /**
@@ -79,6 +80,7 @@ export function TopBar() {
   const live = useSim((s) => s.sendCommand !== null);
   const logOpen = useWindows((s) => s.windows[LOG_WINDOW_ID]?.open === true);
   const rewindOpen = useWindows((s) => s.windows[REWIND_WINDOW_ID]?.open === true);
+  const sitesOpen = useWindows((s) => s.windows[SITES_WINDOW_ID]?.open === true);
   const canRewind = useSim((s) => s.rewindTo !== null) && Number(tick ?? 0) > 0;
 
   const { togglePlay, setSeed, setScenario, triggerScenario } = useSim.getState();
@@ -155,6 +157,14 @@ export function TopBar() {
         data-testid="rewind-toggle"
       >
         ↶ Back in time
+      </button>
+      <button
+        className={`btn ${sitesOpen ? 'btn-active' : ''}`}
+        onClick={() => useWindows.getState().toggle(SITES_WINDOW_ID, SITES_WINDOW_AT)}
+        aria-pressed={sitesOpen}
+        data-testid="sites-toggle"
+      >
+        Sites
       </button>
       <button
         className={`btn ${logOpen ? 'btn-active' : ''}`}
