@@ -170,6 +170,34 @@ h2 {
   color: var(--blue-strong);
 }
 
+/*
+ * A hexagon that holds an editable value ("Speed: 1"): a label styled as a
+ * button with a bare input inside. Focus inside it draws the same thickened
+ * blue outline a focused button gets.
+ */
+.btn-field {
+  cursor: text;
+  gap: 4px;
+}
+
+.btn-field:focus-within {
+  --btn-line: var(--blue);
+  --btn-ring: 2px;
+}
+
+.btn-field input {
+  width: 4ch; /* "64.0" — the hexagon keeps its width whatever the number */
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--f-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  outline: none;
+}
+
 /* Single glyph: a regular hexagon. */
 .btn-glyph {
   width: calc(var(--hex-h) * 1.1547);

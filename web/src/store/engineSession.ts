@@ -1,7 +1,7 @@
 // The sim engine session and step loop, framework-free so the session
 // lifecycle is unit-testable without a DOM: openEngineSession creates a
 // backend session for the current settings and pushes the first snapshot;
-// startStepLoop advances it on a fixed 250 ms cadence while playing and pulls
+// startStepLoop advances it at the chosen speed while playing and pulls
 // incremental events after each step. useSimEngine mounts these on effects.
 // A failed session surfaces the store's error state — the UI shows the
 // retryable engine-unavailable overlay; it never falls back to another
@@ -17,9 +17,10 @@ import { createBackend } from '../engine/api';
 import type { BackendKind, SimBackend } from '../engine/api';
 import { HttpError } from '../engine/httpBackend';
 import { resolveWorld } from '../engine/world';
-import { useSim } from './sim';
+import { nextStep, useSim } from './sim';
 
-const STEP_MS = 250;
+/** How often the loop checks whether a step is due — the pacing error of any one step. */
+const POLL_MS = 25;
 
 /** The live backend session; null between sessions and while one is opening. */
 let session: { id: string; backend: SimBackend } | null = null;
@@ -232,22 +233,44 @@ export async function recoverFromGoneSession(ticks: number): Promise<void> {
 }
 
 /**
- * Fixed-cadence step loop, created once and kept for the app's lifetime:
- * settings changes replace the session, not the loop. Reads playing state at
- * tick time and skips while a step is in flight (HTTP latency). Returns a
- * cleanup that stops the timer.
+ * The step loop, created once and kept for the app's lifetime: settings
+ * changes replace the session, not the loop. It checks every 25 ms whether a
+ * step is due — the store's step interval after the previous one was due —
+ * and then advances `nextStep(speed, carry)` ticks: one tick on a stretched
+ * interval below speed 1, the speed's worth of ticks every 250 ms from 1 up,
+ * fractions carried so 1.5 really averages 1.5.
+ *
+ * Speed and playing state are read when a step is due, so a change mid-run
+ * takes effect on the next step: nothing is skipped or doubled, and a pause,
+ * a slow reply or a jump from a long interval to a short one never causes a
+ * burst of catch-up steps (the schedule restarts from now instead). A step
+ * still in flight is never overlapped. Returns a cleanup that stops it.
  */
 export function startStepLoop(): () => void {
   let inFlight = false;
+  let lastAt = -Infinity; // when the previous step was due (performance.now clock)
+  let carry = 0; // fraction of a tick owed to the next step
   const timer = setInterval(() => {
     const s = useSim.getState();
     if (!s.playing || inFlight) return;
     const current = session;
     if (current === null) return;
+    const now = performance.now();
+    // Due one interval after the previous step was due, at the speed set
+    // NOW: a shorter interval applies at once, a longer one waits it out.
+    const late = now - (lastAt + s.stepIntervalMs);
+    if (late < 0) return; // not due yet
+    // On schedule: count from when this step was due, so the cadence does
+    // not drift by the polling error. Behind schedule (paused, slow reply,
+    // or the interval just got shorter): restart from now — no catch-up.
+    lastAt = late < s.stepIntervalMs ? lastAt + s.stepIntervalMs : now;
+    const step = nextStep(s.speed, carry);
+    carry = step.carry;
+    const ticks = step.ticks;
     inFlight = true;
     void (async () => {
       try {
-        const snap = await serial(() => current.backend.step(current.id, s.speed));
+        const snap = await serial(() => current.backend.step(current.id, ticks));
         useSim.getState().pushSnapshot(snap);
         const { lastSeq } = useSim.getState();
         const events = await current.backend.events(current.id, lastSeq);
@@ -255,7 +278,7 @@ export function startStepLoop(): () => void {
         useSim.getState().setError(null);
       } catch (err) {
         if (isGoneSession(err)) {
-          void recoverFromGoneSession(s.speed);
+          void recoverFromGoneSession(ticks);
         } else {
           useSim.getState().setError(err instanceof Error ? err.message : String(err));
         }
@@ -263,6 +286,6 @@ export function startStepLoop(): () => void {
         inFlight = false;
       }
     })();
-  }, STEP_MS);
+  }, POLL_MS);
   return () => clearInterval(timer);
 }
