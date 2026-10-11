@@ -18,10 +18,15 @@ export function TopBar() {
   const { togglePlay, setSpeed, setSeed, setScenario, setBackendKind, setBaseUrl } = useSim.getState();
 
   return (
-    <header className="pointer-events-auto absolute inset-x-0 top-0 z-10 flex h-12 items-center gap-3 border-b border-slate-700/70 bg-slate-900/85 px-4 backdrop-blur">
-      <span className="text-sm font-semibold tracking-wide text-cyan-300">Chain Reaction</span>
+    <header className="pointer-events-auto absolute inset-x-0 top-0 z-10 flex h-12 items-center gap-2 border-b border-line bg-panel px-4">
+      <span className="flex items-center gap-2" data-testid="wordmark">
+        <img src="/logo.svg" alt="PetroGrid mark" width={20} height={20} />
+        <span className="wordmark text-base leading-none">
+          Petro<span className="text-blue">Grid</span>
+        </span>
+      </span>
 
-      <span className="ml-2 min-w-28 rounded bg-slate-800 px-2 py-1 font-mono text-xs text-slate-100" data-testid="clock">
+      <span className="data ml-2 min-w-28 rounded-sm bg-panel-2 px-2 py-1" data-testid="clock">
         {tick === undefined ? '—' : fmtClock(Number(tick))}
       </span>
 
@@ -37,8 +42,8 @@ export function TopBar() {
         ))}
       </div>
 
-      <label className="ml-2 flex items-center gap-1 text-xs text-slate-400">
-        Seed
+      <label className="ml-2 flex items-center gap-2">
+        <span className="label">Seed</span>
         <input
           type="number"
           className="field w-20"
@@ -49,8 +54,8 @@ export function TopBar() {
         />
       </label>
 
-      <label className="flex items-center gap-1 text-xs text-slate-400">
-        Scenario
+      <label className="flex items-center gap-2">
+        <span className="label">Scenario</span>
         <select className="field" value={scenario} onChange={(e) => setScenario(e.target.value)} data-testid="scenario-select">
           {SCENARIOS.map((s) => (
             <option key={s.key} value={s.key}>{s.label}</option>
@@ -58,8 +63,8 @@ export function TopBar() {
         </select>
       </label>
 
-      <label className="flex items-center gap-1 text-xs text-slate-400">
-        Engine
+      <label className="flex items-center gap-2">
+        <span className="label">Engine</span>
         <select className="field" value={backendKind} onChange={(e) => setBackendKind(e.target.value as 'stub' | 'http')} data-testid="backend-select">
           <option value="stub">In-page stub</option>
           <option value="http">Hosted (HTTP)</option>
@@ -67,8 +72,8 @@ export function TopBar() {
       </label>
 
       {backendKind === 'http' && (
-        <label className="flex items-center gap-1 text-xs text-slate-400">
-          URL
+        <label className="flex items-center gap-2">
+          <span className="label">URL</span>
           <input
             type="text"
             placeholder="https://…"
@@ -80,10 +85,14 @@ export function TopBar() {
         </label>
       )}
 
-      <span className="ml-auto text-xs text-slate-500">{Math.floor(Number(tick ?? 0) / TICKS_PER_DAY)}/60 d</span>
+      <span className="data ml-auto text-muted">{Math.floor(Number(tick ?? 0) / TICKS_PER_DAY)}/60 d</span>
 
       {error !== null && (
-        <span className="rounded border border-red-500/60 bg-red-950/80 px-2 py-1 text-xs text-red-300" data-testid="error-banner" role="alert">
+        <span
+          className="rounded-sm border border-alarm/50 bg-alarm/10 px-2 py-1 text-xs font-medium text-alarm"
+          data-testid="error-banner"
+          role="alert"
+        >
           {error}
         </span>
       )}
