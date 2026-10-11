@@ -87,6 +87,8 @@ struct Tank {
   // 70% full, so exports never rob the domestic chain. Set by the world
   // builder (M3 sizing for port import/export tanks).
   bool export_buy = false;
+  // Initial fill as a share of capacity; negative starts at target_frac.
+  double init_frac = -1.0;
 };
 
 struct Process {
@@ -115,6 +117,9 @@ struct Pipeline {
   TankId from, to;
   uint16_t material = 0;
   double cap_t_h = 0;
+  // Drawn display path in World::polyline_xy (render-only); count 0 means a
+  // straight line between the two sites.
+  Range<uint32_t> polyline{};
 };
 
 struct World {
@@ -146,6 +151,15 @@ struct World {
     TankId buyer{}, seller{};
   };
   std::vector<Contract> contracts;
+
+  // Named hand-built worlds: the name the API reports, the map extent, and
+  // render-only map data the simulation step never reads — a water mask on
+  // a square grid (the API turns it into the terrain the client draws).
+  std::string name = "sixsite";
+  double w_km = 600, h_km = 400;
+  double water_cell_km = 0;  // 0 = no mask: the API renders seeded terrain
+  uint32_t water_cols = 0, water_rows = 0;
+  std::vector<uint8_t> water;  // rows x cols, row-major, 1 = water
 
   int findSite(const std::string& key) const;
   int findTank(const std::string& key) const;
