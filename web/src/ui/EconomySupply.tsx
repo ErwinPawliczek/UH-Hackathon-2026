@@ -21,7 +21,7 @@ import { useSim } from '../store/sim';
 import { SiteBadge } from './SiteIcon';
 import { fmtTonnes } from './economyData';
 import { useEconomyView } from './economyView';
-import { fmtClock } from './format';
+import { fmtMomentWords } from './format';
 import {
   blockedWords, cashWords, cutOff, fmtCover, fmtTrip, inTime, nextPassWords, optionCash, orderBookedWords, orderCommand,
   orderRefusedWords, sortByCover, stateWords, supplierDown, tankHeadline, tankLabel, useSourcingDetail, useSourcingList,
@@ -195,7 +195,7 @@ export function SupplyDetail({ detail, presetOf, onSupplier, onOrder, busy, note
         </ul>
       )}
       <p className="mt-2 text-xs text-muted">
-        As of {fmtClock(detail.tick)}. The price for the product is what an order is booked at now: halfway between
+        As of {fmtMomentWords(detail.tick)}. The price for the product is what an order is booked at now: halfway between
         what the seller asks (less when its tank is full) and what this plant bids. Freight is for that vehicle over
         that distance. &quot;In time&quot; compares door to door with the stock left.
       </p>

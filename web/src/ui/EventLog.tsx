@@ -134,7 +134,7 @@ export function EventLog() {
         ))}
         {rows.length === 0 && (
           <li className="px-3 py-3 text-muted" data-testid="log-empty">
-            {consequences || deliveries ? 'Nothing to show yet.' : 'Nothing changed by you yet.'}
+            {consequences || deliveries ? 'Nothing to show yet.' : 'You have not changed anything yet.'}
           </li>
         )}
       </ul>

@@ -14,7 +14,7 @@ import type { SimEvent } from '../engine/events';
 import { TICKS_PER_DAY, useSim } from '../store/sim';
 import { DraggableWindow } from './DraggableWindow';
 import { eventLabel, eventMark, notableEvents } from './eventKinds';
-import { fmtClock } from './format';
+import { fmtClock, fmtMomentWords } from './format';
 import { useWindows } from './windows';
 
 export const REWIND_WINDOW_ID = 'rewind';
@@ -137,7 +137,7 @@ export function RewindWindow() {
             return (
               <span
                 key={e.seq}
-                title={`${fmtClock(e.tick)} — ${e.text}`}
+                title={`${fmtMomentWords(e.tick)} — ${e.text}`}
                 className={mark.shape === 'diamond'
                   ? 'absolute top-0.5 h-2 w-2 -translate-x-1/2 rotate-45'
                   : 'absolute top-0 h-2.5 w-1 -translate-x-1/2 rounded-sm'}

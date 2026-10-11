@@ -161,6 +161,9 @@ export function buildFlowsheet(world: WorldSpec, siteIdx: number): Flowsheet | n
   const links: { from: string; to: string; key: string; tph: number; proc: number }[] = [];
   for (const process of site.processes) {
     if (process.index === undefined) continue;
+    for (const st of [...(process.in ?? []), ...(process.out ?? []), ...process.units.flatMap((u) => [...(u.in ?? []), ...(u.out ?? [])])]) {
+      if (typeof st.name === 'string' && st.name !== '') STREAM_NAMES.set(st.key, st.name);
+    }
     const makes = new Map<string, { id: string; tph: number }[]>();
     const takes = new Map<string, { id: string; tph: number }[]>();
     for (const unit of process.units) {
@@ -542,9 +545,29 @@ export function tankLive(world: WorldSpec, snap: Snapshot, node: FlowTankNode): 
 
 /** A material or stream key as a label: "Heavy naphtha", "LPG", "Polyethylene", "brine". */
 export function streamLabel(key: string): string {
-  if (key !== key.toUpperCase()) return key.replace(/_/g, ' '); // internal streams are already lower case
+  const given = STREAM_NAMES.get(key);
+  if (given !== undefined) return given.charAt(0).toUpperCase() + given.slice(1);
+  if (key !== key.toUpperCase()) {
+    // an internal stream: lower case in the engine, tidied here
+    const tidy = INTERNAL_NAMES[key] ?? key.replace(/_/g, ' ');
+    return tidy.charAt(0).toUpperCase() + tidy.slice(1);
+  }
   return materialTitle(key);
 }
+
+/** Plain names the world JSON gives its streams (`name`), by stream key; filled as flowsheets are built. */
+const STREAM_NAMES = new Map<string, string>();
+
+/** Internal stream keys that are abbreviations, spelled out for when the engine gives no name. */
+const INTERNAL_NAMES: Record<string, string> = {
+  edc: 'EDC',
+  hcl: 'hydrogen chloride',
+  eb: 'ethylbenzene',
+  wet_cl2: 'wet chlorine',
+  ygrade: 'Y-grade',
+  resid: 'residue',
+  pygas: 'pyrolysis gasoline',
+};
 
 /** Tonnes per hour for a label: one decimal under 100, none above. */
 export function fmtTph(tph: number): string {

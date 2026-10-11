@@ -360,7 +360,8 @@ function Analytics({
         <div className="flex gap-1" role="group" aria-label="Time window">
           {WINDOWS.map((w) => (
             <button key={w.key} type="button" className={`btn ${windowKey === w.key ? 'btn-active' : ''}`} aria-pressed={windowKey === w.key} onClick={() => setWindowKey(w.key)} data-testid={`analytics-window-${w.key}`}>
-              {w.label}
+              {/* the engine keeps 60 days of history: past that, "All" is not all */}
+              {w.key === 'all' && now > 60 * TICKS_PER_DAY ? 'Last 60 days' : w.label}
             </button>
           ))}
         </div>
