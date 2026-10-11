@@ -1366,3 +1366,53 @@ TEST_CASE("R6 room: the forecast leaves out disruptions but keeps the players' p
   REQUIRE(bad);
   CHECK(bad->status == 400);
 }
+
+TEST_CASE("R7 room: readers, players and the host hammer a running room while its clock steps") {
+  RoomServer ts(true);
+  std::string code, hostToken, token;
+  {
+    auto cli = client(ts.port);
+    const json made = postJson(cli, "/api/room", json::object());
+    code = made.at("code").get<std::string>();
+    hostToken = made.at("hostToken").get<std::string>();
+    const std::string base = "/api/room/" + code;
+    token = postJson(cli, base + "/join", {{"name", "Ann"}}).at("token").get<std::string>();
+    REQUIRE(postJson(cli, base + "/claim", {{"token", token}, {"site", freePlant(getJson(cli, base))}}).at("ok") == true);
+    postJson(cli, base + "/host", {{"hostToken", hostToken}, {"action", "speed"}, {"speed", 64}});
+    postJson(cli, base + "/host", {{"hostToken", hostToken}, {"action", "start"}});
+  }
+  const std::string base = "/api/room/" + code;
+  std::atomic<int> bad{0};
+  std::vector<std::thread> threads;
+  for (int t = 0; t < 4; ++t)
+    threads.emplace_back([&, t] {
+      auto cli = client(ts.port);
+      uint64_t last = 0;
+      for (int i = 0; i < 40; ++i) {
+        if (t == 0) {
+          const auto snap = cli.Get(base + "/snapshot");
+          if (!snap || snap->status != 200 || tickOf(snap->body) < last) ++bad;
+          else last = tickOf(snap->body);
+        } else if (t == 1) {
+          const auto a = cli.Get(base + "?token=" + token);
+          const auto b = cli.Get(base + "/scores");
+          if (!a || a->status != 200 || !b || b->status != 200) ++bad;
+        } else if (t == 2) {
+          const json body = {{"token", token}, {"action", i % 2 ? "price" : "rate"},
+                             {"markup", 0.01 * (i % 20)}, {"share", 0.8 + 0.005 * (i % 20)}};
+          const auto r = cli.Post(base + "/play", body.dump(), "application/json");
+          if (!r || r->status != 200) ++bad;
+        } else {
+          const json body = {{"hostToken", hostToken}, {"action", i % 2 ? "pause" : "resume"}};
+          const auto r = cli.Post(base + "/host", body.dump(), "application/json");
+          if (!r || r->status != 200) ++bad;
+          if (i % 10 == 0) {
+            const auto f = cli.Post(base + "/forecast", R"({"days":1})", "application/json");
+            if (!f || f->status != 200) ++bad;
+          }
+        }
+      }
+    });
+  for (std::thread& th : threads) th.join();
+  CHECK(bad.load() == 0);
+}
