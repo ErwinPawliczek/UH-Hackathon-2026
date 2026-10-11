@@ -242,9 +242,36 @@ std::vector<std::string> realSimWarmup(const worldgen::GeneratedWorld& gen,
   constexpr uint32_t kTicksPerHour = 4;  // kTickHours = 0.25
   sim->step(35 * 24 * kTicksPerHour);    // ramp-up: start-up transient excluded
   const crx::sim::World& w = sim->world();
+  // TEMP DIAGNOSTIC: daily level trace for the dry-out suspects and their
+  // suppliers — removed once the balance question is answered.
+  if (std::getenv("CRX_WARMUP_DEBUG") != nullptr) {
+    const size_t n = w.tanks.size();
+    for (uint32_t i = 0; i < n; ++i) {
+      const std::string& sn = w.sites[w.tanks[i].site.v].name;
+      const std::string& mk = w.catalog.materials[w.tanks[i].material].key;
+      if ((sn.find("Eastbrook") != std::string::npos && (mk == "LPG" || mk == "CAUSTIC")) ||
+          (sn.find("Refinery A") != std::string::npos && mk == "LPG") ||
+          (sn.find("Chlor-alkali") != std::string::npos && mk == "CAUSTIC")) {
+        std::fprintf(stderr, "DBG tank %u %s/%s cap=%.1f level=%.2f\n", i, sn.c_str(),
+                     mk.c_str(), w.tanks[i].capacity_t, sim->state().tank[i].level_t);
+      }
+    }
+  }
   for (uint32_t day = 0; day < 7; ++day) {
     sim->step(24 * kTicksPerHour);
     const crx::sim::State& st = sim->state();
+    if (std::getenv("CRX_WARMUP_DEBUG") != nullptr) {
+      for (uint32_t i = 0; i < w.tanks.size(); ++i) {
+        const std::string& sn = w.sites[w.tanks[i].site.v].name;
+        const std::string& mk = w.catalog.materials[w.tanks[i].material].key;
+        if ((sn.find("Eastbrook") != std::string::npos && (mk == "LPG" || mk == "CAUSTIC")) ||
+            (sn.find("Refinery A") != std::string::npos && mk == "LPG") ||
+            (sn.find("Chlor-alkali") != std::string::npos && mk == "CAUSTIC")) {
+          std::fprintf(stderr, "DBG day %u tank %u %s/%s level=%.2f\n", day, i, sn.c_str(),
+                       mk.c_str(), st.tank[i].level_t);
+        }
+      }
+    }
     for (size_t p = 0; p < st.sink_starved.size(); ++p)
       if (st.sink_starved[p] != 0)
         errors.push_back("warm-up: " + w.sites[w.processes[p].site.v].name + "/" +

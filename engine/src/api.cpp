@@ -472,12 +472,19 @@ void buildSnapshot(const Sim& sim, const std::vector<uint32_t>& edge_route,
 
 // ---- C ABI ----
 
+// Last crx_create failure reason on this thread — read by hosts through
+// crx_last_error after a null return (thread_local: the HTTP handler thread
+// that called crx_create reads its own failure).
+thread_local std::string g_lastCreateError;
+
 crx_sim* crx_create(const char* config_json) {
+  g_lastCreateError.clear();
   try {
     std::string error;
     auto sim = Sim::createFromConfig(config_json, error);
     if (sim == nullptr) {
-      std::fprintf(stderr, "crx_create: %s\n", error.c_str());
+      g_lastCreateError = error.empty() ? "world creation failed" : error;
+      std::fprintf(stderr, "crx_create: %s\n", g_lastCreateError.c_str());
       return nullptr;
     }
     auto* api = new ApiSim();
@@ -486,10 +493,13 @@ crx_sim* crx_create(const char* config_json) {
     ApiSim::buildWorldJson(*api->sim, api->terrain, api->world_json, api->edge_route);
     return reinterpret_cast<crx_sim*>(api);
   } catch (const std::exception& e) {
+    g_lastCreateError = std::string("exception: ") + e.what();
     std::fprintf(stderr, "crx_create: %s\n", e.what());
     return nullptr;
   }
 }
+
+const char* crx_last_error(void) { return g_lastCreateError.c_str(); }
 
 crx_sim* crx_fork(const crx_sim* src) {
   if (src == nullptr) return nullptr;

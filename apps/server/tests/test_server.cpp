@@ -60,6 +60,26 @@ std::string createSession(httplib::Client& cli, const std::string& config) {
   return json::parse(res->body).at("id").get<std::string>();
 }
 
+TEST_CASE("rejected config returns 4xx with the engine reason; server stays healthy") {
+  TestServer srv;
+  auto cli = client(srv.port);
+
+  // A config the engine refuses (unknown world name): 400 + JSON error body
+  // carrying the real rejection reason — never a crash, never 5xx.
+  const auto bad = cli.Post("/api/sim", R"({"world":"does_not_exist"})", "application/json");
+  REQUIRE(bad);
+  REQUIRE(bad->status == 400);
+  const json body = json::parse(bad->body);
+  REQUIRE(body.contains("error"));
+  REQUIRE(body.at("error").get<std::string>().find("world") != std::string::npos);
+
+  // The server survived the rejection: the six-site compat world still creates.
+  const auto ok = cli.Post("/api/sim", R"({"world":"sixsite"})", "application/json");
+  REQUIRE(ok);
+  REQUIRE(ok->status == 200);
+  REQUIRE(json::parse(ok->body).contains("id"));
+}
+
 }  // namespace
 
 TEST_CASE("create then step returns the CRXS snapshot and advances the tick") {

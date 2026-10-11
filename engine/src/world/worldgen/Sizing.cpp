@@ -189,18 +189,24 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
   };
 
   // Per-capita demand rate (t/d per million people) by sink basis material.
+  // LPG and CAUSTIC carry a +20% supply reserve: their production is a
+  // co-product or a single-plant supply chain whose previous exact-demand
+  // sizing left zero headroom — any demand-curve peak or logistics loss then
+  // dried the tail depot tanks in the warm-up. The port export sinks absorb
+  // the surplus (they size themselves from domestic arrivals).
+  constexpr double kSupplyReserve = 1.20;
   const auto perCapita = [&](const std::string& basis) {
     if (basis == "GASOLINE") return dc.gasoline;
     if (basis == "DIESEL") return dc.diesel;
     if (basis == "JET") return dc.jet;
-    if (basis == "LPG") return dc.lpg;
+    if (basis == "LPG") return dc.lpg * kSupplyReserve;
     if (basis == "PE") return dc.pe;
     if (basis == "PP") return dc.pp * 0.5;  // split between two consumer sinks
     if (basis == "PVC") return dc.pvc;
     if (basis == "PS") return dc.ps;
     if (basis == "STYRENE") return dc.styrene_monomer;
     if (basis == "SOLVENT") return dc.solvent;
-    if (basis == "CAUSTIC") return dc.caustic;
+    if (basis == "CAUSTIC") return dc.caustic * kSupplyReserve;
     return 0.0;  // METHANE / FUEL_OIL: sized by supply, not per-capita demand
   };
 

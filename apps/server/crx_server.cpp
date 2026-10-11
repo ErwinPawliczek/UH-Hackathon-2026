@@ -211,7 +211,11 @@ void registerRoutes(httplib::Server& svr, SessionRegistry& sessions, const std::
         sendJson(res, 200, json::json{{"id", result.id}}.dump());
         break;
       case SessionRegistry::CreateStatus::kBadConfig:
-        sendJson(res, 400, jsonError("engine rejected the config JSON"));
+        // 400 with the engine's actual rejection reason (unknown world,
+        // infeasible generation, failed warm-up gate) — never a crash, never
+        // 5xx; the server stays healthy for follow-up requests.
+        sendJson(res, 400,
+                 jsonError((std::string("engine rejected the config: ") + crx_last_error()).c_str()));
         break;
       default:
         sendJson(res, 500, jsonError("unexpected create status"));

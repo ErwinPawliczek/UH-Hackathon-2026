@@ -68,6 +68,11 @@ crx_sim* makeSim(uint64_t seed) {
 
 TEST_CASE("stub engine: bad config rejected") {
   REQUIRE(crx_create("not json") == nullptr);
+  // Rejected configs fail CLEANLY: null handle plus a real reason on
+  // crx_last_error — no crash, no deref downstream (hosts turn this into a
+  // 4xx with the message).
+  REQUIRE(crx_create(R"({"world":"does_not_exist"})") == nullptr);
+  REQUIRE(std::string(crx_last_error()).find("world") != std::string::npos);
 }
 
 TEST_CASE("stub engine: deterministic run, seed-sensitive") {

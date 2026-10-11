@@ -20,6 +20,14 @@ typedef struct crx_sim crx_sim;
 /* config_json: {"seed":..,"gen":{..}} or {"world":{..}}; NULL = defaults. */
 crx_sim* crx_create(const char* config_json);
 
+/* Failure reason from the most recent crx_create call on this thread: a
+   non-empty message after a rejected config (bad JSON, unknown world,
+   infeasible generation, failed warm-up gate); empty after a success. The
+   pointer stays valid until the next crx_create on the same thread. Hosts
+   must treat a null return from crx_create as "read crx_last_error and
+   report" — never as a crash. */
+const char* crx_last_error(void);
+
 /* Copies State, shares World. Forks the run (baseline twin). */
 crx_sim* crx_fork(const crx_sim* src);
 
