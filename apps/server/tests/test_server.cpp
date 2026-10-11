@@ -602,6 +602,34 @@ TEST_CASE("sourcing after a closure: the cut-off tank stays listed and says rout
   CHECK(refused.at("error") == "place_order: the road to this site is closed");
 }
 
+TEST_CASE("snapshot site status: 5 marks a site held back by a shock") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  const auto post = [&cli](const std::string& path, const std::string& body) {
+    auto res = cli.Post(path, body, "application/json");
+    REQUIRE(res);
+    return *res;
+  };
+  const json world = json::parse(cli.Get("/api/sim/" + id + "/world")->body);
+  size_t gas_field = world.at("sites").size();
+  for (size_t i = 0; i < world.at("sites").size(); ++i)
+    if (world.at("sites")[i].at("key") == "GAS_FIELD") gas_field = i;
+  REQUIRE(gas_field < world.at("sites").size());
+  // Snapshot (§7.3): magic, version, tick, count, then {scalars, offset} per
+  // array; array 4 is one status byte per site.
+  const auto siteStatus = [&](const std::string& snap, size_t site) {
+    uint32_t offset = 0;
+    std::memcpy(&offset, snap.data() + 20 + 4 * 8 + 4, sizeof offset);
+    return static_cast<int>(static_cast<uint8_t>(snap[offset + site]));
+  };
+  CHECK(siteStatus(post("/api/sim/" + id + "/step", R"({"ticks":8})").body, gas_field) == 0);
+  post("/api/sim/" + id + "/command",
+       R"({"type":"supply_shock","site":"GAS_FIELD","multiplier":0.5,"duration_h":24})");
+  CHECK(siteStatus(post("/api/sim/" + id + "/step", R"({"ticks":4})").body, gas_field) == 5);
+  CHECK(siteStatus(post("/api/sim/" + id + "/step", R"({"ticks":100})").body, gas_field) == 0);
+}
+
 TEST_CASE("world json: fleet manifest without a fabricated shuttle schedule") {
   TestServer srv;
   auto cli = client(srv.port);

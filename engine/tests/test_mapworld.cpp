@@ -1815,3 +1815,35 @@ TEST_CASE("M21: a plant never passes more than its online trains allow") {
     }
   }
 }
+
+TEST_CASE("M22: supply and demand shocks say when they start and end") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  sim->step(96);
+  const auto ok = [&](const json& cmd) {
+    return json::parse(sim->command(cmd.dump())).at("ok").get<bool>();
+  };
+  REQUIRE(ok({{"type", "supply_shock"}, {"site", "GAS_FIELD"}, {"multiplier", 0.5}, {"duration_h", 240}}));
+  REQUIRE(ok({{"type", "demand_shock"}, {"site", "FUEL_DEPOT"}, {"multiplier", 1.3}, {"duration_h", 36}}));
+  sim->step(1);
+  const auto has = [&](const char* type, const char* site, const std::string& text) {
+    for (const LogEntry& e : sim->recorder().log)
+      if (e.type == type && e.site == site && e.text == text) return true;
+    return false;
+  };
+  CHECK(has("supply_shock", "GAS_FIELD", "Gas field: output cut to 50% for 10 days"));
+  CHECK(has("demand_shock", "FUEL_DEPOT", "Fuel depot: demand raised to 130% for 36 hours"));
+  CHECK(!has("shock_ended", "FUEL_DEPOT", "Fuel depot: demand back to normal"));
+  sim->step(36 * 4);
+  CHECK(has("shock_ended", "FUEL_DEPOT", "Fuel depot: demand back to normal"));
+  CHECK(!has("shock_ended", "GAS_FIELD", "Gas field: output back to normal"));
+  sim->step(204 * 4);
+  CHECK(has("shock_ended", "GAS_FIELD", "Gas field: output back to normal"));
+  size_t starts = 0, ends = 0;
+  for (const LogEntry& e : sim->recorder().log) {
+    starts += (e.type == "supply_shock" || e.type == "demand_shock") ? 1 : 0;
+    ends += e.type == "shock_ended" ? 1 : 0;
+  }
+  CHECK(starts == 2);  // once each, not every tick
+  CHECK(ends == 2);
+}
