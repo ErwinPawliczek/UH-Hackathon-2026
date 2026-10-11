@@ -158,15 +158,10 @@ const char* modeLabel(crx::Mode mode) {
   return mode == crx::Mode::Road ? "road" : mode == crx::Mode::River ? "river" : "sea";
 }
 
-const char* blockName(Quote::Block b) {
-  switch (b) {
-    case Quote::Block::NoVehicles: return "no_vehicles";
-    case Quote::Block::SellerShort: return "seller_short";
-    case Quote::Block::ExportFill: return "export_fill";
-    case Quote::Block::Unreachable: return "unreachable";
-    case Quote::Block::None: break;
-  }
-  return nullptr;
+bool anyEdgeClosed(const State& state) {
+  for (const uint8_t open : state.edge_open)
+    if (!open) return true;
+  return false;
 }
 
 bool buysByVehicle(const Tank& tk) {
@@ -261,10 +256,14 @@ struct Option {
   Quote q;
 };
 
+// `open_paths` (the network with every edge open) is given when some edge is
+// closed: a way of supplying the tank that only a closure has taken away
+// stays in the list, blocked as a closed route.
 std::vector<Option> optionsFor(const World& world, const State& state, const PathCache& paths,
                                const MarketParams& params,
                                const std::vector<std::vector<uint32_t>>& class_nodes,
-                               uint32_t tank, double want, double urgency) {
+                               uint32_t tank, double want, double urgency,
+                               const PathCache* open_paths) {
   int contract_seller = -1;
   for (const World::Contract& c : world.contracts)
     if (c.buyer.v == tank) contract_seller = c.seller.v;
@@ -274,8 +273,11 @@ std::vector<Option> optionsFor(const World& world, const State& state, const Pat
     const Tank& seller = world.tanks[s];
     if (seller.site == buyer.site || seller.material != buyer.material || !sells(seller)) continue;
     for (size_t cls = 0; cls < world.catalog.vehicle_classes.size(); ++cls) {
-      const Quote q = quoteLot(world, state, paths, params, class_nodes, tank, s, cls, want,
-                               urgency, contract_seller, true);
+      Quote q = quoteLot(world, state, paths, params, class_nodes, tank, s, cls, want, urgency,
+                         contract_seller, true);
+      if (!q.possible && open_paths != nullptr)
+        q = routeClosedQuote(world, state, *open_paths, params, class_nodes, tank, s, cls, want,
+                             urgency, contract_seller);
       if (q.possible) out.push_back({s, cls, q});
     }
   }
@@ -299,15 +301,20 @@ std::string buyTanksJson(const Sim& sim) {
   const World& world = sim.world();
   const State& state = sim.state();
   const PathCache paths = currentPaths(sim);
+  const bool closures = anyEdgeClosed(state);
+  const PathCache open_paths = closures ? allOpenPaths(world) : PathCache{};
   const std::vector<std::vector<uint32_t>> class_nodes = classNodes(world, state);
   json tanks = json::array();
   for (uint32_t t = 0; t < world.tanks.size(); ++t) {
     const Tank& tk = world.tanks[t];
     if (!buysByVehicle(tk)) continue;
-    const size_t ways = optionsFor(world, state, paths, sim.marketParams(), class_nodes, t,
-                                   tk.target_frac * tk.capacity_t, 0.0)
-                            .size();
+    const std::vector<Option> opts =
+        optionsFor(world, state, paths, sim.marketParams(), class_nodes, t,
+                   tk.target_frac * tk.capacity_t, 0.0, closures ? &open_paths : nullptr);
+    const size_t ways = opts.size();
     if (ways == 0) continue;  // site-internal intermediates: nobody sells them
+    size_t cut = 0;  // ways a closed route has taken away for now
+    for (const Option& o : opts) cut += o.q.blocked == Quote::Block::RouteClosed ? 1 : 0;
     const TankState& ts = state.tank[t];
     const Site& site = world.sites[tk.site.v];
     const Usual usual = usualSeller(world, state, t);
@@ -321,6 +328,7 @@ std::string buyTanksJson(const Sim& sim) {
                 {"draw_t_h", tk.design_out_t_h},
                 {"inbound_t", round2(ts.inbound_t)},
                 {"options", ways},
+                {"route_closed", cut},
                 {"usual", nullptr},
                 {"usual_state", nullptr}};
     if (usual.seller_tank >= 0) {
@@ -390,10 +398,12 @@ std::string sourcingJson(const Sim& sim, const std::string& site_arg,
   json usual_doc = nullptr;
   if (buys) {
     const PathCache paths = currentPaths(sim);
+    const bool closures = anyEdgeClosed(state);
+    const PathCache open_paths = closures ? allOpenPaths(world) : PathCache{};
     const MarketParams& params = sim.marketParams();
     const std::vector<std::vector<uint32_t>> class_nodes = classNodes(world, state);
-    std::vector<Option> opts =
-        optionsFor(world, state, paths, params, class_nodes, tank, quoted_for, urgency);
+    std::vector<Option> opts = optionsFor(world, state, paths, params, class_nodes, tank,
+                                          quoted_for, urgency, closures ? &open_paths : nullptr);
 
     // What the next hourly pass books for this tank: a dry run on a copy.
     Sim probe(sim);
@@ -439,7 +449,9 @@ std::string sourcingJson(const Sim& sim, const std::string& site_arg,
       const Site& ssite = world.sites[seller.site.v];
       const VehicleClass& vc = catalog.vehicle_classes[o.cls];
       const uint32_t from = ssite.node[modeIndex(vc.mode)], to = site.node[modeIndex(vc.mode)];
-      const double travel_h = classTravelHours(world, state, paths, vc, from, to);
+      // A route a closure has cut is described as it normally runs.
+      const bool cut = o.q.blocked == Quote::Block::RouteClosed;
+      const double travel_h = classTravelHours(world, state, cut ? open_paths : paths, vc, from, to);
       const double handling_h = vc.load_t_h > 0 ? 2.0 * o.q.lot_t / vc.load_t_h : 0.0;
       // The nearest idle vehicle of the class, as dispatch would pick it.
       double pickup_h = std::numeric_limits<double>::infinity();
@@ -451,7 +463,7 @@ std::string sourcingJson(const Sim& sim, const std::string& site_arg,
       const bool is_chosen =
           std::find(booked.begin(), booked.end(),
                     std::make_pair(o.seller_tank, static_cast<uint16_t>(o.cls))) != booked.end();
-      const char* blocked = blockName(o.q.blocked);
+      const char* blocked = blockWord(o.q.blocked);
       json row = {{"seller", ssite.key},
                   {"seller_index", seller.site.v},
                   {"seller_name", ssite.name},
@@ -478,7 +490,9 @@ std::string sourcingJson(const Sim& sim, const std::string& site_arg,
                   {"price_usd_t", round2((o.q.ask + o.q.bid) / 2.0)},
                   {"feasible_now", o.q.bookable()},
                   {"blocked", blocked != nullptr ? json(blocked) : json(nullptr)},
-                  {"arrives_before_dry", travel_h + handling_h < cover_h},
+                  {"blocked_reason", blocked != nullptr ? json(blockSentence(o.q.blocked, vc.mode))
+                                                        : json(nullptr)},
+                  {"arrives_before_dry", !cut && travel_h + handling_h < cover_h},
                   {"chosen", is_chosen},
                   {"usual", usual.seller_tank == static_cast<int>(o.seller_tank)}};
       options.push_back(std::move(row));

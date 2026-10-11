@@ -97,6 +97,54 @@ Quote quoteLot(const World& world, const State& state, const PathCache& paths,
   return q;
 }
 
+PathCache allOpenPaths(const World& world) {
+  State open;  // only the edge flags matter to the path builder
+  open.edge_open.assign(world.edges.size(), 1);
+  PathCache cache;
+  refreshPaths(world, open, cache);
+  return cache;
+}
+
+Quote routeClosedQuote(const World& world, const State& state, const PathCache& open_paths,
+                       const MarketParams& params,
+                       const std::vector<std::vector<uint32_t>>& class_nodes, uint32_t buyer_tank,
+                       uint32_t seller_tank, size_t cls, double want, double urgency,
+                       int contract_seller) {
+  Quote q = quoteLot(world, state, open_paths, params, class_nodes, buyer_tank, seller_tank, cls,
+                     want, urgency, contract_seller, true);
+  // The closed route is the reason only when it is the only one; a seller
+  // that is also short, say, keeps saying so.
+  if (q.possible && q.blocked == Quote::Block::None) q.blocked = Quote::Block::RouteClosed;
+  return q;
+}
+
+const char* blockWord(Quote::Block block) {
+  switch (block) {
+    case Quote::Block::NoVehicles: return "no_vehicles";
+    case Quote::Block::SellerShort: return "seller_short";
+    case Quote::Block::ExportFill: return "export_fill";
+    case Quote::Block::Unreachable: return "unreachable";
+    case Quote::Block::RouteClosed: return "route_closed";
+    case Quote::Block::None: break;
+  }
+  return nullptr;
+}
+
+std::string blockSentence(Quote::Block block, crx::Mode mode) {
+  switch (block) {
+    case Quote::Block::NoVehicles: return "there are no vehicles of that class";
+    case Quote::Block::SellerShort: return "the seller does not have that much free stock";
+    case Quote::Block::ExportFill: return "the seller is below its export fill line";
+    case Quote::Block::Unreachable: return "no vehicle of that class can reach the seller";
+    case Quote::Block::RouteClosed:
+      return std::string("the ") +
+             (mode == crx::Mode::River ? "river lane" : mode == crx::Mode::Sea ? "sea lane" : "road") +
+             " to this site is closed";
+    case Quote::Block::None: break;
+  }
+  return {};
+}
+
 uint32_t bookLot(const World& world, State& state, uint32_t buyer_tank, uint32_t seller_tank,
                  size_t cls, double lot_t, double price, double freight_usd, double eta_h,
                  double km, double urgency) {

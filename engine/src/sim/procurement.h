@@ -16,6 +16,7 @@
 #include "sim/world.h"
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace crx {
@@ -49,7 +50,9 @@ struct MarketParams {
 // sourcing view (inspect.h) lists them all, including the ones that cannot
 // be booked right now and why.
 struct Quote {
-  enum class Block : uint8_t { None, NoVehicles, SellerShort, ExportFill, Unreachable };
+  // RouteClosed is never set by quoteLot: a host view sets it on a quote
+  // that would be possible with every edge open (routeClosedQuote below).
+  enum class Block : uint8_t { None, NoVehicles, SellerShort, ExportFill, Unreachable, RouteClosed };
   // The material may travel in the class's mode, the class carries its
   // phase, and both sites are on that network with a way between them.
   bool possible = false;
@@ -75,6 +78,26 @@ Quote quoteLot(const World& world, const State& state, const PathCache& paths,
                const MarketParams& params, const std::vector<std::vector<uint32_t>>& class_nodes,
                uint32_t buyer_tank, uint32_t seller_tank, size_t cls, double want,
                double urgency, int contract_seller, bool explain);
+
+// The paths this world would have with every edge open: what "normally
+// possible" means when a closure has cut a site off.
+PathCache allOpenPaths(const World& world);
+
+// For a lot that quoteLot finds impossible on today's paths: the same lot
+// priced on the all-open network. When that is possible and nothing else is
+// in the way, the quote comes back blocked as RouteClosed (distance, time
+// and prices are the normal route's); `possible` stays false when the class
+// could never carry it between the two sites.
+Quote routeClosedQuote(const World& world, const State& state, const PathCache& open_paths,
+                       const MarketParams& params,
+                       const std::vector<std::vector<uint32_t>>& class_nodes, uint32_t buyer_tank,
+                       uint32_t seller_tank, size_t cls, double want, double urgency,
+                       int contract_seller);
+
+// The host-facing word and sentence for each reason a lot cannot be booked
+// (nullptr for Block::None). The sentence for a closed route names the mode.
+const char* blockWord(Quote::Block block);
+std::string blockSentence(Quote::Block block, crx::Mode mode);
 
 // Books one lot from a bookable quote exactly as the hourly pass does: the
 // order joins the dispatch queue, the seller's stock is reserved, the buyer's

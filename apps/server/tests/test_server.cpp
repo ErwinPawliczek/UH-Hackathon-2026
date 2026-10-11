@@ -547,6 +547,61 @@ TEST_CASE("unit_outage by unit_index: the world JSON's unit index, forgotten by 
   CHECK(json::parse(post("/api/sim/" + id + "/forecast", R"({"days":5})").body).at("disruptions") == 0);
 }
 
+TEST_CASE("sourcing after a closure: the cut-off tank stays listed and says route_closed") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  const auto post = [&cli](const std::string& path, const std::string& body) {
+    auto res = cli.Post(path, body, "application/json");
+    REQUIRE(res);
+    return *res;
+  };
+  const auto get = [&](const std::string& query) {
+    auto res = cli.Get("/api/sim/" + id + "/sourcing" + query);
+    REQUIRE(res);
+    return json::parse(res->body);
+  };
+  post("/api/sim/" + id + "/step", R"({"ticks":480})");
+  CHECK(get("").at("tanks").size() == 20);
+
+  // Find the road edges into Vinyls by closing each road in turn on a fork
+  // until the chlorine option reports a closed route; then do it for real.
+  const json routes = json::parse(cli.Get("/api/sim/" + id + "/world")->body).at("routes");
+  int cutting = -1;
+  for (size_t e = 0; e < routes.size() && cutting < 0; ++e) {
+    if (routes[e].at("mode") != "road") continue;
+    const std::string fork = json::parse(post("/api/sim/" + id + "/fork", "").body).at("id");
+    post("/api/sim/" + fork + "/command",
+         json{{"type", "route_break"}, {"edge", e}, {"duration_h", 240}}.dump());
+    post("/api/sim/" + fork + "/step", R"({"ticks":2})");
+    auto res = cli.Get("/api/sim/" + fork + "/sourcing?site=VINYLS&material=CHLORINE");
+    REQUIRE(res);
+    const json doc = json::parse(res->body);
+    if (doc.at("options").size() == 1 && doc.at("options")[0].at("blocked") == "route_closed")
+      cutting = static_cast<int>(e);
+    cli.Delete("/api/sim/" + fork);
+  }
+  REQUIRE(cutting >= 0);
+  post("/api/sim/" + id + "/command",
+       json{{"type", "route_break"}, {"edge", cutting}, {"duration_h", 240}}.dump());
+  post("/api/sim/" + id + "/step", R"({"ticks":2})");
+
+  CHECK(get("").at("tanks").size() == 20);  // nobody dropped out of the list
+  const json doc = get("?site=VINYLS&material=CHLORINE");
+  REQUIRE(doc.at("options").size() == 1);
+  CHECK(doc.at("options")[0].at("feasible_now") == false);
+  CHECK(doc.at("options")[0].at("blocked") == "route_closed");
+  CHECK(doc.at("options")[0].at("blocked_reason") == "the road to this site is closed");
+  const json refused = json::parse(
+      post("/api/sim/" + id + "/command",
+           R"({"type":"place_order","site":"VINYLS","material":"CHLORINE","seller":"CHLOR_ALKALI",)"
+           R"("cls":"TRUCK_PRESS","tonnes":20})")
+          .body);
+  CHECK(refused.at("ok") == false);
+  CHECK(refused.at("blocked") == "route_closed");
+  CHECK(refused.at("error") == "place_order: the road to this site is closed");
+}
+
 TEST_CASE("world json: fleet manifest without a fabricated shuttle schedule") {
   TestServer srv;
   auto cli = client(srv.port);
