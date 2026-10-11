@@ -1259,8 +1259,9 @@ TEST_CASE("M16: smooth_km rounds interior corners and leaves the ends where they
 
 namespace {
 
-// A sim on a copy of the map world file with one tank's fields changed,
-// loaded through the worlds directory like any named world.
+// A sim on a copy of the map world file with one tank's fields changed (a
+// null value removes the field), loaded through the worlds directory like
+// any named world.
 std::unique_ptr<Sim> makeVariantSim(const std::string& name, const std::string& site,
                                     const std::string& material, const json& tank_fields) {
   json file = json::parse(readWorldFile());
@@ -1270,7 +1271,12 @@ std::unique_ptr<Sim> makeVariantSim(const std::string& name, const std::string& 
     if (s.at("key") == site)
       for (json& t : s["tanks"])
         if (t.at("material") == material) {
-          for (const auto& item : tank_fields.items()) t[item.key()] = item.value();
+          for (const auto& item : tank_fields.items()) {
+            if (item.value().is_null())
+              t.erase(item.key());
+            else
+              t[item.key()] = item.value();
+          }
           found = true;
         }
   REQUIRE(found);
@@ -1289,10 +1295,12 @@ std::unique_ptr<Sim> makeVariantSim(const std::string& name, const std::string& 
 }  // namespace
 
 TEST_CASE("M17: a product tank that rejects when full does not hold its plant back") {
-  const json small_tank = {{"cover_days", 5}, {"init_frac", 0.5}};
-  json small_rejecting = small_tank;
-  small_rejecting["reject_when_full"] = true;
-  auto held = makeVariantSim("reject-off", "GAS_PLANT", "ETHANE", small_tank);
+  // Both runs set the ethane tank and the flag themselves, so the test does
+  // not depend on what the shipped world file chooses: the same small tank,
+  // held back in one run and free to reject in the other.
+  const json small_held = {{"cover_days", 5}, {"init_frac", 0.5}, {"reject_when_full", false}};
+  const json small_rejecting = {{"cover_days", 5}, {"init_frac", 0.5}, {"reject_when_full", true}};
+  auto held = makeVariantSim("reject-off", "GAS_PLANT", "ETHANE", small_held);
   auto free = makeVariantSim("reject-on", "GAS_PLANT", "ETHANE", small_rejecting);
   const World& w = free->world();
   const int ethane = w.findTank("GAS_PLANT/ETHANE");
@@ -1390,7 +1398,9 @@ TEST_CASE("M17: a product tank that rejects when full does not hold its plant ba
 }
 
 TEST_CASE("M18: with the flag absent or false the run is the same run") {
-  auto plain = makeMapSim();
+  // Whatever the shipped file sets for this tank, compare the field removed
+  // against the field set to false.
+  auto plain = makeVariantSim("reject-absent", "GAS_PLANT", "ETHANE", {{"reject_when_full", nullptr}});
   auto off = makeVariantSim("reject-false", "GAS_PLANT", "ETHANE", {{"reject_when_full", false}});
   plain->step(30 * 96);
   off->step(30 * 96);
