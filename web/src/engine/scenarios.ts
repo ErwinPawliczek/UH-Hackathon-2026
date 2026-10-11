@@ -19,7 +19,7 @@ export interface EngineScenario {
   /** dropdown label */
   label: string;
   /** which part of the menu it is listed under */
-  group: 'plants' | 'routes';
+  group: 'plants' | 'routes' | 'network';
   /** engine site key the command targets; null for a route closure */
   site: string | null;
   /** route closures: the route's index in world.routes and the mode it must have there */
@@ -102,6 +102,20 @@ export const ENGINE_SCENARIOS: readonly EngineScenario[] = [
     route: { edge: 29, mode: 'road' },
     command: { type: 'route_break', edge: 29, duration_h: 10 * DAY_H },
   },
+  {
+    key: 'hurricane',
+    label: 'Hurricane: every road at quarter speed (3 days)',
+    group: 'network',
+    site: null,
+    command: { type: 'hurricane', duration_h: 3 * DAY_H },
+  },
+  {
+    key: 'water_restriction',
+    label: 'Water restriction: no barges or ships (5 days)',
+    group: 'network',
+    site: null,
+    command: { type: 'water_restriction', duration_h: 5 * DAY_H },
+  },
 ];
 
 /**
@@ -113,6 +127,7 @@ export function scenariosFor(world: WorldSpec | null): EngineScenario[] {
   if (world === null) return [];
   const keys = new Set(world.sites.map((s) => s.key).filter((k): k is string => k !== undefined));
   return ENGINE_SCENARIOS.filter((s) => {
+    if (s.group === 'network') return keys.size > 0; // any engine world; the keyless stub has no engine
     if (s.route !== undefined) return world.routes[s.route.edge]?.mode === s.route.mode;
     return s.site !== null && keys.has(s.site);
   });

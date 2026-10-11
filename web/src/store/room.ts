@@ -21,7 +21,7 @@ import type { SimBackend } from '../engine/api';
 import { resolveWorld, type WorldSpec } from '../engine/world';
 import { adoptSession } from './engineSession';
 import { useSim } from './sim';
-import type { HostAction, PlayerAction, RoomInfo, RoomReply, RoomScores } from './roomTypes';
+import type { HostAction, PlayerAction, RoomInfo, RoomPartners, RoomReply, RoomScores } from './roomTypes';
 
 /** Real milliseconds between snapshot polls, and between polls of the room itself. */
 export const SNAPSHOT_POLL_MS = 250;
@@ -45,6 +45,8 @@ export interface RoomSource {
   identify(token: string | null): void;
   claim(token: string, site: number | null): Promise<RoomReply>;
   play(token: string, action: PlayerAction): Promise<RoomReply>;
+  /** who a plant sells to and buys from */
+  partners(site: number): Promise<RoomPartners>;
   /** the read-only views (events, series, vehicle, economy, sourcing) as a session the panels can use */
   reads(): { id: string; backend: SimBackend };
   close(): void;
@@ -110,6 +112,7 @@ export function roomSource(code: string): RoomSource {
     host: (hostToken, action) => json(`${base}/host`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ hostToken, ...action }) }),
     join: (name) => json(`${base}/join`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ name }) }),
     claim: (token, site) => json(`${base}/claim`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ token, site }) }),
+    partners: (site) => json<RoomPartners>(`${base}/partners?site=${site}`),
     play: (token, action) => json(`${base}/play`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ token, ...action }) }),
     reads: () => ({ id: code, backend }),
     close: () => undefined,

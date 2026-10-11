@@ -66,7 +66,12 @@ export type HostAction =
 export type PlayerAction =
   | { action: 'price'; markup: number }
   | { action: 'rate'; share: number }
-  | { action: 'unit'; unit_index: number; down: boolean };
+  | { action: 'unit'; unit_index: number; down: boolean }
+  | { action: 'block'; partner: number; direction: 'sell' | 'buy'; blocked: boolean };
+
+/** One plant a site trades with, and whether its owner has cut it off. */
+export interface RoomPartner { site: number; name: string; materials: string[]; blocked: boolean }
+export interface RoomPartners { buyers: RoomPartner[]; suppliers: RoomPartner[] }
 
 /** The server's answer to a claim or a player action. */
 export interface RoomReply { ok?: boolean; error?: string }

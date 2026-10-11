@@ -123,12 +123,14 @@ export function mockRoom(code = 'MOCK'): RoomSource {
       keep();
       return { ok: true };
     },
+    partners: async () => ({ buyers: [], suppliers: [] }),
     async play(token, action) {
       await ready;
       const me = joined.find((j) => j.token === token);
       if (me === undefined || me.site === null) return { ok: false, error: 'You have no plant.' };
       if (action.action === 'price') me.markup = action.markup;
       else if (action.action === 'rate') me.share = action.share;
+      else if (action.action === 'block') return { ok: true };
       else if (id !== null && action.down) return (await backend.command(id, { type: 'unit_outage', unit_index: action.unit_index, unit: 'x', trains: 99, duration_h: 24 })) as { ok?: boolean; error?: string };
       else if (!action.down) return { ok: false, error: 'The stand-in game cannot bring a unit back: it returns by itself after a day.' };
       keep();

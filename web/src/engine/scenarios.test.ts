@@ -28,9 +28,11 @@ describe('scenariosFor', () => {
       'chlor_alkali_cell_room',
       'flex_cracker_furnaces',
       'gas_field_half_output',
+      'hurricane',
+      'water_restriction',
     ]);
     const sixsite = worldWithKeys(['GAS_FIELD', 'GAS_PLANT', 'STEAM_CRACKER']);
-    expect(scenariosFor(sixsite).map((s) => s.key)).toEqual(['steam_cracker_compressor', 'gas_field_half_output']);
+    expect(scenariosFor(sixsite).map((s) => s.key)).toEqual(['steam_cracker_compressor', 'gas_field_half_output', 'hurricane', 'water_restriction']);
   });
 
   it('offers a route closure only where that route index exists with the expected mode', () => {
@@ -58,6 +60,12 @@ describe('scenariosFor', () => {
         expect(s.command).toMatchObject({ type: 'route_break', edge: s.route.edge });
         expect(s.site).toBeNull();
         expect(s.group).toBe('routes');
+        continue;
+      }
+      if (s.group === 'network') {
+        // the whole network: no site, no route
+        expect(s.site).toBeNull();
+        expect(['hurricane', 'water_restriction']).toContain(s.command.type);
         continue;
       }
       expect(s.command.site).toBe(s.site);

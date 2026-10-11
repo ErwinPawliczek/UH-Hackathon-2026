@@ -23,7 +23,7 @@ import {
 } from './playLogic';
 import { openRoom, roomSource } from '../store/room';
 import { mockRoom, mockRoomWanted } from '../store/roomMock';
-import type { RoomInfo } from '../store/roomTypes';
+import type { RoomInfo, RoomPartner, RoomPartners } from '../store/roomTypes';
 import { mePlayer, startScoresLoop, usePlay } from './playStore';
 
 type Menu = 'leaderboard' | 'economy' | 'log' | 'how' | null;
@@ -202,6 +202,53 @@ function LobbySheet({ room }: { room: RoomInfo }) {
   );
 }
 
+/** Who my plant sells to and buys from, each with a switch to cut them off. */
+function Trading({ site }: { site: number }) {
+  const source = usePlay((s) => s.source);
+  const setBlock = usePlay((s) => s.setBlock);
+  const [partners, setPartners] = useState<RoomPartners | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  useEffect(() => {
+    if (source === null) return undefined;
+    let stop = false;
+    const load = () => source.partners(site).then((p) => { if (!stop) setPartners(p); }).catch(() => undefined);
+    load();
+    const t = setInterval(load, 5000);
+    return () => { stop = true; clearInterval(t); };
+  }, [source, site]);
+  if (partners === null || partners.buyers.length + partners.suppliers.length === 0) return null;
+  const flip = (direction: 'sell' | 'buy', p: RoomPartner) => {
+    setBusy(`${direction}${p.site}`);
+    void setBlock(p.site, direction, !p.blocked)
+      .then(() => source?.partners(site)).then((next) => { if (next) setPartners(next); })
+      .finally(() => setBusy(null));
+  };
+  const rows = (title: string, direction: 'sell' | 'buy', list: RoomPartner[]) => list.length === 0 ? null : (
+    <>
+      <div className="label mb-1 mt-3">{title}</div>
+      <ul className="divide-y divide-line">
+        {list.map((p) => (
+          <li key={p.site} className="flex min-h-[52px] items-center gap-2 py-1">
+            <span className="min-w-0 flex-1">
+              <span className={`block truncate text-sm ${p.blocked ? 'text-alarm line-through' : 'text-ink'}`}>{p.name}</span>
+              <span className="block truncate text-xs text-muted">{p.blocked ? 'cut off' : p.materials.join(', ')}</span>
+            </span>
+            <button type="button" className={`btn ${p.blocked ? '' : 'btn-danger'}`} style={TOUCH} disabled={busy !== null} onClick={() => flip(direction, p)} data-testid={`play-block-${direction}-${p.site}`}>
+              {busy === `${direction}${p.site}` ? '…' : p.blocked ? 'Resume' : direction === 'sell' ? 'Stop selling' : 'Stop buying'}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+  return (
+    <div data-testid="play-trading">
+      {rows('You sell to', 'sell', partners.buyers)}
+      {rows('You buy from', 'buy', partners.suppliers)}
+    </div>
+  );
+}
+
 function Slider({ id, label, value, min, max, step, shown, words, onChange }: {
   id: string; label: string; value: number; min: number; max: number; step: number; shown: string; words: string; onChange: (v: number) => void;
 }) {
@@ -312,6 +359,8 @@ function PlantSheet({ room, site }: { room: RoomInfo; site: number }) {
         words={rateWords(r, low)}
         onChange={(v) => { setShare(v); setRate(Math.round(v * 100) / 100); }}
       />
+
+      <Trading site={site} />
 
       <div className="label mb-1 mt-2">Units</div>
       <ul className="divide-y divide-line" data-testid="play-units">
@@ -438,6 +487,7 @@ const HOW = [
   'You run one plant. Everyone else runs theirs; the rest run themselves.',
   'Price: ask more and you earn more per tonne but sell less. Ask less and you sell more.',
   'Rate: make less and you buy less feed. Units can be taken down and brought back.',
+  'Trading: stop selling to one buyer, or stop buying from one supplier, and watch what it does to them.',
   'The host runs the clock and sets off trouble. There are two boards: most profit, and most damage to the economy.',
 ];
 
