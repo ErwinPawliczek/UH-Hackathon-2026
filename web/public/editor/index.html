@@ -154,6 +154,16 @@ select{padding:3px 6px;border:1px solid var(--line-2);border-radius:4px;backgrou
   }
 }
 
+#mapName{font-size:12px;color:var(--ink);max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#mapName .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--blue);margin-left:6px;vertical-align:1px}
+#mapsPanel{position:absolute;left:150px;top:14px;width:380px;z-index:7;max-height:calc(100% - 40px);overflow:auto}
+#mapList li{display:flex;align-items:center;gap:8px}
+#mapList img,#mapList .thumb{width:60px;height:40px;flex-shrink:0;border:1px solid var(--line);background:var(--land);display:block}
+#mapList .nm{flex:1;min-width:0}
+#mapList .nm b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#mapList .nm span{font:11px var(--f-mono);color:var(--muted)}
+#mapList .lk{border:0;background:none;padding:0;cursor:pointer;font-size:12px;color:var(--blue);text-decoration:underline dotted;text-underline-offset:2px}
+#mapList .lk.x{color:var(--alarm)}
 #toast{position:absolute;left:50%;bottom:44px;transform:translateX(-50%);background:var(--ink);color:var(--white);font-size:13px;padding:6px 12px;display:none;max-width:70%}
 </style>
 </head>
@@ -161,13 +171,17 @@ select{padding:3px 6px;border:1px solid var(--line-2);border-radius:4px;backgrou
 <header>
   <a class="mark" href="/" title="Back to the simulation"><img src="/logo.svg" alt=""><span class="wordmark">Petro<b>Grid</b></span></a>
   <span class="title">Map builder</span>
-  <button class="btn" data-tool="select" aria-pressed="true" title="Move a site, pick a line and drag its points">Select<kbd>V</kbd></button>
-  <button class="btn" data-tool="road" title="Press, drag and release to lay a road">Road<kbd>R</kbd></button>
-  <button class="btn" data-tool="river" title="Press, drag and release to lay a river lane for barges">River lane<kbd>B</kbd></button>
-  <button class="btn" data-tool="sea" title="Press, drag and release to lay a sea lane for ships">Sea lane<kbd>S</kbd></button>
-  <button class="btn" data-tool="water" title="Paint water">Water<kbd>W</kbd></button>
-  <button class="btn" data-tool="land" title="Paint land back over water">Land<kbd>E</kbd></button>
+  <button class="btn" id="maps" aria-expanded="false" title="Save this map, load another, or start a new one">Maps</button>
+  <span id="mapName" title="The map you are working on"></span>
+  <span class="sep"></span>
+  <button class="btn" data-tool="select" aria-pressed="true" title="Move a site, pick a line and drag its points (V)">Select</button>
+  <button class="btn" data-tool="road" title="Press, drag and release to lay a road (R)">Road</button>
+  <button class="btn" data-tool="river" title="Press, drag and release to lay a river lane for barges (B)">River lane</button>
+  <button class="btn" data-tool="sea" title="Press, drag and release to lay a sea lane for ships (S)">Sea lane</button>
+  <button class="btn" data-tool="water" title="Paint water (W)">Water</button>
+  <button class="btn" data-tool="land" title="Paint land back over water (E)">Land</button>
   <span class="gap"></span>
+  <button class="btn" id="play" title="Watch this map being drawn, then stand up into the simulation">Play build</button>
   <button class="btn" id="check" title="Ask the engine whether this world can be built and whether it holds for 30 days">Check</button>
   <button class="btn btn-primary" id="run" disabled title="Check the world first">Run this world</button>
   <span class="sep"></span>
@@ -180,7 +194,14 @@ select{padding:3px 6px;border:1px solid var(--line-2);border-radius:4px;backgrou
   <canvas id="cv"></canvas>
   <div id="hint"></div>
   <div id="brushBox">Brush <select id="brush"><option value="0">Small (10 km)</option><option value="1" selected>Medium (30 km)</option><option value="2">Large (50 km)</option></select></div>
-  <div id="status"></div><div id="menu"></div><div id="toast" role="status"></div>
+  <div id="status"></div><div id="menu"></div>
+  <section class="chamfer" id="mapsPanel" hidden>
+    <h2 class="label">Maps</h2>
+    <div class="row" style="flex-wrap:nowrap"><input type="text" id="saveName" maxlength="40" placeholder="Name this map" aria-label="Name to save this map under"><button class="btn btn-primary" id="saveMap">Save</button></div>
+    <ul id="mapList" style="margin-top:8px"></ul>
+    <div class="row" style="margin-top:8px"><button class="btn" id="newMap" title="The 22 sites and 9 pipelines with no roads, lanes or water">New map</button></div>
+    <p class="hint">Saved in this browser. Export keeps a copy as a file.</p>
+  </section><div id="toast" role="status"></div>
 </main>
 
 <aside>
@@ -255,6 +276,7 @@ const PIPE_COLOR = {RAW_GAS:'#79aef2',METHANE:'#79aef2',ETHANE:'#79aef2',LPG:'#7
 const NET_MODES = ['road','river','sea'], CARRY = {road:'T',river:'B',sea:'S'};
 const EDGE = 60, SNAP = 12, W_KM = 600, H_KM = 400, CELL = 10, COLS = W_KM/CELL, ROWS = H_KM/CELL;
 const KEY = 'petrogrid-layout-v2', RUN_KEY = 'petrogrid-run-custom', SEEN_KEY = 'petrogrid-editor-seen';
+const MAPS_KEY = 'petrogrid-maps-v1', NAME_KEY = 'petrogrid-map-name';
 const HINTS = {
   select:'Drag a site to move it. Click a road, lane or pipeline to pick it, then drag its points. Double-click a pipeline to add a bend. Right-click to erase or remove. Ctrl+Z undoes, Ctrl+Shift+Z redoes.',
   road:'Press, drag and release to lay one straight road. Lay them end to end for bends. Ends snap to sites, to other ends, and onto the middle of a road.',
@@ -498,7 +520,7 @@ function refresh(noEdit){if (!noEdit){tieSites(); save(); remember();} draw(); c
   li.push([lost === 0, lost === 0 ? 'Berths within reach of their lanes' : `Berths within reach of their lanes (${lost} not)`]);
   li.push([prob.dry === 0 ? true : null, prob.dry === 0 ? 'River and sea lanes drawn on water' : `${prob.dry} river or sea lane${prob.dry === 1 ? ' has' : 's have'} a point on land (allowed)`]);
   const straight = S.connections.filter(c => c.points.length < 3).length;
-  li.push([straight === 0, straight === 0 ? 'Every pipeline has a bend' : `Every pipeline has a bend (${straight} are straight)`]);
+  li.push([straight === 0 ? true : null, straight === 0 ? 'Every pipeline has a bend' : `${straight} pipeline${straight === 1 ? ' is' : 's are'} straight: double-click one to bend it`]);
   $('list').innerHTML = li.map(([ok,t]) => `<li class="${ok === null ? 'note' : ok ? 'ok' : 'no'}">${t}</li>`).join('');
   const u = []; for (const s of S.sites){const P = PRESETS[s.preset];
     const n = P.needs.filter(m => !S.sites.some(o => o.id !== s.id && PRESETS[o.preset].makes.includes(m) && canMove(m, o.id, s.id, acc)));
@@ -507,7 +529,7 @@ function refresh(noEdit){if (!noEdit){tieSites(); save(); remember();} draw(); c
     if (o.length) u.push(`<li><b>${esc(s.name)}</b> cannot ship ${o.map(word).join(', ')}</li>`);}
   $('unmet').innerHTML = u.join('') || '<li class="ok">Every need can be supplied and every product can ship.</li>';
   if (!noEdit) queueCheck();
-  showCheck();}
+  showCheck(); showName();}
 const esc = t => String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;');
 
 /* ---------- Check: ask the engine; fall back to the editor's own rules when the server has no check ---------- */
@@ -556,13 +578,55 @@ $('run').onclick = async () => {const c = await runCheck(); if (!c.ok || checked
   if (c.trial && !c.trial.pass && !confirm('This world builds but does not hold; run it anyway?')) return;
   save(); try{localStorage.setItem(RUN_KEY, '1');}catch(e){} location.href = '/';};
 $('default').onclick = () => {if (!confirm('Throw this layout away and go back to the default world?')) return;
-  try{localStorage.removeItem(KEY); localStorage.removeItem(RUN_KEY);}catch(e){} lastCheck = null; checkedText = ''; load(clone(DEFAULT), true); toast('Back to the default world.');};
+  try{localStorage.removeItem(KEY); localStorage.removeItem(RUN_KEY);}catch(e){} lastCheck = null; checkedText = ''; load(clone(DEFAULT), true); setName(DEFAULT_NAME); toast('Back to the default world.');};
+
+/* ---------- Maps: several named layouts kept in this browser ---------- */
+const DEFAULT_NAME = 'Default world';
+let mapName = DEFAULT_NAME;
+function readMaps(){try {const j = JSON.parse(localStorage.getItem(MAPS_KEY) || '{}'); return Array.isArray(j.maps) ? j.maps : [];} catch (e){return [];}}
+function writeMaps(maps){try {localStorage.setItem(MAPS_KEY, JSON.stringify({maps})); return true;} catch (e){toast('This browser has no room left to save maps: delete one, or use Export.'); return false;}}
+const savedText = name => {if (name === DEFAULT_NAME) return JSON.stringify(conform(clone(DEFAULT)).layout); const m = readMaps().find(x => x.name === name); return m ? JSON.stringify(m.layout) : null;};
+const dirty = () => JSON.stringify(S) !== savedText(mapName);
+function setName(name){mapName = name; try {localStorage.setItem(NAME_KEY, name);} catch (e){} showName();}
+function showName(){const el = $('mapName'); if (!el || !DEFAULT) return; el.innerHTML = esc(mapName) + (dirty() ? '<span class="dot" title="Changes not saved under this name (they are still kept as you work)"></span>' : '');}
+/* a tiny picture of a layout: water, then the lines, on the land grey */
+function thumb(L){const c = document.createElement('canvas'); c.width = 120; c.height = 80; const g = c.getContext('2d'), k = 120/W_KM;
+  g.fillStyle = '#f1f3f5'; g.fillRect(0,0,120,80); g.fillStyle = '#dde9f8'; for (const [a,b] of L.water) g.fillRect(a*CELL*k, b*CELL*k, CELL*k+.5, CELL*k+.5);
+  const stroke = (pts, col, w) => {g.strokeStyle = col; g.lineWidth = w; g.beginPath(); pts.forEach((p,i) => g[i ? 'lineTo' : 'moveTo'](p[0]*k, p[1]*k)); g.stroke();};
+  for (const n of L.network) stroke(n.points, n.mode === 'road' ? '#9aa0a6' : '#79aef2', 1); for (const n of L.connections) stroke(n.points, PIPE_COLOR[n.material] || '#1764d6', 1.4);
+  g.fillStyle = '#0a0a0a'; for (const s of L.sites){g.beginPath(); g.arc(s.x*k, s.y*k, 1.6, 0, 7); g.fill();}
+  try {return c.toDataURL('image/png');} catch (e){return '';}}
+const when = t => {const d = new Date(t); return isNaN(d) ? '' : d.toLocaleDateString('en-US', {month:'short', day:'numeric'}) + ', ' + d.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'});};
+function listMaps(){const maps = readMaps().sort((a,b) => (b.savedAt || 0)-(a.savedAt || 0));
+  $('saveName').value = mapName === DEFAULT_NAME ? '' : mapName;
+  $('mapList').innerHTML = `<li><span class="thumb"></span><span class="nm"><b>${DEFAULT_NAME}</b><span>built in</span></span><button class="lk" data-load="">Load</button></li>` +
+    maps.map((m,i) => `<li>${m.thumb ? `<img src="${m.thumb}" alt="">` : '<span class="thumb"></span>'}<span class="nm"><b>${esc(m.name)}</b><span>${when(m.savedAt)}</span></span><button class="lk" data-load="${i}">Load</button><button class="lk" data-rename="${i}">Rename</button><button class="lk x" data-del="${i}">Delete</button></li>`).join('');
+  const at = i => maps[+i];
+  $('mapList').querySelectorAll('[data-load]').forEach(b => b.onclick = () => {if (dirty() && !confirm('This map has changes that are not saved under a name. Load another anyway?')) return;
+    const m = b.dataset.load === '' ? null : at(b.dataset.load); load(m ? clone(m.layout) : clone(DEFAULT), true); save(); setName(m ? m.name : DEFAULT_NAME); closeMaps(); toast(`Loaded ${m ? m.name : DEFAULT_NAME}.`);});
+  $('mapList').querySelectorAll('[data-rename]').forEach(b => b.onclick = () => {const m = at(b.dataset.rename), to = (prompt('New name for this map', m.name) || '').trim().slice(0,40); if (!to || to === m.name) return;
+    if (to === DEFAULT_NAME || maps.some(x => x.name === to)){toast('There is already a map with that name.'); return;} const was = m.name; m.name = to; if (writeMaps(maps)){if (mapName === was) setName(to); listMaps();}});
+  $('mapList').querySelectorAll('[data-del]').forEach(b => b.onclick = () => {const m = at(b.dataset.del); if (!confirm(`Delete the saved map “${m.name}”?`)) return; if (writeMaps(maps.filter(x => x !== m))){showName(); listMaps();}});}
+function saveMap(){const name = $('saveName').value.trim().slice(0,40); if (!name){toast('Give the map a name first.'); $('saveName').focus(); return;}
+  if (name === DEFAULT_NAME){toast('That name is the built-in world: pick another.'); return;}
+  const maps = readMaps(), old = maps.find(m => m.name === name); if (old && name !== mapName && !confirm(`Replace the saved map “${name}”?`)) return;
+  const entry = {name, savedAt:Date.now(), layout:clone(S), thumb:thumb(S)}; if (old) Object.assign(old, entry); else maps.push(entry);
+  if (writeMaps(maps)){setName(name); listMaps(); toast(`Saved as ${name}.`);}}
+/* a new map: the 22 sites where the default has them, the 9 pipelines straight, and nothing else */
+function newMap(){if (dirty() && !confirm('This map has changes that are not saved under a name. Start a new one anyway?')) return;
+  const L = blank(); L.sites = clone(DEFAULT.sites); const at = id => {const s = L.sites.find(x => x.id === id); return [s.x, s.y];};
+  L.connections = DEFAULT.connections.map(d => ({from:d.from, to:d.to, mode:'pipeline', material:d.material, points:[at(d.from), at(d.to)]}));
+  load(L, true); save(); setName('Untitled map'); closeMaps(); toast('A new map: the sites and pipelines, with no roads, lanes or water yet.');}
+function closeMaps(){$('mapsPanel').hidden = true; $('maps').setAttribute('aria-expanded', 'false');}
+$('maps').onclick = () => {const p = $('mapsPanel'); p.hidden = !p.hidden; $('maps').setAttribute('aria-expanded', String(!p.hidden)); if (!p.hidden) listMaps();};
+$('saveMap').onclick = saveMap; $('saveName').onkeydown = e => {if (e.key === 'Enter') saveMap();}; $('newMap').onclick = newMap;
+window.addEventListener('mousedown', e => {if (!$('mapsPanel').hidden && !$('mapsPanel').contains(e.target) && e.target !== $('maps')) closeMaps();}, true);
 
 /* ---------- file ---------- */
 $('export').onclick = () => {const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(S, null, 1)], {type:'application/json'})); a.download = 'petrogrid-layout.json'; a.click();};
 $('import').onclick = () => $('file').click();
 $('file').onchange = async e => {const f = e.target.files[0]; e.target.value = ''; if (!f) return;
-  try {load(JSON.parse(await f.text()));} catch (err){toast('That file is not a PetroGrid layout.');}};
+  try {load(JSON.parse(await f.text())); setName(f.name.replace(/\.json$/i, '').slice(0,40) || 'Imported map');} catch (err){toast('That file is not a PetroGrid layout.');}};
 
 /* ---------- start: the working layout if there is one, else the default from the app ---------- */
 (async function start(){setTool('select');
@@ -571,6 +635,7 @@ $('file').onchange = async e => {const f = e.target.files[0]; e.target.value = '
   DEFAULT_ACCESS = access(DEFAULT);
   let stored = null; try {stored = JSON.parse(localStorage.getItem(KEY) || 'null');} catch (e){}
   load(stored || clone(DEFAULT), true);
+  try {mapName = (stored && localStorage.getItem(NAME_KEY)) || DEFAULT_NAME;} catch (e){} showName();
   new ResizeObserver(fit).observe(cv.parentElement); fit();
   /* the first visit gets the whole idea in one line, a little longer */
   let seen = true; try {seen = localStorage.getItem(SEEN_KEY) === '1'; localStorage.setItem(SEEN_KEY, '1');} catch (e){}
