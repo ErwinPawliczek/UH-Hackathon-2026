@@ -20,6 +20,7 @@ add_library(crx_engine STATIC
   engine/src/sim/control.cpp
   engine/src/sim/dispatch.cpp
   engine/src/sim/events.cpp
+  engine/src/sim/genworld.cpp
   engine/src/sim/pipelines.cpp
   engine/src/sim/production.cpp
   engine/src/sim/procurement.cpp
@@ -33,7 +34,6 @@ add_library(crx_engine STATIC
   # World generation (§6) compiles into the one engine library (outline §1):
   # session-create builds the default generated world and bridges it to the
   # sim, so the two halves cannot stay separate link targets.
-  engine/src/world/worldgen/CatalogBridge.cpp
   engine/src/world/worldgen/CatalogData.cpp
   engine/src/world/worldgen/Feasibility.cpp
   engine/src/world/worldgen/Geo.cpp
@@ -52,6 +52,8 @@ target_compile_options(crx_engine PRIVATE
 
 add_executable(crx-cli engine/apps/cli/main.cpp)
 target_link_libraries(crx-cli PRIVATE crx_engine)
+target_compile_definitions(crx-cli PRIVATE
+  CRX_DATA_DIR="${CMAKE_SOURCE_DIR}/engine/data/catalog")
 
 enable_testing()
 add_executable(crx_tests engine/tests/test_core.cpp)
@@ -94,4 +96,6 @@ add_test(NAME catalog COMMAND crx_catalog_tests)
 # ---- worldgen tests (worldgen is part of crx_engine, §1) ----
 add_executable(crx_worldgen_tests engine/tests/test_worldgen.cpp)
 target_link_libraries(crx_worldgen_tests PRIVATE crx_engine doctest::doctest)
+target_compile_definitions(crx_worldgen_tests PRIVATE
+  CRX_CATALOG_DIR="${CMAKE_SOURCE_DIR}/engine/data/catalog")
 add_test(NAME worldgen COMMAND crx_worldgen_tests)

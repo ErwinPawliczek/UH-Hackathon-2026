@@ -86,6 +86,10 @@ struct WProcess {
   Range<UnitId> units;
   std::vector<TankId> tank_of;   // one per external stream of the net recipe
   uint16_t schedule = 0;         // index into schedules; demand or supply curve
+  // Fixed swing-train mix over the type's modes (§5.3 M1 policy): fraction of
+  // the swing unit's trains per mode, in the type's mode order. Sums to 1;
+  // empty for single-mode types.
+  std::vector<double> mode_share;
 };
 
 struct WUnit {
@@ -104,6 +108,17 @@ struct WPipeline {
 struct WVehicleSpec {
   std::string cls;  // vehicle class key, e.g. "TRUCK_TANK"
   NodeId home;
+};
+
+// One directed material movement, retained on the world for the constraint
+// suites and demo tooling: piped=true is a straight site-to-site pipeline,
+// otherwise a contracted vehicle flow (the fleet carries the class).
+// kOverseasSite in from/to marks the external market leg.
+struct WFlowRecord {
+  std::string material;
+  int from_site = -1, to_site = -1;
+  double t_d = 0.0;
+  bool piped = false;
 };
 
 struct WContract {
@@ -125,6 +140,7 @@ struct GeneratedWorld {
   std::vector<WUnit> units;
   std::vector<WPipeline> pipelines;
   std::vector<WVehicleSpec> fleet;
+  std::vector<WFlowRecord> flows;  // in-memory only; not serialized
   std::vector<WContract> contracts;
   std::vector<std::vector<float>> schedules;  // 24 hourly t/h values per curve
 

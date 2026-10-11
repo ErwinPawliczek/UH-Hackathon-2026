@@ -7,6 +7,8 @@
 // backs up.
 
 #include "crx/api.h"
+#include "crx/catalog.h"
+#include "world/worldgen/CatalogView.h"
 #include "world/worldgen/WorldGen.h"
 #include "world/worldgen/WorldJson.h"
 
@@ -138,10 +140,15 @@ void printHelp() {
       "crx-cli — Chain Reaction engine driver\n"
       "  version                     print engine version\n"
       "  run   [--seed N --ticks N --report N] [--event '<json>' ...]\n"
+      "        [--world default|sixsite|<preset>]\n"
       "                              step the sim, report sites, tanks and rates\n"
       "                              every N ticks (default 96); inject §5.9 events\n"
-      "                              via --event (repeatable, applied before tick 0)\n"
+      "                              via --event (repeatable, applied before tick 0);\n"
+      "                              --world picks the generated default world (a\n"
+      "                              named preset like gulf-basin) or the M1 six-site\n"
+      "                              test world\n"
       "  dump  [--seed N --ticks N --out F] [--event '<json>' ...]\n"
+      "        [--world default|sixsite|<preset>]\n"
       "                              write the binary snapshot to F\n"
       "  worldgen [--seed N --out F] generate the template world, write JSON\n");
 }
@@ -163,6 +170,7 @@ int main(int argc, char** argv) {
   uint32_t ticks = 96 * 10;
   uint32_t report = 96;
   const char* out = "snapshot.bin";
+  std::string world_sel = "default";  // generated world; "sixsite" or a preset name
   std::vector<std::string> events;  // --event JSON, repeatable, applied in order
   for (int i = 2; i + 1 < argc; i += 2) {
     if (std::strcmp(argv[i], "--seed") == 0) {
@@ -173,6 +181,8 @@ int main(int argc, char** argv) {
       report = std::strtoul(argv[i + 1], nullptr, 10);
     } else if (std::strcmp(argv[i], "--out") == 0) {
       out = argv[i + 1];
+    } else if (std::strcmp(argv[i], "--world") == 0) {
+      world_sel = argv[i + 1];
     } else if (std::strcmp(argv[i], "--event") == 0) {
       events.push_back(argv[i + 1]);
     }
@@ -180,9 +190,16 @@ int main(int argc, char** argv) {
   if (report == 0) report = ticks;  // single report at the end
 
   if (cmd == "worldgen") {
+    crx::Catalog catalog;
+    crx::worldgen::CatalogView view;
+    std::string cat_err;
+    if (!crx::loadCatalogFromDir(CRX_DATA_DIR, catalog, cat_err)) {
+      std::fprintf(stderr, "worldgen: %s\n", cat_err.c_str());
+      return 1;
+    }
+    view = crx::worldgen::makeCatalogView(catalog);
     const crx::worldgen::GenResult r =
-        crx::worldgen::generateWorld(seed, crx::worldgen::GenParams{},
-                                     crx::worldgen::referenceCatalog());
+        crx::worldgen::generateWorld(seed, crx::worldgen::GenParams{}, view);
     if (!r.ok) {
       std::fprintf(stderr, "worldgen: feasibility gate rejected seed %llu after all attempts\n",
                    static_cast<unsigned long long>(seed));
@@ -206,8 +223,15 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  const std::string cfg = "{\"seed\":" + std::to_string(seed) + "}";
-  crx_sim* sim = crx_create(cfg.c_str());
+  json cfg;
+  cfg["seed"] = seed;
+  if (world_sel == "sixsite") {
+    cfg["world"] = "sixsite";
+  } else if (world_sel != "default") {
+    cfg["preset"] = world_sel;  // a named, warm-up-validated demo seed
+  }
+  const std::string cfg_str = cfg.dump();
+  crx_sim* sim = crx_create(cfg_str.c_str());
   if (sim == nullptr) {
     std::fprintf(stderr, "crx_create failed\n");
     return 1;

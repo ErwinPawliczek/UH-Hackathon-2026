@@ -24,12 +24,6 @@ int World::findTank(const std::string& key) const {
   return -1;
 }
 
-namespace {
-
-constexpr double kOverdesign = 1.10;  // §3.2: trains sized at 110 % of nameplate
-
-}  // namespace
-
 bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, World& out,
                 std::string& error) {
   auto fail = [&](const std::string& msg) {
@@ -164,7 +158,7 @@ bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, Wo
     // (nameplate is in basis t/h, so unit capacity is basis t/h per train).
     for (uint32_t u = proc.units.begin; u < rangeEnd(proc.units); ++u) {
       const UnitSlot& slot = type.units[out.units[u].slot];
-      out.units[u].cap_per_train_t_h = kOverdesign * proc.design_rate_t_h / slot.trains;
+      out.units[u].cap_per_train_t_h = kUnitOverdesign * proc.design_rate_t_h / slot.trains;
     }
   }
 

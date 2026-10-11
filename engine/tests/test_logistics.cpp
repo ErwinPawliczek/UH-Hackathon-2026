@@ -232,7 +232,8 @@ TEST_CASE("T10: adaptation — learning, caution, and the global switch") {
   CHECK(on->state().tank[buyer].caution >= 1.0);
 
   // Learning frozen: the same month leaves the parameters at their initials.
-  auto off = makeSimConfig("{\"seed\":42,\"adaptation\":false}");
+  // Explicit sixsite: the world must match makeSim()'s for the tank index.
+  auto off = makeSimConfig("{\"seed\":42,\"world\":\"sixsite\",\"adaptation\":false}");
   off->step(30 * 24 * 4);  // 30 days
   CHECK(off->state().adaptation == false);
   CHECK(off->state().tank[buyer].lead_time_h == doctest::Approx(initialLead));

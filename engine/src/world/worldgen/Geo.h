@@ -38,6 +38,11 @@ std::vector<Vec2> wigglePolyline(Vec2 a, Vec2 b, double detourTarget, Rng& rng);
 // straight links — the vertices only give the renderer something to draw).
 std::vector<Vec2> straightPolyline(Vec2 a, Vec2 b);
 
+// Collinear overlap length between two polylines: how many km of one lie
+// along a piece of the other (either direction), within a 1 m corridor.
+// Shared endpoints and plain crossings contribute nothing.
+double overlapAlong(const std::vector<Vec2>& a, const std::vector<Vec2>& b);
+
 double roundTo(double v, double step);
 
 }  // namespace worldgen

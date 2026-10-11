@@ -1,186 +1,853 @@
 {
   "site_presets": [
-    { "key": "OIL_FIELD", "name": "Oil field", "processes": ["OIL_PRODUCTION"],
-      "tanks": [ { "material": "CRUDE", "role": "product", "cover_days": 7.0, "target_frac": 0.70 } ],
-      "bays": [1, 0, 0], "ref_nameplate_t_d": 0 },
-
-    { "key": "GAS_FIELD", "name": "Gas field", "processes": ["GAS_PRODUCTION"],
-      "tanks": [ { "material": "RAW_GAS", "role": "product", "cover_days": 7.0, "target_frac": 0.70 } ],
-      "bays": [1, 0, 0], "ref_nameplate_t_d": 0 },
-
-    { "key": "SALT_MINE", "name": "Salt mine", "processes": ["SALT_MINING"],
-      "tanks": [ { "material": "SALT", "role": "product", "cover_days": 7.0, "target_frac": 0.70 } ],
-      "bays": [1, 1, 0], "ref_nameplate_t_d": 0 },
-
-    { "key": "GAS_PLANT", "name": "Gas plant", "processes": ["NGL_RECOVERY"],
-      "tanks": [
-        { "material": "RAW_GAS", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "METHANE", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "ETHANE", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "LPG", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "NAPHTHA", "role": "product", "cover_days": 7.0, "target_frac": 0.70 }
+    {
+      "key": "OIL_FIELD",
+      "name": "Oil field",
+      "processes": [
+        "OIL_PRODUCTION"
       ],
-      "bays": [2, 1, 1], "ref_nameplate_t_d": 20000 },
-
-    { "key": "REFINERY", "name": "Refinery",
-      "processes": ["CRUDE_DISTILLATION", "REFORMING", "FCC", "DIESEL_HDT"],
       "tanks": [
-        { "material": "CRUDE", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "HEAVY_NAPHTHA", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "GASOIL", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "VGO", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "LPG", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "NAPHTHA", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "JET", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "GASOLINE", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "DIESEL", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "FUEL_OIL", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "SOLVENT", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "BENZENE", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "PROPYLENE", "role": "product", "cover_days": 7.0, "target_frac": 0.70 }
+        {
+          "material": "CRUDE",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
       ],
-      "bays": [2, 1, 1], "ref_nameplate_t_d": 27000 },
-
-    { "key": "STEAM_CRACKER_GAS", "name": "Steam cracker (ethane)", "processes": ["OLEFINS_GAS"],
+      "bays": [
+        1,
+        0,
+        0
+      ],
+      "ref_nameplate_t_d": 0
+    },
+    {
+      "key": "GAS_FIELD",
+      "name": "Gas field",
+      "processes": [
+        "GAS_PRODUCTION"
+      ],
       "tanks": [
-        { "material": "ETHANE", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "ETHYLENE", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "PROPYLENE", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "LPG", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "BENZENE", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "GASOLINE", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "FUEL_OIL", "role": "product", "cover_days": 7.0, "target_frac": 0.70 }
+        {
+          "material": "RAW_GAS",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
       ],
-      "bays": [2, 1, 1], "ref_nameplate_t_d": 5500 },
-
-    { "key": "STEAM_CRACKER_FLEX", "name": "Steam cracker (flex)", "processes": ["OLEFINS_FLEX"],
+      "bays": [
+        1,
+        0,
+        0
+      ],
+      "ref_nameplate_t_d": 0
+    },
+    {
+      "key": "SALT_MINE",
+      "name": "Salt mine",
+      "processes": [
+        "SALT_MINING"
+      ],
       "tanks": [
-        { "material": "ETHANE", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "LPG", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "NAPHTHA", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "ETHYLENE", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "PROPYLENE", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "BENZENE", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "GASOLINE", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "FUEL_OIL", "role": "product", "cover_days": 7.0, "target_frac": 0.70 }
+        {
+          "material": "SALT",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
       ],
-      "bays": [2, 1, 1], "ref_nameplate_t_d": 5500 },
-
-    { "key": "CHLOR_ALKALI", "name": "Chlor-alkali plant", "processes": ["ELECTROLYSIS"],
+      "bays": [
+        1,
+        1,
+        0
+      ],
+      "ref_nameplate_t_d": 0
+    },
+    {
+      "key": "GAS_PLANT",
+      "name": "Gas plant",
+      "processes": [
+        "NGL_RECOVERY"
+      ],
       "tanks": [
-        { "material": "SALT", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "CHLORINE", "role": "product", "cover_days": 1.0, "target_frac": 0.70 },
-        { "material": "CAUSTIC", "role": "product", "cover_days": 7.0, "target_frac": 0.70 }
+        {
+          "material": "RAW_GAS",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "METHANE",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "ETHANE",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "LPG",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "NAPHTHA",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
       ],
-      "bays": [2, 1, 0], "ref_nameplate_t_d": 1370 },
-
-    { "key": "POLYETHYLENE", "name": "Polyethylene plant", "processes": ["PE_POLYMERISATION"],
+      "bays": [
+        2,
+        1,
+        1
+      ],
+      "ref_nameplate_t_d": 20000
+    },
+    {
+      "key": "REFINERY",
+      "name": "Refinery",
+      "processes": [
+        "CRUDE_DISTILLATION",
+        "REFORMING",
+        "FCC",
+        "DIESEL_HDT"
+      ],
       "tanks": [
-        { "material": "ETHYLENE", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "PE", "role": "product", "cover_days": 7.0, "target_frac": 0.70 }
+        {
+          "material": "CRUDE",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "HEAVY_NAPHTHA",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "GASOIL",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "VGO",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "LPG",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "NAPHTHA",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "JET",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "GASOLINE",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "DIESEL",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "FUEL_OIL",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "SOLVENT",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "BENZENE",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "PROPYLENE",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
       ],
-      "bays": [2, 1, 1], "ref_nameplate_t_d": 1370 },
-
-    { "key": "POLYPROPYLENE", "name": "Polypropylene plant", "processes": ["PP_POLYMERISATION"],
+      "bays": [
+        2,
+        1,
+        1
+      ],
+      "ref_nameplate_t_d": 27000
+    },
+    {
+      "key": "STEAM_CRACKER_GAS",
+      "name": "Steam cracker (ethane)",
+      "processes": [
+        "OLEFINS_GAS"
+      ],
       "tanks": [
-        { "material": "PROPYLENE", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "PP", "role": "product", "cover_days": 7.0, "target_frac": 0.70 }
+        {
+          "material": "ETHANE",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "ETHYLENE",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "PROPYLENE",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "LPG",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "BENZENE",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "GASOLINE",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "FUEL_OIL",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
       ],
-      "bays": [2, 1, 1], "ref_nameplate_t_d": 820 },
-
-    { "key": "VINYLS", "name": "Vinyls plant", "processes": ["VCM", "PVC"],
+      "bays": [
+        2,
+        1,
+        1
+      ],
+      "ref_nameplate_t_d": 5500
+    },
+    {
+      "key": "STEAM_CRACKER_FLEX",
+      "name": "Steam cracker (flex)",
+      "processes": [
+        "OLEFINS_FLEX"
+      ],
       "tanks": [
-        { "material": "ETHYLENE", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "CHLORINE", "role": "feed", "cover_days": 1.0, "target_frac": 0.70 },
-        { "material": "VCM", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "PVC", "role": "product", "cover_days": 7.0, "target_frac": 0.70 }
+        {
+          "material": "ETHANE",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "LPG",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "NAPHTHA",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "ETHYLENE",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "PROPYLENE",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "BENZENE",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "GASOLINE",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "FUEL_OIL",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
       ],
-      "bays": [2, 1, 0], "ref_nameplate_t_d": 1640 },
-
-    { "key": "STYRENICS", "name": "Styrenics plant", "processes": ["STYRENE", "PS"],
+      "bays": [
+        2,
+        1,
+        1
+      ],
+      "ref_nameplate_t_d": 5500
+    },
+    {
+      "key": "CHLOR_ALKALI",
+      "name": "Chlor-alkali plant",
+      "processes": [
+        "ELECTROLYSIS"
+      ],
       "tanks": [
-        { "material": "BENZENE", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "ETHYLENE", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "STYRENE", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "SOLVENT", "role": "product", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "PS", "role": "product", "cover_days": 7.0, "target_frac": 0.70 }
+        {
+          "material": "SALT",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "CHLORINE",
+          "role": "product",
+          "cover_days": 1.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "CAUSTIC",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
       ],
-      "bays": [2, 1, 1], "ref_nameplate_t_d": 550 },
-
-    { "key": "FUEL_DEPOT", "name": "City fuel depot",
-      "processes": ["FUEL_DEPOT_GASOLINE", "FUEL_DEPOT_DIESEL", "FUEL_DEPOT_JET", "FUEL_DEPOT_LPG"],
+      "bays": [
+        2,
+        1,
+        0
+      ],
+      "ref_nameplate_t_d": 1370
+    },
+    {
+      "key": "POLYETHYLENE",
+      "name": "Polyethylene plant",
+      "processes": [
+        "PE_POLYMERISATION"
+      ],
       "tanks": [
-        { "material": "GASOLINE", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "DIESEL", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "JET", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "LPG", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 }
+        {
+          "material": "ETHYLENE",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "PE",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
       ],
-      "bays": [2, 0, 0], "ref_nameplate_t_d": 0 },
-
-    { "key": "GAS_GRID", "name": "City gas grid", "processes": ["GAS_GRID_METHANE"],
-      "tanks": [ { "material": "METHANE", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 } ],
-      "bays": [0, 0, 0], "ref_nameplate_t_d": 0 },
-
-    { "key": "PACKAGING", "name": "Packaging industry",
-      "processes": ["PACKAGING_PE", "PACKAGING_PP"],
+      "bays": [
+        2,
+        1,
+        1
+      ],
+      "ref_nameplate_t_d": 1370
+    },
+    {
+      "key": "POLYPROPYLENE",
+      "name": "Polypropylene plant",
+      "processes": [
+        "PP_POLYMERISATION"
+      ],
       "tanks": [
-        { "material": "PE", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "PP", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 }
+        {
+          "material": "PROPYLENE",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "PP",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
       ],
-      "bays": [2, 0, 0], "ref_nameplate_t_d": 0 },
-
-    { "key": "CONSTRUCTION", "name": "Construction industry",
-      "processes": ["CONSTRUCTION_PVC"],
-      "tanks": [ { "material": "PVC", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 } ],
-      "bays": [2, 0, 0], "ref_nameplate_t_d": 0 },
-
-    { "key": "CONSUMER_GOODS", "name": "Consumer goods industry",
-      "processes": ["CONSUMER_GOODS_PS", "CONSUMER_GOODS_PP"],
+      "bays": [
+        2,
+        1,
+        1
+      ],
+      "ref_nameplate_t_d": 820
+    },
+    {
+      "key": "VINYLS",
+      "name": "Vinyls plant",
+      "processes": [
+        "VCM",
+        "PVC"
+      ],
       "tanks": [
-        { "material": "PS", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "PP", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 }
+        {
+          "material": "ETHYLENE",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "CHLORINE",
+          "role": "feed",
+          "cover_days": 1.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "VCM",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "PVC",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
       ],
-      "bays": [2, 0, 0], "ref_nameplate_t_d": 0 },
-
-    { "key": "PAINTS_COATINGS", "name": "Paints and coatings industry",
-      "processes": ["PAINTS_SOLVENT", "PAINTS_STYRENE"],
+      "bays": [
+        2,
+        1,
+        0
+      ],
+      "ref_nameplate_t_d": 1640
+    },
+    {
+      "key": "STYRENICS",
+      "name": "Styrenics plant",
+      "processes": [
+        "STYRENE",
+        "PS"
+      ],
       "tanks": [
-        { "material": "SOLVENT", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "STYRENE", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 }
+        {
+          "material": "BENZENE",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "ETHYLENE",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "STYRENE",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "SOLVENT",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "PS",
+          "role": "product",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
       ],
-      "bays": [2, 0, 0], "ref_nameplate_t_d": 0 },
-
-    { "key": "PROCESS_INDUSTRIES", "name": "Process industries",
-      "processes": ["PROCESS_INDUSTRIES_CAUSTIC"],
-      "tanks": [ { "material": "CAUSTIC", "role": "feed", "cover_days": 7.0, "target_frac": 0.70 } ],
-      "bays": [2, 0, 0], "ref_nameplate_t_d": 0 },
-
-    { "key": "PORT_TERMINAL", "name": "Port terminal", "processes": ["PORT_BUNKER_FUEL_OIL",
-                    "PORT_EXPORT_LPG", "PORT_EXPORT_NAPHTHA", "PORT_EXPORT_GASOLINE", "PORT_EXPORT_JET", "PORT_EXPORT_DIESEL", "PORT_EXPORT_PROPYLENE", "PORT_EXPORT_BENZENE", "PORT_EXPORT_SOLVENT", "PORT_EXPORT_STYRENE", "PORT_EXPORT_CAUSTIC", "PORT_EXPORT_PE", "PORT_EXPORT_PP", "PORT_EXPORT_PVC", "PORT_EXPORT_PS"],
+      "bays": [
+        2,
+        1,
+        1
+      ],
+      "ref_nameplate_t_d": 550
+    },
+    {
+      "key": "FUEL_DEPOT",
+      "name": "City fuel depot",
+      "processes": [
+        "FUEL_DEPOT_GASOLINE",
+        "FUEL_DEPOT_DIESEL",
+        "FUEL_DEPOT_JET",
+        "FUEL_DEPOT_LPG"
+      ],
       "tanks": [
-        { "material": "CRUDE", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "RAW_GAS", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "SALT", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "METHANE", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "ETHANE", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "LPG", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "NAPHTHA", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "GASOLINE", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "JET", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "DIESEL", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "FUEL_OIL", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "SOLVENT", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "BENZENE", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "ETHYLENE", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "PROPYLENE", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "CHLORINE", "role": "both", "cover_days": 1.0, "target_frac": 0.70 },
-        { "material": "CAUSTIC", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "STYRENE", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "PE", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "PP", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "PVC", "role": "both", "cover_days": 7.0, "target_frac": 0.70 },
-        { "material": "PS", "role": "both", "cover_days": 7.0, "target_frac": 0.70 }
+        {
+          "material": "GASOLINE",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "DIESEL",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "JET",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "LPG",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
       ],
-      "bays": [2, 0, 2], "ref_nameplate_t_d": 0 }
+      "bays": [
+        2,
+        2,
+        0
+      ],
+      "ref_nameplate_t_d": 0
+    },
+    {
+      "key": "GAS_GRID",
+      "name": "City gas grid",
+      "processes": [
+        "GAS_GRID_METHANE"
+      ],
+      "tanks": [
+        {
+          "material": "METHANE",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
+      ],
+      "bays": [
+        0,
+        0,
+        0
+      ],
+      "ref_nameplate_t_d": 0
+    },
+    {
+      "key": "PACKAGING",
+      "name": "Packaging industry",
+      "processes": [
+        "PACKAGING_PE",
+        "PACKAGING_PP"
+      ],
+      "tanks": [
+        {
+          "material": "PE",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "PP",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
+      ],
+      "bays": [
+        2,
+        2,
+        0
+      ],
+      "ref_nameplate_t_d": 0
+    },
+    {
+      "key": "CONSTRUCTION",
+      "name": "Construction industry",
+      "processes": [
+        "CONSTRUCTION_PVC"
+      ],
+      "tanks": [
+        {
+          "material": "PVC",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
+      ],
+      "bays": [
+        2,
+        2,
+        0
+      ],
+      "ref_nameplate_t_d": 0
+    },
+    {
+      "key": "CONSUMER_GOODS",
+      "name": "Consumer goods industry",
+      "processes": [
+        "CONSUMER_GOODS_PS",
+        "CONSUMER_GOODS_PP"
+      ],
+      "tanks": [
+        {
+          "material": "PS",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "PP",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
+      ],
+      "bays": [
+        2,
+        2,
+        0
+      ],
+      "ref_nameplate_t_d": 0
+    },
+    {
+      "key": "PAINTS_COATINGS",
+      "name": "Paints and coatings industry",
+      "processes": [
+        "PAINTS_SOLVENT",
+        "PAINTS_STYRENE"
+      ],
+      "tanks": [
+        {
+          "material": "SOLVENT",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "STYRENE",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
+      ],
+      "bays": [
+        2,
+        2,
+        0
+      ],
+      "ref_nameplate_t_d": 0
+    },
+    {
+      "key": "PROCESS_INDUSTRIES",
+      "name": "Process industries",
+      "processes": [
+        "PROCESS_INDUSTRIES_CAUSTIC"
+      ],
+      "tanks": [
+        {
+          "material": "CAUSTIC",
+          "role": "feed",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
+      ],
+      "bays": [
+        2,
+        2,
+        0
+      ],
+      "ref_nameplate_t_d": 0
+    },
+    {
+      "key": "PORT_TERMINAL",
+      "name": "Port terminal",
+      "processes": [
+        "PORT_BUNKER_FUEL_OIL",
+        "PORT_EXPORT_LPG",
+        "PORT_EXPORT_NAPHTHA",
+        "PORT_EXPORT_GASOLINE",
+        "PORT_EXPORT_JET",
+        "PORT_EXPORT_DIESEL",
+        "PORT_EXPORT_PROPYLENE",
+        "PORT_EXPORT_ETHANE",
+        "PORT_EXPORT_ETHYLENE",
+        "PORT_EXPORT_BENZENE",
+        "PORT_EXPORT_SOLVENT",
+        "PORT_EXPORT_STYRENE",
+        "PORT_EXPORT_CAUSTIC",
+        "PORT_EXPORT_PE",
+        "PORT_EXPORT_PP",
+        "PORT_EXPORT_PVC",
+        "PORT_EXPORT_PS"
+      ],
+      "tanks": [
+        {
+          "material": "CRUDE",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "RAW_GAS",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "SALT",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "METHANE",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "ETHANE",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "LPG",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "NAPHTHA",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "GASOLINE",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "JET",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "DIESEL",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "FUEL_OIL",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "SOLVENT",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "BENZENE",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "ETHYLENE",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "PROPYLENE",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "CHLORINE",
+          "role": "both",
+          "cover_days": 1.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "CAUSTIC",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "STYRENE",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "PE",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "PP",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "PVC",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        },
+        {
+          "material": "PS",
+          "role": "both",
+          "cover_days": 7.0,
+          "target_frac": 0.7
+        }
+      ],
+      "bays": [
+        2,
+        0,
+        2
+      ],
+      "ref_nameplate_t_d": 0
+    }
   ]
 }

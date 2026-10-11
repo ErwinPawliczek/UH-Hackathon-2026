@@ -140,19 +140,23 @@ Features makeFeatures(const GenParams& params, Rng& rng, const Frame& frame) {
   ft.river = wigglePolyline(start, mouth, 1.25, rng);
 
   // -- Cities: rank-size populations, rejection-sampled with spacing and
-  // clearance from basins and the river (§6.2).
+  // clearance from basins (§6.2). Cities sit in a band 10–14 km off the river
+  // — close enough that their fuel depots (≤3 km out) earn river berths and
+  // receive liquids by barge, far enough to keep the bank clear.
   const int n = std::max(1, params.n_cities);
   double rank_sum = 0.0;
   for (int i = 1; i <= n; ++i) rank_sum += 1.0 / std::pow(static_cast<double>(i), params.rank_size_exponent);
 
   const double spacing0 = params.city_min_spacing_km;
   double spacing = spacing0;
+  double band_lo = 10.0, band_hi = 14.0;
   int failures = 0;
   ft.cities.reserve(static_cast<size_t>(n));
   while (static_cast<int>(ft.cities.size()) < n && failures < 20000) {
     const Vec2 p = {rng.uniform(50.0, frame.w_km - 50.0), rng.uniform(50.0, frame.h_km - 50.0)};
     ++failures;
-    bool ok = frame.onLand(p, 45.0) && polylineMinDist(p, ft.river) >= 12.0 &&
+    const double river_d = polylineMinDist(p, ft.river);
+    bool ok = frame.onLand(p, 45.0) && river_d >= band_lo && river_d <= band_hi &&
               distKM(p, ft.oil_basin) >= 45.0 && distKM(p, ft.gas_basin) >= 45.0 &&
               distKM(p, ft.salt_deposit) >= 45.0;
     if (ok) {
@@ -174,6 +178,9 @@ Features makeFeatures(const GenParams& params, Rng& rng, const Frame& frame) {
     } else if (failures % 256 == 0) {
       spacing *= 0.96;  // deterministic relaxation
       if (spacing < 40.0) spacing = 40.0;
+      if (band_hi < 15.0) band_hi += 1.0;  // widen under pressure, but cities
+                                           // must keep depots inside the 18 km
+                                           // river-berth reach (10-15 + 3 km)
     }
   }
   return ft;
@@ -217,21 +224,40 @@ std::vector<SiteSlot> placeSites(const GenParams& params, Rng& rng, const Featur
     slots.push_back(s);
   };
 
-  // Fixed count skeleton (§6.3), with three seeded count bits — gas plants,
-  // PE plants, styrenics — so seeds vary plant counts in 27–30 sites total.
-  const int gas_plant_count = 2 + static_cast<int>(rng.below(2));
-  const int pe_count = 1 + static_cast<int>(rng.below(2));
-  const int sty_count = 1 + static_cast<int>(rng.below(2));
+  // Fixed count skeleton (§6.3), with two seeded count bits — PE plants and
+  // styrenics — so seeds vary plant counts in 29–30 sites total. Gas plants
+  // stay at two: they are the only ETHANE/METHANE/LPG source family, and the
+  // two-supplier rule needs both. Single PE/styrenics plants still leave two
+  // suppliers for their pellets/styrene because stocked port-export tanks
+  // count as the alternate supplier (§6.5); chlorine is the one deliberate
+  // exception (single chlor-alkali plant, no export sink). The combined bit
+  // is capped at 3 so the largest worlds stay within the 25–30 budget.
+  const int gas_plant_count = 2;
+  int pe_count = 1 + static_cast<int>(rng.below(2));
+  int sty_count = 1 + static_cast<int>(rng.below(2));
+  if (pe_count + sty_count > 3) --sty_count;
 
   // One port on the coast; the country's single export/import terminal (§3.3).
   const Vec2 port_a = frame.coastPoint(ft.port_u[0]);
   push("PORT_TERMINAL", std::string("Port ") + kPortNames[0], port_a);
 
-  // Refineries hugging the coast (marine berths, §6.3), crackers just inland.
+  // Refinery A hugs the coast (marine berths, sea lanes); Refinery B sits in
+  // the river band like the cities and gas plants — its gasoline/diesel/jet
+  // legs to the city fuel depots then barge the river, the inland liquid lane
+  // every seed must show (§6.5). Coastal fallback keeps placement total.
   const Vec2 ref_a = inland(frame, port_a, 3.0);
   push("REFINERY", "Refinery A", ref_a);
   const double ref_b_u = std::clamp(ft.port_u[0] + (ft.port_u[0] < 0.5 ? 0.06 : -0.06), 0.05, 0.95);
-  const Vec2 ref_b = inland(frame, frame.coastPoint(ref_b_u), 3.0);
+  Vec2 ref_b = inland(frame, frame.coastPoint(ref_b_u), 3.0);
+  for (int attempt = 0; attempt < 256; ++attempt) {
+    const Vec2 p = {rng.uniform(50.0, frame.w_km - 50.0), rng.uniform(50.0, frame.h_km - 50.0)};
+    const double river_d = polylineMinDist(p, ft.river);
+    if (river_d < 10.0 || river_d > 16.0) continue;
+    if (tooClose(p, 14.0)) continue;
+    if (distKM(p, port_a) < 40.0) continue;
+    ref_b = p;
+    break;
+  }
   push("REFINERY", "Refinery B", ref_b);
   const Vec2 crk_a = inland(frame, ref_a, 6.0);
   const Vec2 crk_b = inland(frame, ref_b, 6.0);
@@ -246,10 +272,23 @@ std::vector<SiteSlot> placeSites(const GenParams& params, Rng& rng, const Featur
   push("SALT_MINE", "Salt mine A", near(ft.salt_deposit, 4.0, 16.0, 8.0));
   push("SALT_MINE", "Salt mine B", near(ft.salt_deposit, 4.0, 16.0, 8.0));
 
-  // Gas plants at the gas basin, clear of the wells.
-  for (int i = 0; i < gas_plant_count; ++i)
-    push("GAS_PLANT", std::string("Gas plant ") + suffix(i),
-         near(ft.gas_basin, 6.0, 20.0, 12.0));
+  // Gas plants sit in the river band like the cities (10-16 km off the
+  // river): their LPG legs to city fuel depots then barge the river — the
+  // inland liquid lane every seed must show (§6.5). The gate's no-barge
+  // constraint rejects a seed whose layout still misses the river on both
+  // ends of a liquid flow.
+  for (int i = 0; i < gas_plant_count; ++i) {
+    Vec2 p{0, 0};
+    for (int attempt = 0; attempt < 256; ++attempt) {
+      p = {rng.uniform(50.0, frame.w_km - 50.0), rng.uniform(50.0, frame.h_km - 50.0)};
+      const double river_d = polylineMinDist(p, ft.river);
+      if (river_d < 10.0 || river_d > 16.0) continue;
+      if (tooClose(p, 12.0)) continue;
+      if (distKM(p, ft.oil_basin) < 30.0 || distKM(p, ft.gas_basin) < 30.0) continue;
+      break;
+    }
+    push("GAS_PLANT", std::string("Gas plant ") + suffix(i), p);
+  }
 
   // Derivative plants within 25 km of a cracker (§6.3), alternating between
   // the two crackers so no single cluster carries everything.

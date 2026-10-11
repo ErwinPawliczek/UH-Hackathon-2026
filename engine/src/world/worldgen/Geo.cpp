@@ -82,18 +82,15 @@ std::vector<Vec2> wigglePolyline(Vec2 a, Vec2 b, double detourTarget, Rng& rng) 
     return arc > 0.0 ? arc / span : 1.0;
   };
 
-  std::vector<Vec2> pts = build(1.0);
-  double detour = detourOf(pts);
-  if (detour > 1.0) {
-    double scale = (detourTarget - 1.0) / (detour - 1.0);
-    pts = build(scale);
-    detour = detourOf(pts);
-    if (detour > 1.0) {
-      scale *= (detourTarget - 1.0) / (detour - 1.0);
-      pts = build(scale);
-    }
+  // detour(scale) is monotone in the wave scale; bisect it onto the target.
+  // A closed-form linear solve is ill-conditioned for short spans, where the
+  // base detour is ~1.0 and (target-1)/(detour-1) explodes the amplitude.
+  double lo = 0.0, hi = 4.0;
+  for (int it = 0; it < 12; ++it) {
+    const double mid = 0.5 * (lo + hi);
+    if (detourOf(build(mid)) < detourTarget) lo = mid; else hi = mid;
   }
-  return pts;
+  return build(lo);
 }
 
 std::vector<Vec2> straightPolyline(Vec2 a, Vec2 b) {
@@ -106,6 +103,35 @@ std::vector<Vec2> straightPolyline(Vec2 a, Vec2 b) {
                                    roundTo(a.y + (b.y - a.y) * t, 0.1)};
   }
   return pts;
+}
+
+// Collinear overlap length between two polylines: how many km of one lie
+// along a piece of the other (either direction), within a 1 m corridor.
+// Shared endpoints and plain crossings contribute nothing.
+double overlapAlong(const std::vector<Vec2>& a, const std::vector<Vec2>& b) {
+  double total = 0.0;
+  for (size_t i = 1; i < a.size(); ++i) {
+    const Vec2 p = a[i - 1], q = a[i];
+    const double qx = q.x - p.x, qy = q.y - p.y;
+    const double ql = std::hypot(qx, qy);
+    if (ql < 1e-9) continue;
+    for (size_t j = 1; j < b.size(); ++j) {
+      const Vec2 u = b[j - 1], v = b[j];
+      const double ux = v.x - u.x, uy = v.y - u.y;
+      const double ul = std::hypot(ux, uy);
+      if (ul < 1e-9) continue;
+      const double cross = qx * uy - qy * ux;
+      if (std::abs(cross) > 1e-3 * ql * ul) continue;  // not collinear
+      const double off_u = std::abs(qx * (u.y - p.y) - qy * (u.x - p.x)) / ql;
+      if (off_u > 1.0) continue;  // parallel but in a different corridor
+      const double pu = ((u.x - p.x) * qx + (u.y - p.y) * qy) / ql;
+      const double pv = pu + (qx * ux + qy * uy) / ql;
+      const double lo = std::max(0.0, std::min(pu, pv));
+      const double hi = std::min(ql, std::max(pu, pv));
+      if (hi > lo) total += hi - lo;
+    }
+  }
+  return total;
 }
 
 }  // namespace worldgen

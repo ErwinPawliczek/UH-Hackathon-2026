@@ -23,6 +23,20 @@ struct GenResult {
   bool ok = false;
 };
 
+// Named seed presets for demos (§6.7): seeds validated through the warm-up
+// gate to steady state, exposed at session creation by name. Same seed always
+// yields a byte-identical world.
+struct NamedWorld {
+  const char* name;        // preset name, e.g. "gulf-basin"
+  uint64_t seed;           // generator seed that builds the world
+  const char* description; // one-line demo note
+};
+
+// The curated list, in presentation order.
+const std::vector<NamedWorld>& namedWorlds();
+// Case-sensitive lookup by name; nullptr when unknown.
+const NamedWorld* findNamedWorld(const std::string& name);
+
 // Pluggable warm-up steady-state check (§6.7): the sim systems that would
 // verify a warm-up settle land separately; the hook stays empty for now.
 using WarmupHook = std::vector<std::string> (*)(const GeneratedWorld&, const CatalogView&);

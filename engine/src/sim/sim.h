@@ -18,6 +18,7 @@
 #include "sim/adaptation.h"
 #include "sim/dispatch.h"
 #include "sim/events.h"
+#include "sim/genworld.h"
 #include "sim/pipelines.h"
 #include "sim/production.h"
 #include "sim/procurement.h"
@@ -26,6 +27,7 @@
 #include "sim/signals.h"
 #include "sim/state.h"
 #include "sim/world.h"
+#include "world/worldgen/WorldGen.h"
 
 #include <memory>
 #include <string>
@@ -39,12 +41,27 @@ constexpr uint32_t kKpiCount = 8;  // §5.10 KPI vector
 class Sim {
  public:
   // Builds the six-site world (sixsite.h) around the catalog and initialises
-  // state. Returns nullptr with `error` set on failure.
+  // state. The explicit-compatibility path: the default session world is
+  // generated (createGenerated). Returns nullptr with `error` set on failure.
   static std::unique_ptr<Sim> create(uint64_t seed, std::string& error);
 
-  // Config JSON: {"seed": N} (six-site world) — the §7.1 contract also names
-  // {"gen":{..}} (M3 worldgen) and {"world":{..}} (later); unknown keys are
-  // rejected so typos do not silently default.
+  // Builds the generated world (worldgen §6) for a seed — the default
+  // session world. Validates the seed through the real-Sim warm-up gate
+  // (28 simulated days to steady state) before accepting it.
+  static std::unique_ptr<Sim> createGenerated(uint64_t seed, std::string& error);
+  static std::unique_ptr<Sim> createGenerated(uint64_t seed, const worldgen::GenParams& params,
+                                              std::string& error);
+
+  // Wraps an already-built World and initialises state. Used by both create
+  // paths and by the warm-up gate (which bridges a generated world itself).
+  static std::unique_ptr<Sim> fromWorld(std::shared_ptr<const World> world, std::string& error);
+
+  // Config JSON: {"seed": N, "adaptation": b, "world": "default"|"sixsite",
+  // "preset": "<named world>", "gen": {…overrides…}}. Seed-only configs build
+  // the generated world (the §6 default); "world":"sixsite" keeps the M1
+  // test world reachable; "preset" selects a named, warm-up-validated seed;
+  // "gen" overrides generation parameters. Unknown keys are rejected so
+  // typos do not silently default.
   static std::unique_ptr<Sim> createFromConfig(const char* config_json, std::string& error);
 
   // Deep copy: World shared, State and Recorder copied. Forks the run.

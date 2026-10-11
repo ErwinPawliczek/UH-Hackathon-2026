@@ -17,6 +17,12 @@ namespace worldgen {
 std::vector<std::string> checkFeasibility(const GeneratedWorld& world,
                                           const CatalogView& catalog);
 
+// The M3 default-world structural guarantees (preset presence, supplier
+// counts, outlets, route non-overlap, tank cover, mode usage), checked
+// separately so the doctest suites can assert each family's error strings.
+std::vector<std::string> checkConstraints(const GeneratedWorld& world,
+                                          const CatalogView& catalog);
+
 }  // namespace worldgen
 }  // namespace crx
 

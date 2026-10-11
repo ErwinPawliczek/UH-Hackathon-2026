@@ -186,6 +186,26 @@
     ]
   },
   {
+    "key": "PORT_EXPORT_ETHANE", "name": "Port export (ethane)", "basis": "ETHANE",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PT-EXP-ETHANE", "name": "Export draw", "glyph": "jetty", "trains": 1,
+        "recipes": [ { "in": { "ETHANE": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_ETHYLENE", "name": "Port export (ethylene)", "basis": "ETHYLENE",
+    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
+    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "units": [
+      { "key": "PT-EXP-ETHYLENE", "name": "Export draw", "glyph": "jetty", "trains": 1,
+        "recipes": [ { "in": { "ETHYLENE": 1.000 }, "out": {},
+                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+    ]
+  },
+  {
     "key": "PORT_EXPORT_BENZENE", "name": "Port export (benzene)", "basis": "BENZENE",
     "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
     "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,

@@ -140,11 +140,11 @@ CatalogView makeCatalogView(const crx::Catalog& catalog) {
     for (const TankRule& t : sp.tanks) {
       const std::string key = catalog.materials[t.m.v].key;
       info.cover_by_material.emplace(key, t.cover_days);
-      if (t.role == TankRole::Feed || t.role == TankRole::Both)
+      if (t.role == crx::TankRole::Feed || t.role == crx::TankRole::Both)
         info.cover_feed_d = std::max(info.cover_feed_d, t.cover_days);
-      if (t.role == TankRole::Product || t.role == TankRole::Both)
+      if (t.role == crx::TankRole::Product || t.role == crx::TankRole::Both)
         info.cover_product_d = std::max(info.cover_product_d, t.cover_days);
-      if (t.role == TankRole::Internal)
+      if (t.role == crx::TankRole::Internal)
         info.cover_internal_d = std::max(info.cover_internal_d, t.cover_days);
     }
     view.presets.push_back(std::move(info));

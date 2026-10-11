@@ -16,11 +16,37 @@ namespace sim {
 std::unique_ptr<Sim> Sim::create(uint64_t seed, std::string& error) {
   auto world = std::make_shared<World>();
   if (!buildSixSiteWorld(seed, *world, error)) return nullptr;
+  world->seed = seed;
+  return fromWorld(world, error);
+}
 
+std::unique_ptr<Sim> Sim::createGenerated(uint64_t seed, std::string& error) {
+  return createGenerated(seed, worldgen::GenParams{}, error);
+}
+
+std::unique_ptr<Sim> Sim::createGenerated(uint64_t seed, const worldgen::GenParams& params,
+                                          std::string& error) {
+  crx::Catalog catalog;
+  if (!loadCatalogFromDir(CRX_DATA_DIR, catalog, error)) return nullptr;
+  const crx::worldgen::CatalogView view = crx::worldgen::makeCatalogView(catalog);
+  const crx::worldgen::GenResult r =
+      crx::worldgen::generateWorld(seed, params, view, &realSimWarmup);
+  if (!r.ok) {
+    error = "world generation rejected seed " + std::to_string(seed) + ":";
+    for (const std::string& e : r.gate_errors) error += "\n  - " + e;
+    return nullptr;
+  }
+  auto world = std::make_shared<World>();
+  if (!buildGeneratedWorld(catalog, r.world, *world, error)) return nullptr;
+  world->seed = r.world.seed;
+  return fromWorld(world, error);
+}
+
+std::unique_ptr<Sim> Sim::fromWorld(std::shared_ptr<const World> world, std::string& error) {
+  (void)error;  // cannot fail: the world is already built and validated
   auto sim = std::unique_ptr<Sim>(new Sim());
-  world->seed = seed;  // stamped through the non-const pointer before the move
   sim->world_ = std::move(world);
-  sim->state_.rng = Rng(seed);
+  sim->state_.rng = Rng(sim->world_->seed);
 
   // Initial state (§4.4): tanks at their target level, all rates cold at
   // zero — the run ramps up to design through the normal control path, so
@@ -67,19 +93,21 @@ std::unique_ptr<Sim> Sim::create(uint64_t seed, std::string& error) {
 std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string& error) {
   uint64_t seed = 42;  // §7.1: NULL or missing seed = defaults
   bool adaptation_override = true;
+  std::string world_kind = "default";  // generated world unless told otherwise
+  std::string preset;
+  bool have_gen = false;
+  worldgen::GenParams params;
   if (config_json != nullptr && config_json[0] != '\0') {
     try {
       const json cfg = json::parse(config_json);
-      if (cfg.contains("seed")) {
-        if (!cfg.at("seed").is_number_unsigned()) {
-          error = "config seed must be a non-negative integer";
-          return nullptr;
-        }
-        cfg.at("seed").get_to(seed);
-      }
       for (auto it = cfg.begin(); it != cfg.end(); ++it) {
-        if (it.key() == "seed") continue;
-        if (it.key() == "adaptation") {
+        if (it.key() == "seed") {
+          if (!it.value().is_number_unsigned()) {
+            error = "config seed must be a non-negative integer";
+            return nullptr;
+          }
+          it.value().get_to(seed);
+        } else if (it.key() == "adaptation") {
           // §5.8 global switch: false gives comparison runs with all three
           // learned parameters frozen at their world initials.
           if (!it.value().is_boolean()) {
@@ -87,20 +115,108 @@ std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string&
             return nullptr;
           }
           adaptation_override = it.value().get<bool>();
-          continue;
+        } else if (it.key() == "world") {
+          if (!it.value().is_string()) {
+            error = "config world must be a string";
+            return nullptr;
+          }
+          world_kind = it.value().get<std::string>();
+          if (world_kind != "default" && world_kind != "sixsite") {
+            error = "config world must be \"default\" (generated) or \"sixsite\"";
+            return nullptr;
+          }
+        } else if (it.key() == "preset") {
+          if (!it.value().is_string()) {
+            error = "config preset must be a string";
+            return nullptr;
+          }
+          preset = it.value().get<std::string>();
+          const worldgen::NamedWorld* nw = worldgen::findNamedWorld(preset);
+          if (nw == nullptr) {
+            error = "unknown world preset \"" + preset + "\"";
+            return nullptr;
+          }
+          seed = nw->seed;  // a named preset pins its validated seed
+        } else if (it.key() == "gen") {
+          if (!it.value().is_object()) {
+            error = "config gen must be an object";
+            return nullptr;
+          }
+          have_gen = true;
+          for (auto g = it.value().begin(); g != it.value().end(); ++g) {
+            bool ok = true;
+            const std::string& k = g.key();
+            const json& v = g.value();
+            if (k == "n_cities" || k == "max_gate_attempts") {
+              if (v.is_number_integer())
+                ok = v.get<int>() >= 1;
+              else
+                ok = false;
+              if (ok && k == "n_cities") params.n_cities = v.get<int>();
+              if (ok && k == "max_gate_attempts") params.max_gate_attempts = v.get<int>();
+            } else if (k == "map_w_km") {
+              ok = v.is_number() && v.get<double>() > 0;
+              if (ok) params.map_w_km = v.get<double>();
+            } else if (k == "map_h_km") {
+              ok = v.is_number() && v.get<double>() > 0;
+              if (ok) params.map_h_km = v.get<double>();
+            } else if (k == "demand_scale") {
+              ok = v.is_number() && v.get<double>() > 0;
+              if (ok) params.demand_scale = v.get<double>();
+            } else if (k == "target_utilisation") {
+              ok = v.is_number() && v.get<double>() > 0 && v.get<double>() <= 1;
+              if (ok) params.target_utilisation = v.get<double>();
+            } else if (k == "cover_multiplier") {
+              ok = v.is_number() && v.get<double>() > 0;
+              if (ok) params.cover_multiplier = v.get<double>();
+            } else if (k == "top_population_m") {
+              ok = v.is_number() && v.get<double>() > 0;
+              if (ok) params.top_population_m = v.get<double>();
+            } else if (k == "rank_size_exponent") {
+              ok = v.is_number() && v.get<double>() > 0;
+              if (ok) params.rank_size_exponent = v.get<double>();
+            } else if (k == "city_min_spacing_km") {
+              ok = v.is_number() && v.get<double>() > 0;
+              if (ok) params.city_min_spacing_km = v.get<double>();
+            } else if (k == "cracker_cluster_km") {
+              ok = v.is_number() && v.get<double>() > 0;
+              if (ok) params.cracker_cluster_km = v.get<double>();
+            } else if (k == "sea_leg_days") {
+              ok = v.is_number() && v.get<double>() > 0;
+              if (ok) params.sea_leg_days = v.get<double>();
+            } else if (k == "ship_speed_kmh") {
+              ok = v.is_number() && v.get<double>() > 0;
+              if (ok) params.ship_speed_kmh = v.get<double>();
+            } else {
+              ok = false;
+            }
+            if (!ok) {
+              error = "config gen.\"" + k + "\" is not a supported generation override";
+              return nullptr;
+            }
+          }
+        } else {
+          // §7.1: unknown keys are rejected so typos do not silently default.
+          error = "config key \"" + it.key() + "\" is not supported (only \"seed\", "
+                  "\"adaptation\", \"world\", \"preset\", \"gen\")";
+          return nullptr;
         }
-        // §7.1 names "gen" (M3 worldgen) and "world" (custom); neither is a
-        // surface yet — reject instead of silently ignoring.
-        error = "config key \"" + it.key() + "\" is not supported (only \"seed\" and "
-                "\"adaptation\")";
-        return nullptr;
       }
     } catch (const json::exception& e) {
       error = std::string("bad config json: ") + e.what();
       return nullptr;
     }
   }
-  auto sim = create(seed, error);
+  if (world_kind == "sixsite" && (have_gen || !preset.empty())) {
+    error = "config gen/preset apply only to the generated default world";
+    return nullptr;
+  }
+  std::unique_ptr<Sim> sim;
+  if (world_kind == "sixsite") {
+    sim = create(seed, error);
+  } else {
+    sim = have_gen ? createGenerated(seed, params, error) : createGenerated(seed, error);
+  }
   if (sim) sim->state().adaptation = adaptation_override;
   return sim;
 }

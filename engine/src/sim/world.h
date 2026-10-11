@@ -26,6 +26,10 @@ namespace sim {
 
 constexpr double kTickHours = 0.25;  // §5.1 fixed tick: 15 minutes
 
+// §3.2: train units sized at 110 % of the process design rate, split over the
+// unit's trains. Shared by the spec builder and the generated-world bridge.
+constexpr double kUnitOverdesign = 1.10;
+
 using crx::Range;
 
 // Range is {begin, count}; this is the one-past-the-last index.

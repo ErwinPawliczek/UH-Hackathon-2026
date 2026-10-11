@@ -28,7 +28,7 @@ double modeSpeed(const CatalogView& catalog, Mode mode, double fallback) {
 GeneratedWorld assemble(uint64_t seed, const GenParams& params, const Frame& frame,
                         const Features& ft, const std::vector<SiteSlot>& slots,
                         const Routes& routes, const SizingResult& sizing,
-                        const CatalogView& catalog) {
+                        const CatalogView& catalog, const DemandConstants& demands) {
   GeneratedWorld w;
   w.seed = seed;
   w.params = params;
@@ -146,20 +146,29 @@ GeneratedWorld assemble(uint64_t seed, const GenParams& params, const Frame& fra
       }
       wp.units.count = static_cast<uint32_t>(w.units.size()) - wp.units.begin;
 
-      // tank_of: one tank per external (traded) stream — products first,
-      // then feeds, in recipe order. A stream that netted to zero has no
-      // tank; point it at the site's first tank so the index stays total.
-      std::vector<TankId> tank_of;
+      // tank_of: material-indexed (the sim contract — one tank per traded
+      // material, at the material's own index). A stream that netted to zero
+      // has no tank; point it at the site's first tank so the index stays
+      // total.
+      std::vector<TankId> tank_of(catalog.materials.size(), TankId{});
+      auto materialIndex = [&](const std::string& key) {
+        for (size_t i = 0; i < catalog.materials.size(); ++i)
+          if (catalog.materials[i].key == key) return static_cast<int>(i);
+        return -1;
+      };
       auto streamTank = [&](const std::string& material) {
+        const int mid = materialIndex(material);
+        if (mid < 0) return;
         const auto it = tank_id.find({wp.site.v, material});
         if (it != tank_id.end()) {
-          tank_of.push_back(it->second);
+          tank_of[static_cast<size_t>(mid)] = it->second;
           return;
         }
         // Zero-net stream: reuse the site's own tank range start (the site
         // always has at least one tank when any of its processes run).
         if (w.sites[static_cast<size_t>(d.site)].tanks.count > 0) {
-          tank_of.push_back(TankId{w.sites[static_cast<size_t>(d.site)].tanks.begin});
+          tank_of[static_cast<size_t>(mid)] =
+              TankId{w.sites[static_cast<size_t>(d.site)].tanks.begin};
         }
       };
       for (size_t mi = 0; mi < p->modes.size(); ++mi) {
@@ -177,12 +186,28 @@ GeneratedWorld assemble(uint64_t seed, const GenParams& params, const Frame& fra
       wp.tank_of = tank_of;
     }
 
-    // Schedule curve: boundary sinks ride the demand sinusoid, everything
-    // else runs flat at the design rate. Values are absolute t/h, one curve
-    // per process.
+    // Mode mix (§5.3 M1 policy): fixed per design mode. Single-mode types run
+    // all swing trains on their one mode; the gas cracker burns pure ethane;
+    // the flex cracker rides the generator's feed policy.
+    if (p != nullptr && p->modes.size() > 1) {
+      wp.mode_share.assign(p->modes.size(), 0.0);
+      if (d.mode == "FLEX") {
+        for (size_t m = 0; m < p->modes.size(); ++m)
+          wp.mode_share[m] = p->modes[m] == "ETHANE"   ? demands.flex_ethane
+                             : p->modes[m] == "LPG"    ? demands.flex_lpg
+                                                       : demands.flex_naphtha;
+      } else {
+        for (size_t m = 0; m < p->modes.size(); ++m)
+          if (p->modes[m] == d.mode) wp.mode_share[m] = 1.0;
+      }
+    }
+
+    // Schedule curve: city demand sinks ride the demand sinusoid (§3.3),
+    // everything else — plant trains and the port's flat export/bunker
+    // sinks — runs flat at the design rate. Values are absolute t/h.
     wp.schedule = static_cast<uint16_t>(w.schedules.size());
     std::vector<float> curve(24, 0.0f);
-    if (d.type.rfind("SINK_", 0) == 0) {
+    if (d.demand_curved) {
       double raw[24];
       double sum = 0.0;
       for (int h = 0; h < 24; ++h) {
@@ -199,7 +224,41 @@ GeneratedWorld assemble(uint64_t seed, const GenParams& params, const Frame& fra
     w.processes.push_back(wp);
   }
 
+  // -- per-site process ranges: regroup the flat list by site so the sim
+  // bridge (which walks sites, not the flat list) sees each site's processes
+  // contiguously; remap the units' back-references to the new flat indices.
+  {
+    std::vector<uint32_t> remap(w.processes.size(), 0u);
+    std::vector<WProcess> ordered;
+    ordered.reserve(w.processes.size());
+    for (size_t ps = 0; ps < slots.size(); ++ps) {
+      w.sites[ps].processes.begin = static_cast<uint32_t>(ordered.size());
+      for (size_t i = 0; i < w.processes.size(); ++i) {
+        if (w.processes[i].site.v != ps) continue;
+        remap[i] = static_cast<uint32_t>(ordered.size());
+        ordered.push_back(w.processes[i]);
+      }
+      w.sites[ps].processes.count =
+          static_cast<uint32_t>(ordered.size()) - w.sites[ps].processes.begin;
+    }
+    w.processes = std::move(ordered);
+    for (WUnit& u : w.units) u.process = ProcessId{remap[u.process.v]};
+  }
+
   // -- pipelines: straight links between the piped flows' endpoint tanks.
+  // Any new pipeline collinear with a committed one — the same pair twice, or
+  // sites that line up across pairs (A→B and B→C on one axis) — or lying on a
+  // road gets a shallow lateral bend, so no road lies on a pipeline and no
+  // line carries three pipelines (§6.4). The gate re-verifies overlap on the
+  // finished world; the threshold matches its tolerance, not a loose 10 km.
+  std::vector<std::vector<Vec2>> built_lines;
+  for (const Routes::Edge& e : routes.edges)
+    if (e.mode == Mode::Road) built_lines.push_back(e.polyline);
+  const auto collides = [&](const std::vector<Vec2>& line) {
+    for (const auto& other : built_lines)
+      if (overlapAlong(line, other) > 0.05) return true;
+    return false;
+  };
   for (const SizingResult::FlowLine& f : sizing.flows) {
     if (!f.piped) continue;
     const TankId from = f.from_site == kOverseasSite
@@ -218,9 +277,28 @@ GeneratedWorld assemble(uint64_t seed, const GenParams& params, const Frame& fra
     const Vec2 b = f.to_site == kOverseasSite
                        ? frame.overseas
                        : (f.to_site >= 0 ? slots[static_cast<size_t>(f.to_site)].pos : Vec2{});
-    pl.length_km = static_cast<float>(distKM(a, b));
+    const double dx = b.x - a.x, dy = b.y - a.y;
+    const double len = std::hypot(dx, dy);
+    std::vector<Vec2> line;
+    int bend = 0;
+    do {
+      if (bend == 0 || len <= 1e-6) {
+        line = straightPolyline(a, b);
+      } else {
+        const double side = (bend % 2 == 1) ? 1.0 : -1.0;
+        const double off = 0.6 * static_cast<double>((bend + 1) / 2);  // km
+        const Vec2 mid{(a.x + b.x) / 2.0 - dy / len * off * side,
+                       (a.y + b.y) / 2.0 + dx / len * off * side};
+        line = {a, mid, b};
+      }
+      ++bend;
+    } while (bend <= 7 && collides(line));
+    built_lines.push_back(line);
+    double length_km = 0.0;
+    for (size_t i = 1; i < line.size(); ++i) length_km += distKM(line[i - 1], line[i]);
+    pl.length_km = static_cast<float>(length_km);
     pl.polyline.begin = static_cast<uint32_t>(w.polyline_xy.size() / 2);
-    for (const Vec2& p : straightPolyline(a, b)) {
+    for (const Vec2& p : line) {
       w.polyline_xy.push_back(static_cast<float>(p.x));
       w.polyline_xy.push_back(static_cast<float>(p.y));
     }
@@ -256,6 +334,11 @@ GeneratedWorld assemble(uint64_t seed, const GenParams& params, const Frame& fra
     w.contracts.push_back({buyer, seller});
   }
 
+  // -- flow records for the constraint suites and demo tooling (not serialized).
+  w.flows.reserve(sizing.flows.size());
+  for (const SizingResult::FlowLine& f : sizing.flows)
+    w.flows.push_back({f.material, f.from_site, f.to_site, f.t_d, f.piped});
+
   return w;
 }
 
@@ -277,9 +360,11 @@ GenResult generateWorld(uint64_t seed, const GenParams& params, const CatalogVie
                                 modeSpeed(catalog, Mode::River, 12.0));
     finalize(routes);
     const SizingResult sizing = sizeWorld(catalog, params, demands, ft, slots, routes);
-    GeneratedWorld world = assemble(s, params, frame, ft, slots, routes, sizing, catalog);
+    GeneratedWorld world = assemble(s, params, frame, ft, slots, routes, sizing, catalog, demands);
     res.gate_errors = checkFeasibility(world, catalog);
-    if (warmup != nullptr) {
+    // The warm-up runs 28 simulated days and presumes a structurally sound
+    // world; run it only on candidates the structural gate already cleared.
+    if (warmup != nullptr && res.gate_errors.empty()) {
       for (std::string& e : warmup(world, catalog)) res.gate_errors.push_back(std::move(e));
     }
     if (res.gate_errors.empty()) {

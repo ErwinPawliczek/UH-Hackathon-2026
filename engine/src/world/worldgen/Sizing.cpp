@@ -35,7 +35,7 @@ namespace worldgen {
 
 namespace {
 
-constexpr double kFleetPadding = 1.20;  // §6.6: +20% fleet padding
+constexpr double kFleetPadding = 1.60;  // §6.6: fleet padding — raised from +20% so the far-city legs (JET/LPG/CAUSTIC) keep cover through the warm-up tail
 
 std::vector<int> slotsOf(const std::vector<SiteSlot>& slots, const char* preset) {
   std::vector<int> out;
@@ -301,8 +301,11 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
   for (const auto& [m, d] :
        {std::pair{"GASOLINE", gasoline_d}, {std::pair{"DIESEL", diesel_d}},
         std::pair{"JET", jet_d}, std::pair{"LPG", lpg_d}})
-    crude_req = std::max(crude_req, crudeFor(m.c_str(), d));
+    crude_req = std::max(crude_req, crudeFor(m, d));
   const double refinery_rate = perSite(refineries.size(), crude_req / U);
+  // Total CDU design across the refinery family = the crude draw with the
+  // utilisation headroom already inside refinery_rate.
+  const double refinery_total = refinery_rate * static_cast<double>(refineries.size());
 
   // ---- 5. Chlor-alkali; salt requirement from the recipe.
   const double ca_rate = perSite(cas.size(), chlorine_req / U);
@@ -402,6 +405,34 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
         mode_over[preset == "STEAM_CRACKER_FLEX" ? "OLEFINS_FLEX" : "OLEFINS_GAS"] = it->mode;
     }
     comps[s] = composeSite(catalog, slots[s], desired, mode_over);
+    // Flex crackers run a blended feed (three real modes at the demand
+    // constants' shares); composeSite applies one mode at a time, so the
+    // blended net is composed directly from the mode recipes.
+    if (preset == "STEAM_CRACKER_FLEX") {
+      const auto it = std::find_if(cracker_design.begin(), cracker_design.end(),
+                                   [&](const Cracker& c) { return c.site == static_cast<int>(s); });
+      const ProcessInfo* of = catalog.process("OLEFINS_FLEX");
+      if (it != cracker_design.end() && of != nullptr && it->feed_t_d > 0.0) {
+        const double mix[3] = {dc.flex_ethane, dc.flex_lpg, dc.flex_naphtha};
+        const char* feeds[3] = {"ETHANE", "LPG", "NAPHTHA"};
+        for (size_t mi = 0; mi < of->modes.size(); ++mi) {
+          int k = -1;
+          for (int j = 0; j < 3; ++j)
+            if (of->modes[mi] == feeds[j]) k = j;
+          if (k < 0 || mix[k] <= 0.0) continue;
+          for (const NetStream& st : of->by_mode[mi].in) {
+            const MaterialInfo* m = catalog.material(st.material);
+            if (m == nullptr || m->kind != MatKind::Traded) continue;
+            comps[s].traded_net[st.material] -= st.t_per_t * mix[k] * it->feed_t_d;
+          }
+          for (const NetStream& st : of->by_mode[mi].out) {
+            const MaterialInfo* m = catalog.material(st.material);
+            if (m == nullptr || m->kind != MatKind::Traded) continue;
+            comps[s].traded_net[st.material] += st.t_per_t * mix[k] * it->feed_t_d;
+          }
+        }
+      }
+    }
     for (const auto& [key, mm] : comps[s].procs) {
       if (mm.second <= 0.0) continue;
       const bool curved = is_city_sink_preset(preset);
@@ -459,6 +490,7 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
         double vehicle_cost = 1e18;
         for (const VehicleClassInfo& v : catalog.vehicles) {
           if (v.carries != mi.phase) continue;
+          if ((mi.modes_mask & (1u << static_cast<uint8_t>(v.mode))) == 0) continue;
           const int a = routes.siteNode(s.site, v.mode);
           const int b = routes.siteNode(c.site, v.mode);
           if (a < 0 || b < 0 || !routes.reachable(a, b, v.mode)) continue;
@@ -522,12 +554,25 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
     std::map<std::string, double> desired;
     const PresetInfo* pi = catalog.preset("PORT_TERMINAL");
     if (pi != nullptr) {
+      // One consuming process per basis material: a domestic-demand sink
+      // (fuel depot, bunker) wins over the export sink, so an arrival is
+      // never counted twice.
+      std::map<std::string, const ProcessInfo*> chosen;
       for (const std::string& key : pi->process_keys) {
         const ProcessInfo* proc = catalog.process(key);
         if (proc == nullptr) continue;
-        const auto it = arrivals.find(proc->basis);
-        if (it != arrivals.end() && it->second > 1e-9) desired[key] = it->second;
+        if (arrivals.find(proc->basis) == arrivals.end() || arrivals.at(proc->basis) <= 1e-9)
+          continue;
+        const bool export_sink = proc->key.rfind("PORT_EXPORT_", 0) == 0;
+        const auto it = chosen.find(proc->basis);
+        if (it == chosen.end()) {
+          chosen[proc->basis] = proc;
+        } else if (!export_sink &&
+                   it->second->key.rfind("PORT_EXPORT_", 0) == 0) {
+          it->second = proc;  // prefer the domestic-demand sink
+        }
       }
+      for (const auto& [basis, proc] : chosen) desired[proc->key] = arrivals.at(basis);
     }
     comps[static_cast<size_t>(p)] = composeSite(catalog, slots[static_cast<size_t>(p)], desired, {});
     for (const auto& [key, mm] : comps[static_cast<size_t>(p)].procs) {
@@ -588,12 +633,14 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
     const double cov_i = preset ? preset->cover_internal_d : 2.0;
     const double cov = params.cover_multiplier *
                        slots[static_cast<size_t>(key.first)].cover_weight;
+    // A per-material cover is the catalog author's explicit rule for that
+    // tank (e.g. chlorine holds about a day, not a week) — it wins outright.
     const double cap =
         internal
             ? std::max(f.in, f.out) * 24.0 * cov_i * cov
-            : std::max({f.in * 24.0 * cov_p, f.out * 24.0 * cov_f,
-                        cov_m > 0.0 ? std::max(f.in, f.out) * 24.0 * cov_m : 0.0}) *
-                  cov;
+        : cov_m > 0.0
+            ? std::max(f.in, f.out) * 24.0 * cov_m * cov
+            : std::max({f.in * 24.0 * cov_p, f.out * 24.0 * cov_f}) * cov;
     const TankRole role =
         internal                                    ? TankRole::Internal
         : (f.in > 1e-12 && f.out > 1e-12)           ? TankRole::Both
@@ -602,44 +649,54 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
     out.tanks.push_back({key.first, key.second, role, f.in, f.out, cap});
   }
 
-  // ---- 11. Fleet: cheapest feasible class per flow; count = ceil(trips ×
-  // round-trip ÷ 24 × 1.2).
+  // ---- 11. Fleet: per flow pick the vehicle class the way the sim's
+  // procurement would. Liquids follow the country's geography (§6.4): a
+  // coastal-to-coastal pair ships the sea lanes; otherwise a pair with river
+  // access both ends barges the inland waterway; road trucks take what is
+  // left. Solids and bottled gases simply take the cheapest feasible class.
+  // Either way the material's catalog mode list gates the choice, and count
+  // = ceil(trips × round-trip ÷ 24 × 1.2).
   for (const auto& f : out.flows) {
     if (f.piped) continue;
     const MaterialInfo* mi = catalog.material(f.material);
     if (mi == nullptr) continue;
-    const VehicleClassInfo* best = nullptr;
-    double best_cost = 1e18, best_arc = 0.0;
+    struct Pick {
+      const VehicleClassInfo* v = nullptr;
+      double arc = 0.0, cost = 1e18;
+    };
+    Pick by_mode[3];  // indexed by Mode: Road, River, Sea
     for (const VehicleClassInfo& v : catalog.vehicles) {
       if (v.carries != mi->phase) continue;
+      if ((mi->modes_mask & (1u << static_cast<uint8_t>(v.mode))) == 0) continue;
       const int a = routes.siteNode(f.from_site, v.mode);
       const int b = routes.siteNode(f.to_site, v.mode);
       if (a < 0 || b < 0 || !routes.reachable(a, b, v.mode)) continue;
       const double arc = routes.km(a, b, v.mode);
       const double cost = v.freight_per_t_km * arc;
-      if (cost < best_cost - 1e-12) {
-        best_cost = cost;
-        best = &v;
-        best_arc = arc;
-      }
+      Pick& slot = by_mode[static_cast<uint8_t>(v.mode)];
+      if (slot.v == nullptr || cost < slot.cost - 1e-12) slot = {&v, arc, cost};
     }
-    if (best == nullptr) continue;
+    const auto valid = [](const Pick& p) { return p.v != nullptr; };
+    const bool both_sea = routes.siteNode(f.from_site, Mode::Sea) >= 0 &&
+                          routes.siteNode(f.to_site, Mode::Sea) >= 0;
+    const bool both_river = routes.siteNode(f.from_site, Mode::River) >= 0 &&
+                            routes.siteNode(f.to_site, Mode::River) >= 0;
+    Pick pick;
+    if (mi->phase == Phase::Liquid && both_sea && valid(by_mode[2])) {
+      pick = by_mode[2];  // coastal pair: sea lanes
+    } else if (mi->phase == Phase::Liquid && both_river && valid(by_mode[1])) {
+      pick = by_mode[1];  // inland pair: the river
+    } else {
+      for (int m = 0; m < 3; ++m)
+        if (valid(by_mode[m]) && by_mode[m].cost < pick.cost) pick = by_mode[m];
+    }
+    if (pick.v == nullptr) continue;
     const int home = f.from_site;
-    const double trips = f.t_d / best->capacity_t;
-    const double rt_h = 2.0 * best_arc / std::max(1.0, best->speed_kmh) +
-                        2.0 * best->capacity_t / std::max(1.0, best->load_t_h);
+    const double trips = f.t_d / pick.v->capacity_t;
+    const double rt_h = 2.0 * pick.arc / std::max(1.0, pick.v->speed_kmh) +
+                        2.0 * pick.v->capacity_t / std::max(1.0, pick.v->load_t_h);
     const int count = static_cast<int>(std::ceil(trips * rt_h / 24.0 * kFleetPadding));
-    out.fleet.push_back({best->key, home, std::max(1, count)});
-  }
-
-  return out;
-}
-
-}  // namespace worldgen
-}  // namespace crx
-);
-    const int count = static_cast<int>(std::ceil(trips * rt_h / 24.0 * kFleetPadding));
-    out.fleet.push_back({best->key, home, std::max(1, count)});
+    out.fleet.push_back({pick.v->key, home, std::max(1, count)});
   }
 
   return out;

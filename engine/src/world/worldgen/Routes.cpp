@@ -172,7 +172,7 @@ Routes buildRoutes(const GenParams& params, Rng& rng, const Features& ft, const 
           best_v = v;
         }
       }
-      if (best_v != SIZE_MAX && best_d <= 15.0) {
+      if (best_v != SIZE_MAX && best_d <= 18.0) {
         routes.site_nodes[s][1] = routes.site_nodes[s][0];
         b.addEdge(routes.site_nodes[s][0], river_nodes[best_v], Mode::River, river_kmh,
                   straightPolyline(pos, ft.river[best_v]));
@@ -180,21 +180,34 @@ Routes buildRoutes(const GenParams& params, Rng& rng, const Features& ft, const 
     }
   }
 
-  // -- Sea network: port berths, overseas leg, coastal port↔port arc.
+  // -- Sea network: port berth, coastal plant berths, overseas leg. Refineries
+  // and crackers sit 3–9 km inland so they get marine berths too (§6.3): sea
+  // legs between plant berths and the port berth carry the liquid exports.
+  const auto has_sea_berth = [](const std::string& preset) {
+    return preset == "PORT_TERMINAL" || preset == "REFINERY" ||
+           preset == "STEAM_CRACKER_GAS" || preset == "STEAM_CRACKER_FLEX";
+  };
   const uint32_t overseas = b.addNode(frame.overseas, -1);
   routes.overseas_node = static_cast<int>(overseas);
-  uint32_t first_berth = UINT32_MAX;
+  uint32_t port_berth = UINT32_MAX;
+  std::vector<uint32_t> plant_berths;
   for (size_t s = 0; s < slots.size(); ++s) {
-    if (slots[s].preset != "PORT_TERMINAL") continue;
+    if (!has_sea_berth(slots[s].preset)) continue;
     const Vec2 berth_pos = seaward(frame, slots[s].pos, 10.0);
     const uint32_t berth = b.addNode(berth_pos, static_cast<int>(s));
     routes.site_nodes[s][2] = static_cast<int>(berth);
-    b.addEdge(berth, overseas, Mode::Sea, params.ship_speed_kmh,
-              straightPolyline(berth_pos, frame.overseas));
-    if (first_berth != UINT32_MAX)
-      b.addEdge(first_berth, berth, Mode::Sea, params.ship_speed_kmh,
-                straightPolyline(routes.nodes[first_berth].pos, berth_pos));
-    if (first_berth == UINT32_MAX) first_berth = berth;
+    if (slots[s].preset == "PORT_TERMINAL") {
+      b.addEdge(berth, overseas, Mode::Sea, params.ship_speed_kmh,
+                straightPolyline(berth_pos, frame.overseas));
+      port_berth = berth;
+    } else {
+      plant_berths.push_back(berth);
+    }
+  }
+  for (const uint32_t berth : plant_berths) {
+    if (port_berth == UINT32_MAX) break;
+    b.addEdge(berth, port_berth, Mode::Sea, params.ship_speed_kmh,
+              straightPolyline(routes.nodes[berth].pos, routes.nodes[port_berth].pos));
   }
 
   finalize(routes);
