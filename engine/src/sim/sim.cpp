@@ -1,6 +1,7 @@
 // Chain Reaction — sim integration implementation.
 #include "sim/sim.h"
 
+#include "sim/inspect.h"
 #include "sim/layout.h"
 #include "sim/sixsite.h"
 #include "sim/worldfile.h"
@@ -217,6 +218,84 @@ std::string Sim::command(const std::string& json_cmd) {
     if (!cmd.is_object() || !cmd.contains("type") || !cmd.at("type").is_string())
       return R"({"ok":false,"error":"command must be an object with a string \"type\""})";
     const std::string type = cmd.at("type").get<std::string>();
+    // A command sent for a named player: the log lines it writes carry the
+    // player, and say who did it.
+    struct ActorScope {
+      Recorder& rec;
+      ~ActorScope() {
+        rec.actor_id.clear();
+        rec.actor_name.clear();
+      }
+    } actor_scope{rec_};
+    if (cmd.contains("player") && cmd.at("player").is_string() && cmd.contains("player_name") &&
+        cmd.at("player_name").is_string()) {
+      rec_.actor_id = cmd.at("player").get<std::string>();
+      rec_.actor_name = cmd.at("player_name").get<std::string>();
+    }
+    const std::string& actor = rec_.actor_name;
+
+    if (type == "hurricane" || type == "water_restriction") {
+      const bool storm = type == "hurricane";
+      double hours = storm ? 72.0 : 120.0;
+      if (cmd.contains("duration_h")) {
+        if (!cmd.at("duration_h").is_number() || !(cmd.at("duration_h").get<double>() > 0.0) ||
+            cmd.at("duration_h").get<double>() > 24.0 * 365.0)
+          return R"({"ok":false,"error":"duration_h must be a number of hours above zero"})";
+        hours = cmd.at("duration_h").get<double>();
+      }
+      const uint64_t until =
+          state_.tick + std::max<uint64_t>(1, static_cast<uint64_t>(std::llround(hours / kTickHours)));
+      uint64_t& slot = storm ? state_.hurricane_until : state_.water_stop_until;
+      const bool running = slot > state_.tick;
+      slot = until;
+      if (!running)
+        logEvent(rec_, state_.tick, type, "", "",
+                 storm ? "A hurricane has slowed every road to a quarter speed"
+                       : "A water restriction has stopped all barges and ships");
+      return json{{"ok", true}, {"until_tick", until}}.dump();
+    }
+
+    if (type == "trade_block") {
+      const auto siteOf = [&](const char* key) -> int {
+        if (!cmd.contains(key)) return -1;
+        const json& v = cmd.at(key);
+        if (v.is_number_unsigned())
+          return v.get<uint64_t>() < world_->sites.size() ? static_cast<int>(v.get<uint64_t>()) : -1;
+        return v.is_string() ? world_->findSite(v.get<std::string>()) : -1;
+      };
+      const int site = siteOf("site"), partner = siteOf("partner");
+      if (site < 0 || partner < 0) return R"({"ok":false,"error":"There is no such site"})";
+      const std::string direction =
+          cmd.contains("direction") && cmd.at("direction").is_string() ? cmd.at("direction").get<std::string>() : "";
+      if (direction != "sell" && direction != "buy")
+        return R"({"ok":false,"error":"Say whether to stop selling to them or buying from them"})";
+      if (!cmd.contains("blocked") || !cmd.at("blocked").is_boolean())
+        return R"({"ok":false,"error":"Say whether the block goes on or comes off"})";
+      const bool sell = direction == "sell", on = cmd.at("blocked").get<bool>();
+      const Site& me = world_->sites[static_cast<size_t>(site)];
+      const Site& them = world_->sites[static_cast<size_t>(partner)];
+      const uint32_t seller = static_cast<uint32_t>(sell ? site : partner);
+      const uint32_t buyer = static_cast<uint32_t>(sell ? partner : site);
+      if (tradedMaterials(*world_, seller, buyer).empty())
+        return json{{"ok", false},
+                    {"error", me.name + (sell ? " does not sell to " : " does not buy from ") + them.name}}
+            .dump();
+      const uint64_t key = (static_cast<uint64_t>(seller) << 32) | buyer;
+      auto& blocks = state_.trade_blocks;
+      const auto at = std::lower_bound(blocks.begin(), blocks.end(), key);
+      const bool was = at != blocks.end() && *at == key;
+      if (was == on)
+        return json{{"ok", false},
+                    {"error", on ? me.name + " has already stopped " + (sell ? "selling to " : "buying from ") + them.name
+                                 : me.name + " is not blocking " + them.name}}
+            .dump();
+      if (on) blocks.insert(at, key);
+      else blocks.erase(at);
+      logEvent(rec_, state_.tick, "trade_block", me.key, them.key,
+               (actor.empty() ? me.name : actor) + (on ? " stopped " : " resumed ") +
+                   (sell ? "selling to " : "buying from ") + them.name);
+      return json{{"ok", true}}.dump();
+    }
 
     if (type == "unit_outage" || type == "site_shutdown" || type == "demand_shock" ||
         type == "supply_shock" || type == "route_break") {
@@ -278,10 +357,14 @@ std::string Sim::command(const std::string& json_cmd) {
         state_.site_markup[static_cast<size_t>(site)] = markup;
         const int pct = static_cast<int>(std::lround(markup * 100.0));
         logEvent(rec_, state_.tick, "price_set", s.key, "",
-                 s.name + ": asking price set " +
-                     (pct == 0 ? std::string("back to the market rule")
-                               : std::to_string(std::abs(pct)) + "% " +
-                                     (pct > 0 ? "above" : "below") + " the market rule"));
+                 !actor.empty()
+                     ? (pct == 0 ? actor + " put " + s.name + "'s price back to the market rule"
+                                 : actor + (pct > 0 ? " raised " : " lowered ") + s.name + "'s price to " +
+                                       (pct > 0 ? "+" : "-") + std::to_string(std::abs(pct)) + "%")
+                     : s.name + ": asking price set " +
+                           (pct == 0 ? std::string("back to the market rule")
+                                     : std::to_string(std::abs(pct)) + "% " +
+                                           (pct > 0 ? "above" : "below") + " the market rule"));
         return json{{"ok", true}, {"markup", markup}}.dump();
       }
       if (!cmd.contains("share") || !cmd.at("share").is_number())
@@ -300,10 +383,14 @@ std::string Sim::command(const std::string& json_cmd) {
       for (size_t p = 0; p < world_->processes.size(); ++p)
         if (world_->processes[p].site.v == static_cast<uint32_t>(site))
           state_.rate_override[p] = share >= 1.0 ? -1.0 : share * world_->processes[p].design_rate_t_h;
+      const double share_before = state_.site_rate_share[static_cast<size_t>(site)];
       state_.site_rate_share[static_cast<size_t>(site)] = share;
+      const std::string pct = std::to_string(static_cast<int>(std::lround(share * 100.0))) + "%";
       logEvent(rec_, state_.tick, "rate_set", s.key, "",
-               s.name + ": running at " + std::to_string(static_cast<int>(std::lround(share * 100.0))) +
-                   "% of design at most");
+               !actor.empty() ? (share >= 1.0 ? actor + " put " + s.name + " back to full rate"
+                                              : actor + (share < share_before ? " cut " : " raised ") +
+                                                    s.name + " to " + pct)
+                              : s.name + ": running at " + pct + " of design at most");
       return json{{"ok", true}, {"share", share}, {"min_share", floor}}.dump();
     }
 

@@ -230,7 +230,8 @@ bool isDisruption(const std::string& command) {
   if (!j.is_object() || !j.contains("type") || !j["type"].is_string()) return false;
   const std::string type = j["type"].get<std::string>();
   return type == "unit_outage" || type == "site_shutdown" || type == "supply_shock" ||
-         type == "demand_shock" || type == "route_break" || type == "unit_state";
+         type == "demand_shock" || type == "route_break" || type == "unit_state" ||
+         type == "trade_block" || type == "hurricane" || type == "water_restriction";
 }
 
 void stepSimTo(crx_sim* sim, uint64_t target) {

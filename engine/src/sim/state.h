@@ -115,6 +115,7 @@ struct EventDef {
 struct LogEntry {
   uint64_t seq = 0, tick = 0;
   std::string type, site, unit, text;
+  std::string player, player_name;  // set when a named player's command caused it
 };
 
 // §4.4 ledger, one per site.
@@ -168,6 +169,22 @@ struct State {
   // The cap itself lives in rate_override; this is kept for the scores view.
   std::vector<double> site_rate_share;
   std::vector<SiteTrade> site_trade;   // per site, cumulative (not hashed)
+  // trade_block: pairs that do not trade, as seller site << 32 | buyer site,
+  // kept sorted. Empty unless a player set one; hashed only when not empty.
+  std::vector<uint64_t> trade_blocks;
+  // Network-wide scenarios, as the tick they end at (0 = not running; hashed
+  // only when running). A hurricane slows every road vehicle to a quarter
+  // speed; a water restriction lets no barge or ship set off.
+  uint64_t hurricane_until = 0;
+  uint64_t water_stop_until = 0;
+
+  bool tradeBlocked(uint32_t seller_site, uint32_t buyer_site) const {
+    if (trade_blocks.empty()) return false;
+    const uint64_t key = (static_cast<uint64_t>(seller_site) << 32) | buyer_site;
+    for (const uint64_t b : trade_blocks)
+      if (b == key) return true;
+    return false;
+  }
 
   // Accounting accumulators (§5.4, §5.10). Real material only: pseudo
   // streams (FUEL_GAS, LOSS, WATER, AIR_O2) never enter tanks, so their
