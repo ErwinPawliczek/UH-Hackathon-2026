@@ -3,9 +3,10 @@
 // The fixture builds a lean typed snapshot the same way the codec does.
 
 import { describe, expect, it } from 'vitest';
+import type * as THREE from 'three';
 import type { Snapshot } from '../engine/snapshot';
 import { stubWorld, type WorldSpec } from '../engine/world';
-import { buildVehicleLayer, classMode, liveCargo, vehicleGeometry, waterSpan } from './instances';
+import { buildVehicleLayer, classMode, liveCargo, vehicleGeometry, vehicleParts, waterSpan } from './instances';
 import { VEHICLE_CLASSES, type VehicleClassKey } from '../engine/world';
 
 /** Lean v2-shaped snapshot with nVeh vehicles; movement arrays optional. */
@@ -101,4 +102,33 @@ describe('vehicle classes', () => {
     }
     expect(counts.size).toBe(Object.keys(VEHICLE_CLASSES).length);
   });
+
+  it('keeps what a truck or barge carries as a separate part, so an empty one is drawn without it', () => {
+    for (const cls of ['TRUCK_TANK', 'TRUCK_PRESS', 'TRUCK_BULK', 'BARGE_TANK', 'BARGE_DRY'] as VehicleClassKey[]) {
+      const parts = vehicleParts(cls);
+      expect(parts.cargo).not.toBeNull();
+      // the bare vehicle is lower than the loaded one: nothing on its back
+      parts.base.computeBoundingBox();
+      const whole = vehicleGeometry(cls);
+      whole.computeBoundingBox();
+      const baseHeight = cls.startsWith('TRUCK')
+        ? heightBehindCab(parts.base)
+        : heightAmidships(parts.base);
+      expect(baseHeight).toBeLessThan(cls.startsWith('TRUCK') ? heightBehindCab(whole) : heightAmidships(whole));
+    }
+    // ships are drawn in one piece and only lose their cargo tint when empty
+    for (const cls of ['SHIP_TANK', 'SHIP_GAS', 'SHIP_DRY'] as VehicleClassKey[]) {
+      expect(vehicleParts(cls).cargo).toBeNull();
+    }
+  });
 });
+
+/** Highest point of a geometry within a slice of its length (local z). */
+function heightIn(geo: THREE.BufferGeometry, z0: number, z1: number): number {
+  const pos = geo.getAttribute('position');
+  let top = 0;
+  for (let i = 0; i < pos.count; i++) if (pos.getZ(i) >= z0 && pos.getZ(i) <= z1) top = Math.max(top, pos.getY(i));
+  return top;
+}
+const heightBehindCab = (geo: THREE.BufferGeometry) => heightIn(geo, -1, 0.115); // the cab starts at z = 0.12
+const heightAmidships = (geo: THREE.BufferGeometry) => heightIn(geo, -0.38, 1); // forward of the pusher house
