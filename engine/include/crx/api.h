@@ -56,6 +56,12 @@ const double* crx_kpis(const crx_sim* sim, uint32_t* n);
    first tick it stopped. Reply valid until the next call on this sim. */
 const char* crx_step_report(crx_sim* sim, uint32_t ticks);
 
+/* Drops the run's history (event log, series, economy rows) and stops it
+   recording any more. The run itself steps exactly as before (same state
+   hash); events, series and economy read as empty from then on. For forks
+   kept only for their totals. */
+void crx_mute(crx_sim* sim);
+
 /* One vehicle as JSON: class, status, cargo, the order it serves with both
    ends named, where its current leg ends, and the path from here to there.
    NULL when `index` is not a vehicle. Reply valid until the next call. */
