@@ -11,6 +11,10 @@ WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
+# web/src imports the catalog JSON from ../../../engine/data (in the repo,
+# web/ and engine/ are siblings under the repo root). Mirror that layout
+# inside the stage or npm run build fails TS2307 on the missing JSON imports.
+COPY engine/data /src/engine/data
 RUN npm run build
 
 # ---- stage 2: native server (same toolchain family as CI) ----
