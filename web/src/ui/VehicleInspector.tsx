@@ -7,7 +7,7 @@ import { materialColor } from '../scene/palette';
 import { liveCargo } from '../scene/instances';
 import { useSim } from '../store/sim';
 import { fmtClock, fmtDelta, fmtPct } from './format';
-import { vehicleLive } from './vehicleLive';
+import { VEH_IDLE, standingAt, vehicleLive } from './vehicleLive';
 
 export function VehicleInspector({ vehIdx }: { vehIdx: number }) {
   const world = useSim((s) => s.world);
@@ -35,6 +35,16 @@ export function VehicleInspector({ vehIdx }: { vehIdx: number }) {
           {cargo ?? 'Empty'}
         </span>
       </header>
+
+      {/* An idle vehicle is parked and not drawn: say where it is instead of pointing at nothing. */}
+      {live.status === VEH_IDLE && (
+        <p className="mb-3 rounded-sm bg-panel-2 px-2 py-1.5 text-muted" data-testid="vehicle-idle-note">
+          {(() => {
+            const at = standingAt(world, live);
+            return at === null ? 'Idle, not shown on the map.' : `Idle at ${at}, not shown on the map.`;
+          })()}
+        </p>
+      )}
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-ink">
         <dt className="label">Status</dt>

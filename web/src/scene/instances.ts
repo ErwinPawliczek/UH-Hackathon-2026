@@ -155,6 +155,8 @@ export function updateVehicles(
   poses: VehiclePose[],
   /** world Y of what the vehicle stands on; `vehicle` is its index in the fleet */
   terrainY: (xKm: number, yKm: number, vehicle: number) => number,
+  /** drawn size of a vehicle, 0 (hidden) to 1; all are full size when omitted */
+  shown?: (vehicle: number) => number,
 ): void {
   layer.meshes.forEach((mesh, j) => {
     const members = layer.members[j];
@@ -164,6 +166,7 @@ export function updateVehicles(
       const [x, z] = mapToWorld(pose.x, pose.y);
       p3.set(x, terrainY(pose.x, pose.y, members[k]) + 0.04, z);
       q4.setFromAxisAngle(up, Math.atan2(pose.dirX, pose.dirY));
+      s3.setScalar(shown === undefined ? 1 : Math.max(0, Math.min(1, shown(members[k]))));
       m4.compose(p3, q4, s3);
       mesh.setMatrixAt(k, m4);
     }

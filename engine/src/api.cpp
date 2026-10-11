@@ -223,19 +223,95 @@ std::string buildWorldJson(const sim::World& w, const TerrainGrid& terrain,
       const auto& proc = w.processes[p];
       if (proc.site.v != i) continue;
       const auto& type = cat.process_types[proc.type];
+      // Flowsheet data for the site panel: every stream at design rate,
+      // weighted over the process's mode mix. A stream is a "material" (it
+      // has a tank on site, by index), "internal" (unit to unit inside the
+      // process) or a "utility" (fuel gas, water, air, losses). Live values
+      // are these times the process's rate ÷ design from the snapshot.
+      const auto streamList = [&](const std::vector<std::vector<crx::Stream>>& by_mode) {
+        std::vector<std::pair<std::string, double>> acc;  // key -> t/h, first-seen order
+        std::vector<uint16_t> slots;
+        for (size_t m = 0; m < by_mode.size() && m < proc.mode_share.size(); ++m) {
+          const double share = proc.mode_share[m];
+          if (share <= 0) continue;
+          for (const auto& st : by_mode[m]) {
+            const double tph = std::abs(st.t_per_t) * share * proc.design_rate_t_h;
+            size_t k = 0;
+            while (k < acc.size() && acc[k].first != st.key) ++k;
+            if (k == acc.size()) {
+              acc.emplace_back(st.key, 0.0);
+              slots.push_back(st.slot);
+            }
+            acc[k].second += tph;
+          }
+        }
+        json out = json::array();
+        for (size_t k = 0; k < acc.size(); ++k) {
+          const uint16_t slot = slots[k];
+          const bool internal = slot >= crx::kInternalStreamBase;
+          const bool utility =
+              !internal && cat.materials[slot].kind == crx::MatKind::Pseudo;
+          json tank = nullptr;
+          if (!internal && !utility && slot < proc.tank_of.size() && proc.tank_of[slot].valid())
+            tank = proc.tank_of[slot].v;
+          out.push_back({{"key", acc[k].first},
+                         {"tph", acc[k].second},
+                         {"kind", internal ? "internal" : utility ? "utility" : "material"},
+                         {"tank", tank}});
+        }
+        return out;
+      };
       json units = json::array();
       for (uint32_t u = 0; u < w.units.size(); ++u) {
         const auto& unit = w.units[u];
         if (unit.process.v != p) continue;
         const auto& slot = type.units[unit.slot];
+        std::vector<std::vector<crx::Stream>> ins, outs;
+        double heat = 0, power = 0;
+        for (size_t m = 0; m < slot.by_mode.size(); ++m) {
+          ins.push_back(slot.by_mode[m].in);
+          outs.push_back(slot.by_mode[m].out);
+          const double share = m < proc.mode_share.size() ? proc.mode_share[m] : 0.0;
+          heat += slot.by_mode[m].heat_gj * share * proc.design_rate_t_h;
+          power += slot.by_mode[m].power_mwh * share * proc.design_rate_t_h;
+        }
         units.push_back({{"key", slot.key},
                          {"name", slot.name},
                          {"glyph", slot.glyph},
-                         {"trains", slot.trains}});
+                         {"trains", slot.trains},
+                         {"index", u},
+                         {"capPerTrainTph", unit.cap_per_train_t_h},
+                         {"in", streamList(ins)},
+                         {"out", streamList(outs)},
+                         {"heatGjH", heat},
+                         {"powerMw", power}});
+      }
+      // Net streams of the whole process, split by direction.
+      std::vector<std::vector<crx::Stream>> net_in, net_out;
+      for (const auto& mode : type.net) {
+        net_in.emplace_back();
+        net_out.emplace_back();
+        for (const auto& st : mode) (st.t_per_t < 0 ? net_in : net_out).back().push_back(st);
+      }
+      json modes = json::array(), shares = json::array();
+      for (size_t m = 0; m < type.modes.size(); ++m) {
+        modes.push_back(type.modes[m]);
+        shares.push_back(m < proc.mode_share.size() ? proc.mode_share[m] : 0.0);
       }
       procs.push_back({{"key", type.key},
                        {"name", type.name},
+                       {"index", p},
                        {"designRateTph", proc.design_rate_t_h},
+                       {"basis", type.basis_key},
+                       {"boundary", type.boundary == crx::Boundary::Source  ? "source"
+                                    : type.boundary == crx::Boundary::Sink ? "sink"
+                                                                           : "none"},
+                       {"modes", modes},
+                       {"modeShare", shares},
+                       {"turndown", type.turndown},
+                       {"restartH", type.restart_h},
+                       {"in", streamList(net_in)},
+                       {"out", streamList(net_out)},
                        {"units", units}});
     }
     const std::string preset =

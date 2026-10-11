@@ -79,3 +79,23 @@ function headingToEnd(points: [number, number][], x: number, y: number, dirX: nu
 }
 
 const clamp01 = (t: number) => Math.min(1, Math.max(0, t));
+
+/** §4.4 VehStatus value of a vehicle with no order: parked, and not drawn on the map. */
+export const VEH_IDLE = 0;
+
+/**
+ * Name of the site an idle vehicle is standing at — the nearest site within
+ * `withinKm` of where the engine reports it — or null when it is not near one.
+ */
+export function standingAt(world: WorldSpec, live: Pick<VehicleLive, 'x' | 'y'>, withinKm = 15): string | null {
+  let best: string | null = null;
+  let bestKm = withinKm;
+  for (const site of world.sites) {
+    const km = Math.hypot(site.x - live.x, site.y - live.y);
+    if (km <= bestKm) {
+      bestKm = km;
+      best = site.name;
+    }
+  }
+  return best;
+}

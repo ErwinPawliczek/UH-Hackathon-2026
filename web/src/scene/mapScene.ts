@@ -13,6 +13,8 @@ import { buildHexBoard, deckYAt, surfaceYAt, mapToWorld, SCALE } from './terrain
 import { buildFlowLine, resizeFlowLines, setFlowLineColor, tickFlowLines, type FlowLine } from './lines';
 import { MODE_LINE_STYLE, PIPELINE_WIDTH, V3, flowColor, routeLineColor } from './palette';
 import { SiteLabels } from './siteLabels';
+import { PipelineLabels } from './pipelineLabels';
+import { buildRails, resizeRails, type RailLayer } from './rails';
 import { buildSiteLayer, updateInstances, type SiteLayer } from './siteClusters';
 import {
   buildVehicleLayer, classMode, updateVehicleCargo, updateVehicles, waterSpan,
@@ -30,6 +32,19 @@ const TOP_INSET_PX = 64;
 const BOTTOM_INSET_PX = 16;
 /** Vehicle statuses (§4.4 VehStatus) at which a vehicle stands at a site: idle, queueing, loading, unloading. */
 const AT_SITE = new Set([0, 2, 3, 5, 6]);
+/**
+ * Idle vehicles are not drawn. The engine leaves a vehicle where it last
+ * unloaded and about a third of the fleet is idle at any moment, so drawn
+ * idle trucks read as a car park beside every plant. A vehicle shows only
+ * while it is travelling, queueing for a bay, loading or unloading; it
+ * appears at its site when dispatched and fades out when its job is done.
+ * Set true to draw idle vehicles parked in their rows again.
+ */
+const DRAW_IDLE_VEHICLES = false;
+/** §4.4 VehStatus value of a vehicle with no job. */
+const VEH_IDLE = 0;
+/** Seconds a vehicle takes to appear or fade out. */
+const VEHICLE_FADE_S = 0.25;
 /** Trucks standing at a site park in rows on its near side, this many per row. */
 const PARK_PER_ROW = 9;
 
@@ -69,6 +84,8 @@ export class MapScene {
   private readonly siteLayer: SiteLayer;
   private readonly vehicleLayer: VehicleLayer;
   private readonly labels: SiteLabels;
+  private readonly pipelineLabels: PipelineLabels;
+  private readonly rails: RailLayer | null;
   private readonly flowLines: FlowLine[] = [];
   /** flowLines[i] for i < routeLineCount is world.routes[i]; pipelines follow. */
   private routeLineCount = 0;
@@ -86,11 +103,17 @@ export class MapScene {
   private readonly net: RouteNet;
   private readonly motion: VehicleMotion;
   private readonly poses: VehiclePose[] = [];
+  /** How much of each vehicle is drawn, 0 (hidden) to 1; eases as it appears or fades. */
+  private readonly shown: number[] = [];
+  private lastFrameMs = 0;
   /** Snapshot and run the vehicles are currently heading for. */
   private motionSnap: Snapshot | null = null;
   private motionEpoch = -1;
   /** Parking slot per standing vehicle, kept while it stays at its site. */
   private readonly slots = new Map<number, { key: string; slot: number }>();
+  /** Per vehicle: the last draw target and the site it stood at then (-1 when it was not standing). */
+  private lastTargets: DrawTarget[] = [];
+  private lastStoodAt: number[] = [];
   /** Site index by position, for telling which site a standing vehicle is at. */
   private readonly siteAtCache = new Map<string, number>();
   private readonly raycaster = new THREE.Raycaster();
@@ -174,6 +197,10 @@ export class MapScene {
       });
     });
 
+    // rail lines: drawn as small tracks, nothing runs on them
+    this.rails = buildRails(world, deck, isWater);
+    if (this.rails !== null) this.scene.add(this.rails.group);
+
     this.net = new RouteNet(world);
     this.motion = new VehicleMotion(
       this.net,
@@ -191,6 +218,8 @@ export class MapScene {
     // canvas is always in the DOM here; a detached canvas just gets an
     // off-screen host so labels exist but render nowhere
     const container = canvas.parentElement ?? document.createElement('div');
+    // pipeline names first, so the site labels' overlay sits above them
+    this.pipelineLabels = new PipelineLabels(container, world, (x, y) => deckYAt(world, x, y) + 0.1);
     this.labels = new SiteLabels(container, world, this.siteLayer.siteAnchors);
     this.labels.addTo(this.scene);
 
@@ -306,21 +335,35 @@ export class MapScene {
       const line = this.flowLines[i];
       setFlowLineColor(line, cur.edgeOpen[i] === 0 ? V3.alarm : line.color);
     }
+    let instantPlaced = false;
     if (cur !== this.motionSnap) {
       const last = this.motionSnap;
       const instant =
         last === null || epoch !== this.motionEpoch || cur.tick <= last.tick || cur.nVeh !== last.nVeh;
+      instantPlaced = instant;
       if (instant) this.slots.clear();
       const ticks = last === null ? 0 : Number(cur.tick - last.tick);
+      if (instant) this.lastTargets = [];
       this.motion.retarget(this.drawTargets(cur), nowMs, ticks, instant, stepMs);
       this.motionSnap = cur;
       this.motionEpoch = epoch;
     }
     this.motion.sample(nowMs, this.poses);
     const world = this.world;
-    updateVehicles(this.vehicleLayer, this.poses, (x, y, v) =>
+    const fade = Math.min(1, Math.max(0, (nowMs - this.lastFrameMs) / 1000) / VEHICLE_FADE_S);
+    this.lastFrameMs = nowMs;
+    for (let v = 0; v < cur.nVeh; v++) {
+      const want = DRAW_IDLE_VEHICLES || cur.vehStatus[2 * v] !== VEH_IDLE ? 1 : 0;
+      const now = this.shown[v];
+      this.shown[v] = now === undefined || instantPlaced ? want : now + Math.sign(want - now) * Math.min(fade, Math.abs(want - now));
+    }
+    this.shown.length = cur.nVeh;
+    updateVehicles(
+      this.vehicleLayer,
+      this.poses,
       // trucks keep to the road deck over water; vessels ride the water surface
-      classMode(world.vehicles[v]?.cls ?? '') === 'road' ? deckYAt(world, x, y) : surfaceYAt(world, x, y),
+      (x, y, v) => (classMode(world.vehicles[v]?.cls ?? '') === 'road' ? deckYAt(world, x, y) : surfaceYAt(world, x, y)),
+      (v) => this.shown[v] ?? 1,
     );
     if (cur !== this.cargoSnap) {
       updateVehicleCargo(this.vehicleLayer, this.world, cur);
@@ -373,20 +416,33 @@ export class MapScene {
   private drawTargets(snap: Snapshot): DrawTarget[] {
     const world = this.world;
     const targets: DrawTarget[] = [];
+    const stoodAt: number[] = [];
     for (let v = 0; v < snap.nVeh; v++) {
       const x = snap.vehPos[5 * v];
       const y = snap.vehPos[5 * v + 1];
       const dir: [number, number] = [snap.vehPos[5 * v + 2] || 0, snap.vehPos[5 * v + 3] || 1];
       const mode = classMode(world.vehicles[v]?.cls ?? '');
-      const site = AT_SITE.has(snap.vehStatus[2 * v]) && v < world.vehicles.length ? this.siteAt(x, y) : -1;
-      if (site >= 0) {
+      const status = snap.vehStatus[2 * v];
+      const site = AT_SITE.has(status) && v < world.vehicles.length ? this.siteAt(x, y) : -1;
+      const standing = site >= 0 && (DRAW_IDLE_VEHICLES || status !== VEH_IDLE);
+      if (standing) {
         const parked = this.parkTarget(v, site, this.slotFor(v, `${site}:${mode}`), dir);
         if (parked !== null) {
           targets.push(parked);
+          stoodAt.push(site);
           continue;
         }
       }
       this.slots.delete(v);
+      // A hidden idle vehicle gives up its slot but stays where it stood, so
+      // it fades out in place and later drives off from there.
+      const held = this.lastTargets[v];
+      if (site >= 0 && held !== undefined && this.lastStoodAt[v] === site) {
+        targets.push(held);
+        stoodAt.push(site);
+        continue;
+      }
+      stoodAt.push(-1);
       const routeId = snap.vehRoute?.[v];
       const progress = snap.vehProgress?.[v];
       if (routeId !== undefined && progress !== undefined && routeId < world.routes.length) {
@@ -398,6 +454,8 @@ export class MapScene {
       const node = this.net.nodeNear(mode, x, y, 1.5);
       targets.push({ x, y, net: node >= 0 ? { kind: 'node', node } : null, dir, restDir: null, standoffKm: 0 });
     }
+    this.lastTargets = targets;
+    this.lastStoodAt = stoodAt;
     return targets;
   }
 
@@ -445,7 +503,7 @@ export class MapScene {
     };
   }
 
-  private syncRing(selection: Selection, poses: { x: number; y: number }[]): void {
+  private syncRing(selection: Selection, poses: readonly { x: number; y: number }[]): void {
     if (selection === null) {
       this.ring.visible = false;
       return;
@@ -460,7 +518,8 @@ export class MapScene {
       this.ring.scale.setScalar((anchor.clusterR + 0.15) / 1.02);
     } else {
       const pose = poses[selection.index];
-      if (pose === undefined) {
+      // no ring round a vehicle that is not drawn
+      if (pose === undefined || (this.shown[selection.index] ?? 1) < 0.5) {
         this.ring.visible = false;
         return;
       }
@@ -490,7 +549,8 @@ export class MapScene {
       const meshIdx = this.vehicleLayer.meshes.indexOf(hit.object as THREE.InstancedMesh);
       if (meshIdx >= 0 && hit.instanceId !== undefined) {
         const index = this.vehicleLayer.members[meshIdx][hit.instanceId];
-        if (index !== undefined) return { kind: 'vehicle', index };
+        // a vehicle that is not drawn cannot be picked
+        if (index !== undefined && (this.shown[index] ?? 1) >= 0.5) return { kind: 'vehicle', index };
       }
     }
     // Small pads on a large map miss raycasts by a few pixels — fall back
@@ -517,7 +577,9 @@ export class MapScene {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
     this.labels.setSize(width, height);
+    this.pipelineLabels.setSize(width, height);
     resizeFlowLines(this.flowLines, width, height);
+    resizeRails(this.rails, width, height);
     if (!this.userMoved) this.frameMap(height);
   }
 
@@ -530,6 +592,7 @@ export class MapScene {
       this.controls.target.y,
       this.controls.target.z,
     );
+    this.pipelineLabels.update(this.camera);
   }
 
   /** Advance flow-dash animation; dt in seconds. Kept for the render loop API. */
@@ -539,6 +602,7 @@ export class MapScene {
 
   dispose(): void {
     this.labels.dispose();
+    this.pipelineLabels.dispose();
     this.controls.dispose();
     this.scene.traverse((obj) => {
       // (Line2 is a Mesh, so the fat route lines are covered too.)
