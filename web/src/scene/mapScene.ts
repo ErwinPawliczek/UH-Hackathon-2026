@@ -13,6 +13,7 @@ import { buildHexBoard, deckYAt, surfaceYAt, mapToWorld, SCALE } from './terrain
 import { buildFlowLine, resizeFlowLines, setFlowLineColor, tickFlowLines, type FlowLine } from './lines';
 import { MODE_LINE_STYLE, PIPELINE_WIDTH, V3, flowColor, routeLineColor } from './palette';
 import { SiteLabels } from './siteLabels';
+import { PipelineLabels } from './pipelineLabels';
 import { buildSiteLayer, updateInstances, type SiteLayer } from './siteClusters';
 import {
   buildVehicleLayer, classMode, updateVehicleCargo, updateVehicles, waterSpan,
@@ -82,6 +83,7 @@ export class MapScene {
   private readonly siteLayer: SiteLayer;
   private readonly vehicleLayer: VehicleLayer;
   private readonly labels: SiteLabels;
+  private readonly pipelineLabels: PipelineLabels;
   private readonly flowLines: FlowLine[] = [];
   /** flowLines[i] for i < routeLineCount is world.routes[i]; pipelines follow. */
   private routeLineCount = 0;
@@ -210,6 +212,8 @@ export class MapScene {
     // canvas is always in the DOM here; a detached canvas just gets an
     // off-screen host so labels exist but render nowhere
     const container = canvas.parentElement ?? document.createElement('div');
+    // pipeline names first, so the site labels' overlay sits above them
+    this.pipelineLabels = new PipelineLabels(container, world, (x, y) => deckYAt(world, x, y) + 0.1);
     this.labels = new SiteLabels(container, world, this.siteLayer.siteAnchors);
     this.labels.addTo(this.scene);
 
@@ -567,6 +571,7 @@ export class MapScene {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
     this.labels.setSize(width, height);
+    this.pipelineLabels.setSize(width, height);
     resizeFlowLines(this.flowLines, width, height);
     if (!this.userMoved) this.frameMap(height);
   }
@@ -580,6 +585,7 @@ export class MapScene {
       this.controls.target.y,
       this.controls.target.z,
     );
+    this.pipelineLabels.update(this.camera);
   }
 
   /** Advance flow-dash animation; dt in seconds. Kept for the render loop API. */
@@ -589,6 +595,7 @@ export class MapScene {
 
   dispose(): void {
     this.labels.dispose();
+    this.pipelineLabels.dispose();
     this.controls.dispose();
     this.scene.traverse((obj) => {
       // (Line2 is a Mesh, so the fat route lines are covered too.)
