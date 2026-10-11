@@ -38,8 +38,37 @@ export class HttpError extends Error {
   }
 }
 
+/** An event as the engine sends it: `site` is the site's key ("CRACKER_ETHANE"), not its index. */
+type WireEvent = Omit<SimEvent, 'site'> & { site?: string | number };
+
+/** Site key → index in the world's site list. */
+export function siteKeyIndex(world: Pick<WorldSpec, 'sites'> | undefined): Map<string, number> {
+  const keys = new Map<string, number>();
+  (world?.sites ?? []).forEach((site, i) => {
+    if (typeof site.key === 'string') keys.set(site.key, i);
+  });
+  return keys;
+}
+
+/**
+ * Events with `site` as the client uses it everywhere: an index into the
+ * world's sites. A key the world does not have leaves the event without a
+ * site rather than pointing it at the wrong one.
+ */
+export function resolveEventSites(events: WireEvent[], keys: ReadonlyMap<string, number>): SimEvent[] {
+  return events.map((e) => {
+    if (typeof e.site !== 'string') return e as SimEvent;
+    const { site, ...rest } = e;
+    const index = keys.get(site);
+    return index === undefined ? rest : { ...rest, site: index };
+  });
+}
+
 export class HttpBackend implements SimBackend {
   readonly kind = 'http' as const;
+
+  /** per session: its world's site keys, for turning an event's site key into an index */
+  private readonly siteKeys = new Map<string, Map<string, number>>();
 
   constructor(
     private readonly base: string,
@@ -98,7 +127,9 @@ export class HttpBackend implements SimBackend {
   }
 
   async world(id: string): Promise<WorldSpec> {
-    return this.json(`/api/sim/${encodeURIComponent(id)}/world`);
+    const world = await this.json<WorldSpec>(`/api/sim/${encodeURIComponent(id)}/world`);
+    this.siteKeys.set(id, siteKeyIndex(world));
+    return world;
   }
 
   async step(id: string, ticks: number): Promise<Snapshot> {
@@ -128,7 +159,11 @@ export class HttpBackend implements SimBackend {
     // sentinel (-1, which lets the 0-based stub log include seq 0) must not
     // reach the wire — floor it at 0.
     const since = Math.max(0, Math.floor(sinceSeq));
-    return this.json(`/api/sim/${encodeURIComponent(id)}/events?since=${since}`);
+    const events = await this.json<WireEvent[]>(`/api/sim/${encodeURIComponent(id)}/events?since=${since}`);
+    // The engine names an event's site by key; the client selects sites by index.
+    if (!events.some((e) => typeof e.site === 'string')) return events as SimEvent[];
+    if (!this.siteKeys.has(id)) await this.world(id); // a session whose world was never asked for (a fork)
+    return resolveEventSites(events, this.siteKeys.get(id) ?? new Map());
   }
 
   async kpis(id: string): Promise<number[]> {
@@ -188,6 +223,7 @@ export class HttpBackend implements SimBackend {
    * session was already released, expired or evicted — nothing to surface.
    */
   async release(id: string): Promise<void> {
+    this.siteKeys.delete(id);
     try {
       await this.send(`/api/sim/${encodeURIComponent(id)}`, {
         method: 'DELETE',
