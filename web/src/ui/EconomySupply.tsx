@@ -21,7 +21,7 @@ import { useSim } from '../store/sim';
 import { SiteBadge } from './SiteIcon';
 import { fmtTonnes } from './economyData';
 import { useEconomyView } from './economyView';
-import { fmtMomentWords } from './format';
+import { fmtClock, fmtMomentWords } from './format';
 import {
   blockedWords, cashWords, cutOff, fmtCover, fmtTrip, inTime, nextPassWords, optionCash, orderBookedWords, orderCommand,
   orderRefusedWords, sellerSplitWords, sortByCover, stateWords, supplierDown, tankHeadline, tankLabel, useSourcingDetail, useSourcingList,
