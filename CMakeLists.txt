@@ -64,6 +64,12 @@ target_compile_definitions(crx_mapworld_tests PRIVATE
   CRX_WORLDS_DIR="${CMAKE_SOURCE_DIR}/engine/data/worlds")
 add_test(NAME mapworld COMMAND crx_mapworld_tests)
 
+# 60-day gate for the default world: service >= 95% at days 7, 30 and 60, every
+# customer above 90% in every window, and no plant starved of feed after day 1.
+add_test(NAME mapworld_60d COMMAND crx-report
+  --config "{\"seed\":42,\"world\":\"erwin-world-v1\"}"
+  --days 60 --checkpoints 7,30,60 --min-service 0.95 --min-sink-service 0.9 --quiet)
+
 # ---- crx-server: HTTP host over the C ABI (§7.4) ----
 FetchContent_Declare(httplib
   URL https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.18.7.tar.gz)
