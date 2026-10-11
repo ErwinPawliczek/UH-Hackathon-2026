@@ -13,6 +13,7 @@
 // that dies mid-use (404/410 after server-side idle expiry or LRU eviction)
 // is replaced transparently instead of surfacing an error.
 
+import { customLayout } from './customMap';
 import { createBackend } from '../engine/api';
 import type { BackendKind, SimBackend } from '../engine/api';
 import { HttpError } from '../engine/httpBackend';
@@ -131,7 +132,10 @@ async function openSessionFor(
   backend: SimBackend,
   stillRunning: () => boolean = () => true,
 ): Promise<LiveSession | null> {
-  const { id } = await backend.create({ seed, scenario, world: worldName });
+  // a map drawn in the builder and sent here to be run, if there is one
+  const layout = backend.kind === 'http' ? customLayout() : null;
+  useSim.setState({ customMap: layout !== null });
+  const { id } = await backend.create({ seed, scenario, world: worldName, ...(layout !== null ? { layout } : {}) });
   // The M0 stub engine's /world reply is too sparse to render (§7.3 world
   // lands in M1); reconcile it with the client's deterministic stub world.
   const world = resolveWorld(await backend.world(id), seed);
@@ -192,7 +196,8 @@ export function openEngineSession(
       if (live === null) return; // replaced mid-open; openSessionFor released the id
       session = live;
     } catch (err) {
-      if (!cancelled) useSim.getState().setError(err instanceof Error ? err.message : String(err));
+      // a refused request carries the server's own reason ("Refinery needs a river lane within 12 km")
+      if (!cancelled) useSim.getState().setError(err instanceof HttpError ? err.reason : err instanceof Error ? err.message : String(err));
     }
   })();
   return () => {

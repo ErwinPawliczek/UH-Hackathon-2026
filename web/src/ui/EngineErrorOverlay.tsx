@@ -6,10 +6,28 @@
 export function EngineErrorOverlay({
   message,
   onRetry,
+  custom = null,
 }: {
   message: string;
   onRetry: () => void;
+  /** the run was to be on a map from the map builder: the ways out are to edit it or to drop it */
+  custom?: { editHref: string; onDefaultWorld: () => void } | null;
 }) {
+  if (custom !== null) {
+    return (
+      <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/80" data-testid="fatal-error">
+        <div className="chamfer flex max-w-md flex-col items-start gap-2 p-6">
+          <h1 className="wordmark text-lg text-alarm" role="alert">This map cannot be run yet</h1>
+          <p className="text-sm text-ink">The server looked at the map you drew and answered:</p>
+          <p className="w-full break-words rounded-sm bg-panel-2 px-2 py-1 text-sm text-ink" data-testid="fatal-reason">{message}</p>
+          <div className="mt-1 flex gap-2">
+            <a className="btn btn-primary" href={custom.editHref} data-testid="error-edit-map">Edit map</a>
+            <button className="btn" onClick={custom.onDefaultWorld} data-testid="error-default-world">Default world</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/80" data-testid="fatal-error">
       <div className="chamfer flex max-w-md flex-col items-start gap-2 p-6">

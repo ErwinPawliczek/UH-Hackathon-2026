@@ -112,6 +112,8 @@ export interface SimState {
   error: string | null;
   /** the server no longer has this run (it restarted, or the run sat idle too long): only a new run can follow */
   ended: boolean;
+  /** this run is on a map drawn in the map builder, not the default world */
+  customMap: boolean;
   /**
    * Live backend command dispatcher, wired by the engine session; null
    * between sessions. A command the engine accepts leaves a note in the log
@@ -199,6 +201,7 @@ export const useSim = create<SimState>()(
       selected: null,
       error: null,
       ended: false,
+      customMap: false,
       sendCommand: null,
       fetchVehicle: null,
       fetchSeries: null,

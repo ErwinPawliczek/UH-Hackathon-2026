@@ -70,6 +70,24 @@ describe('HttpBackend request mapping', () => {
     expect(bodies).toEqual([{ seed: 7, world: 'erwin-world-v1' }, { seed: 7 }]);
   });
 
+  it("sends a drawn layout with its world, and passes a refusal on with the server's reason instead of falling back", async () => {
+    const layout = { version: 2, sites: [] };
+    const ok = fakeFetch({ 'POST /api/sim': () => ({ id: 'sim-9' }) });
+    await new HttpBackend('http://x', ok.impl).create({ seed: 42, scenario: 'none', world: 'erwin-world-v1', layout });
+    expect(JSON.parse(ok.calls[0].body)).toEqual({ seed: 42, world: 'erwin-world-v1', layout });
+
+    const calls: string[] = [];
+    const refuse: typeof fetch = async (_input, init) => {
+      calls.push(String(init?.body));
+      return new Response(JSON.stringify({ error: 'Refinery needs a river lane within 12 km' }), { status: 400 });
+    };
+    const b = new HttpBackend('http://x', refuse);
+    const err = await b.create({ seed: 42, scenario: 'none', world: 'erwin-world-v1', layout }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HttpError);
+    expect((err as HttpError).reason).toBe('Refinery needs a river lane within 12 km');
+    expect(calls).toHaveLength(1); // no second create on the built-in world
+  });
+
   it('does not retry a named-world create on errors other than a 400', async () => {
     let n = 0;
     const impl: typeof fetch = async () => {

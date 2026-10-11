@@ -112,6 +112,10 @@ export class HttpBackend implements SimBackend {
         headers: JSON_HEADERS,
         body: JSON.stringify(body),
       });
+    // A map drawn in the builder: the layout goes with the world it redraws.
+    // A refusal is the visitor's to read and act on (the layout cannot be
+    // run as drawn), so there is no falling back to another world here.
+    if (config.layout !== undefined) return post({ seed: config.seed, world: config.world, layout: config.layout });
     const named = config.world !== undefined && config.world !== BUILTIN_WORLD;
     if (!named) return post({ seed: config.seed });
     try {
