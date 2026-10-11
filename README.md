@@ -56,7 +56,7 @@ plant how fast to run from a few simple signals, so the network reacts to an ups
 
 ## Run it locally
 
-Needs a C++20 compiler, CMake 3.23 or newer with Ninja, and Node 20 or newer.
+Needs a C++20 compiler, CMake 3.28 or newer with Ninja, and Node 20 or newer.
 
 ```sh
 cmake --preset native-release
