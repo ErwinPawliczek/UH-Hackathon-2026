@@ -10,7 +10,7 @@ import { siteRanges, type WorldSpec } from '../engine/world';
 import type { Snapshot } from '../engine/snapshot';
 import { materialColor, siteStateStyle } from './palette';
 import { hexCenter, hexSpiral } from './hexGrid';
-import { SCALE, terrainYAt } from './terrainMesh';
+import { SCALE, hexPrismGeometry, terrainYAt } from './terrainMesh';
 
 /** Marker pad dimensions, in world units (1 unit = 10 km). */
 export const PAD_RADIUS = 0.3;
@@ -193,8 +193,8 @@ export function buildSiteLayer(world: WorldSpec): SiteLayer {
   });
 
   const pads = new THREE.InstancedMesh(
-    new THREE.CylinderGeometry(1, 1, 1, 6),
-    new THREE.MeshLambertMaterial({ color: 0xffffff }),
+    hexPrismGeometry(0.902), // 0xe6e9ec walls against a white top
+    new THREE.MeshBasicMaterial({ vertexColors: true, color: 0xffffff }),
     markers.length,
   );
   const rings = new THREE.InstancedMesh(
@@ -252,7 +252,7 @@ export function buildSiteLayer(world: WorldSpec): SiteLayer {
   const anchors: TankAnchor[] = [];
   const tanks = new THREE.InstancedMesh(
     new THREE.BoxGeometry(0.55, 1, 0.55),
-    new THREE.MeshLambertMaterial(),
+    new THREE.MeshBasicMaterial({ color: 0xffffff }),
     Math.max(1, world.tanks.length),
   );
   tanks.count = world.tanks.length;

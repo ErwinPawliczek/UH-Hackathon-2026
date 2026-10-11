@@ -40,14 +40,43 @@ export function cellTopY(cell: HexCell, seaLevelM: number): number {
   return cell.terrain === 'water' ? h - WATER_DROP : h - LAND_SINK;
 }
 
+/**
+ * Hex prism geometry (circumradius 1, height 1, centred) with baked vertex
+ * colours — white top, darkened walls — and the invisible bottom cap stripped,
+ * so a whole instance draws in ONE pass. Instance colour still multiplies the
+ * per-vertex tone, giving exact top-face colours with shaded step walls.
+ */
+export function hexPrismGeometry(sideTone: number): THREE.BufferGeometry {
+  const src = new THREE.CylinderGeometry(1, 1, 1, 6, 1, false).toNonIndexed();
+  const pos = src.getAttribute('position');
+  const nor = src.getAttribute('normal');
+  const p: number[] = [];
+  const c: number[] = [];
+  for (let t = 0; t < pos.count; t += 3) {
+    if (nor.getY(t) < -0.9) continue; // bottom cap is never seen — drop it
+    for (let k = 0; k < 3; k++) {
+      const v = t + k;
+      p.push(pos.getX(v), pos.getY(v), pos.getZ(v));
+      const tone = nor.getY(v) > 0.9 ? 1 : sideTone;
+      c.push(tone, tone, tone);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(c, 3));
+  return geo;
+}
+
 /** The instanced hex board replacing the old smooth terrain mesh. */
 export function buildHexBoard(world: WorldSpec): THREE.InstancedMesh {
   const cells = buildCells(world.terrain, HEX_SIZE_KM);
   const r = HEX_SIZE_KM * SCALE;
-  const geo = new THREE.CylinderGeometry(1, 1, 1, 6);
+  // One unlit pass per instance; the prism's baked vertex colours darken the
+  // walls so elevation steps read as edges, while the top face shows the
+  // exact v3 token colour via the instance colour.
   const mesh = new THREE.InstancedMesh(
-    geo,
-    new THREE.MeshLambertMaterial({ color: 0xffffff }),
+    hexPrismGeometry(0.855),
+    new THREE.MeshBasicMaterial({ vertexColors: true, color: 0xffffff }),
     cells.length,
   );
   const m = new THREE.Matrix4();
