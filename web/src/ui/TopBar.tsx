@@ -92,22 +92,23 @@ export function TopBar() {
     // z-[60]: above every floating window (they stack from 20 up, see DraggableWindow),
     // so a menu opened from the bar — Scenario — is never hidden under a window
     // that sits just below it. Windows cannot be dragged over the bar itself.
-    <header className="pointer-events-auto absolute inset-x-0 top-0 z-[60] flex h-12 items-center gap-2 bg-panel px-4" data-testid="top-bar">
+    <header className="pointer-events-auto absolute inset-x-0 top-0 z-[60] flex h-12 items-center gap-1 bg-panel px-2 lg:gap-2 lg:px-4" data-testid="top-bar">
       <ChainEdge />
       <span className="flex items-center gap-2" data-testid="wordmark">
         <img src="/logo.svg" alt="PetroGrid mark" width={20} height={20} />
-        <span className="wordmark text-base leading-none">
+        {/* on a narrow screen the mark stands for the name, so the controls fit */}
+        <span className="wordmark hidden text-base leading-none lg:inline">
           Petro<span className="text-blue">Grid</span>
         </span>
       </span>
 
-      <span className="data ml-2 min-w-28 rounded-sm bg-panel-2 px-2 py-1" data-testid="clock">
+      <span className="data min-w-24 rounded-sm lg:ml-2 lg:min-w-28 bg-panel-2 px-2 py-1" data-testid="clock">
         {tick === undefined ? '—' : fmtClock(Number(tick))}
       </span>
 
       {/* Start and Resume are the call to action (primary); Pause, while running, reads as the active state. */}
       <button className={`btn ${playing ? 'btn-active' : 'btn-primary'}`} onClick={togglePlay} data-testid="play-pause">
-        {!started ? '▶ Start simulation' : playing ? '⏸ Pause' : '▶ Resume'}
+        {!started ? <>▶ Start<span className="hidden lg:inline"> simulation</span></> : playing ? '⏸ Pause' : '▶ Resume'}
       </button>
 
       <SpeedControl />
@@ -149,7 +150,7 @@ export function TopBar() {
         aria-pressed={rewindOpen}
         data-testid="rewind-toggle"
       >
-        ↶ Back in time
+        ↶ Back<span className="hidden lg:inline"> in time</span>
       </button>
       <button
         className={`btn ${sitesOpen ? 'btn-active' : ''}`}

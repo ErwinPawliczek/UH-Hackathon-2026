@@ -108,7 +108,7 @@ export function DropdownMenu({
         onKeyDown={onButtonKey}
         data-testid={testId}
       >
-        <span className="inline-block max-w-72 truncate align-bottom">{label}</span>
+        <span className="inline-block max-w-28 truncate align-bottom lg:max-w-72">{label}</span>
         <span aria-hidden="true" className="ml-2 text-[9px]">{open ? '▲' : '▼'}</span>
       </button>
       {open && (
