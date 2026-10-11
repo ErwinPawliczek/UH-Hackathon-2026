@@ -688,6 +688,7 @@ bool loadWorld(const std::string& name, const std::string& text, uint64_t seed, 
                      : k == "demand_elasticity"  ? &market.demand_elasticity
                      : k == "demand_min_frac"    ? &market.demand_min_frac
                      : k == "demand_max_frac"    ? &market.demand_max_frac
+                     : k == "margin_control"     ? &market.margin_control
                                                        : nullptr;
       if (slot == nullptr) bad("market: unknown key \"" + k + "\"");
       // Switches may be written true / false.

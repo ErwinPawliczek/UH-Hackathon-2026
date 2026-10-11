@@ -90,6 +90,11 @@ Quote quoteLot(const World& world, const State& state, const PathCache& paths,
   // §5.6 price formation and cost, all per tonne.
   const double base = mat.base_price;
   q.ask = base * (1.0 + params.beta * (1.0 - 2.0 * q.seller_fill));
+  // Cost pass-through (margin control): dearer feed raises the ask by the
+  // same amount, and nobody sells under what the product cost to make.
+  if (state.margin_control)
+    q.ask = std::max(q.ask + base * state.cost_delta[seller_tank],
+                     state.ask_floor[seller_tank] * (1.0 - q.seller_fill));
   // The seller's own markup (set_price) on top of the rule.
   const double markup = state.site_markup[seller.site.v];
   if (markup != 0.0) q.ask *= 1.0 + markup;
@@ -310,10 +315,15 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
       }
       bookLot(world, state, req.tank, best.seller_tank, best.cls, lot_t, best.price,
               best.freight_usd, best.eta_h, best.km, req.urgency);
-      if (params.demand_elasticity > 0.0) {
-        // What this buyer has been paying lately, for its customers' appetite.
+      if (params.demand_elasticity > 0.0 || params.margin_control) {
+        // What this buyer has been paying lately: its customers' appetite
+        // and its own margin follow it.
         double& paid = state.tank[req.tank].paid_avg;
         paid = paid <= 0.0 ? best.price : paid + params.paid_avg_weight * (best.price - paid);
+      }
+      if (params.margin_control) {
+        double& got = state.tank[best.seller_tank].sold_avg;
+        got = got <= 0.0 ? best.price : got + params.paid_avg_weight * (best.price - got);
       }
 
       out.orders_created += 1;

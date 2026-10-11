@@ -3,6 +3,7 @@
 
 #include "sim/inspect.h"
 #include "sim/layout.h"
+#include "sim/market.h"
 #include "sim/sixsite.h"
 #include "sim/worldfile.h"
 
@@ -81,6 +82,10 @@ std::unique_ptr<Sim> Sim::createOn(std::shared_ptr<World> world, uint64_t seed) 
   sim->state_.site_trade.assign(w.sites.size(), SiteTrade{});
   sim->state_.pipe_moved_t.assign(w.pipelines.size(), 0.0);
   sim->state_.demand_factor.assign(w.processes.size(), 1.0);
+  sim->state_.cost_delta.assign(w.tanks.size(), 0.0);
+  sim->state_.ask_floor.assign(w.tanks.size(), 0.0);
+  sim->state_.margin_signal.assign(w.processes.size(), 1.0);
+  sim->state_.proc_margin.assign(w.processes.size(), 0.0);
   sim->state_.mat_bought_t.assign(w.catalog.materials.size(), 0.0);
   sim->state_.mat_bought_usd.assign(w.catalog.materials.size(), 0.0);
   // M2 logistics (§4.4): all edges open, market index at par, the fleet at
@@ -118,6 +123,8 @@ std::unique_ptr<Sim> Sim::createOn(std::shared_ptr<World> world, uint64_t seed) 
   if (mk.demand_elasticity >= 0) mp.demand_elasticity = mk.demand_elasticity;
   if (mk.demand_min_frac >= 0) mp.demand_min_frac = mk.demand_min_frac;
   if (mk.demand_max_frac >= 0) mp.demand_max_frac = mk.demand_max_frac;
+  if (mk.margin_control >= 0) mp.margin_control = mk.margin_control > 0;
+  sim->state_.margin_control = mp.margin_control;
   sim->state_.demand_elasticity = mp.demand_elasticity;
   sim->state_.demand_min = mp.demand_min_frac;
   sim->state_.demand_max = mp.demand_max_frac;
@@ -199,6 +206,7 @@ void Sim::step(uint32_t ticks) {
     ++state_.tick;
     stepEvents(w, state_, rec_);
     computeSignals(w, state_, signals);
+    if (state_.tick % 4 == 0) stepMarket(w, state_);
     stepControl(w, state_, signals, rec_, control);
     // §5.10 shutdown hours: every plant (not a source or a sink) that is
     // shut down or restarting this tick counts its quarter hour.

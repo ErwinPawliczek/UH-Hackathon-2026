@@ -46,6 +46,8 @@ struct TankState {
   // (0 = nothing booked yet, read as the base price). Kept only in worlds
   // with demand elasticity; hashed only when non-zero.
   double paid_avg = 0;
+  // The same for lots sold from this tank (kept with margin control only).
+  double sold_avg = 0;
 };
 
 // §4.4 vehicle state. Plain data so forks copy it: the planned node sequence
@@ -192,6 +194,11 @@ struct State {
   double demand_elasticity = 0, demand_min = 0.6, demand_max = 1.2;
   std::vector<double> demand_factor;   // per process: wanted / base this tick (1 for non-sinks)
   double cum_priced_out_t = 0, cum_priced_out_usd = 0;  // not hashed: follow from hashed state
+  // Margin control (market.h; from the world's market block). The vectors
+  // carry over from hour to hour, so they are state: hashed where non-zero.
+  bool margin_control = false;
+  std::vector<double> cost_delta, ask_floor;      // per tank
+  std::vector<double> margin_signal, proc_margin; // per process
   // trade_block: pairs that do not trade, as seller site << 32 | buyer site,
   // kept sorted. Empty unless a player set one; hashed only when not empty.
   std::vector<uint64_t> trade_blocks;

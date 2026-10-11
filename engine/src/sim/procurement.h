@@ -60,6 +60,8 @@ struct MarketParams {
   // when what they pay is above the base price, more when below.
   double demand_elasticity = 0.0, demand_min_frac = 0.6, demand_max_frac = 1.2;
   double paid_avg_weight = 0.2;  // weight of each new lot in the rolling price paid
+  // Margin control and cost pass-through (market.h).
+  bool margin_control = false;
 };
 
 // One way of filling a lot: a seller tank and a vehicle class, priced as the

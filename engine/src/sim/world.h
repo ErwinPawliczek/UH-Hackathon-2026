@@ -188,6 +188,7 @@ struct World {
     double price_cheap_ratio = -1, price_dear_ratio = -1, price_cheap_fill = -1,
            price_dear_fill = -1, price_cheap_cover = -1, price_dear_cover = -1;
     double demand_elasticity = -1, demand_min_frac = -1, demand_max_frac = -1;
+    double margin_control = -1;
   };
   Market market;
 
