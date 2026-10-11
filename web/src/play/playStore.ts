@@ -68,7 +68,7 @@ export const usePlay = create<PlayState>()((set, get) => {
     try {
       for (const a of actions) {
         const r = await source.play(seat.token, a);
-        if (r.ok === false) throw new Error(r.error ?? 'The game did not accept that.');
+        if (r.ok === false) throw new Error(r.error ?? 'The simulation did not accept that.');
       }
       set({ confirmedAt: performance.now(), error: null });
     } catch (err) {
@@ -139,7 +139,7 @@ export const usePlay = create<PlayState>()((set, get) => {
       set({ sending: true });
       try {
         const r = await source.play(seat.token, { action: 'unit', unit_index: unitIndex, down });
-        if (r.ok === false) set({ error: r.error ?? 'The game did not accept that.' });
+        if (r.ok === false) set({ error: r.error ?? 'The simulation did not accept that.' });
         else set((s) => ({ confirmedAt: performance.now(), error: null, ownDown: down ? [...new Set([...s.ownDown, unitIndex])] : s.ownDown.filter((u) => u !== unitIndex) }));
       } catch (err) {
         set({ error: say(err) });

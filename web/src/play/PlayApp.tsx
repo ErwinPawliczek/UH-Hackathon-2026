@@ -55,8 +55,8 @@ function NameScreen() {
   return (
     <main className="flex h-full flex-col items-center justify-center gap-5 bg-white px-6" data-testid="play-name">
       <Mark size={34} />
-      <h1 className="wordmark text-2xl text-ink">Join the game</h1>
-      <p className="text-sm text-muted">Game <span className="data text-ink">{code}</span>. You will run one chemical plant.</p>
+      <h1 className="wordmark text-2xl text-ink">Join the simulation</h1>
+      <p className="text-sm text-muted">Session <span className="data text-ink">{code}</span>. You will run one chemical plant.</p>
       <form className="flex w-full max-w-xs flex-col gap-3" onSubmit={(e) => { e.preventDefault(); go(); }}>
         <label className="flex flex-col gap-1 text-sm text-ink" htmlFor="play-name-input">
           Your name
@@ -254,7 +254,7 @@ function PlantSheet({ room, site }: { room: RoomInfo; site: number }) {
       </div>
 
       <p className="min-h-[18px] text-xs" role="status" data-testid="play-saved" style={{ color: error !== null ? 'var(--alarm)' : 'var(--muted)' }}>
-        {error !== null ? error : waiting ? 'Sending…' : saved ? 'Saved: the game has your settings.' : room.phase === 'lobby' ? 'Settings take effect when the host starts.' : ''}
+        {error !== null ? error : waiting ? 'Sending…' : saved ? 'Saved: your settings are in.' : room.phase === 'lobby' ? 'Settings take effect when the host starts.' : ''}
       </p>
 
       <Slider
@@ -431,7 +431,7 @@ export function PlayApp() {
     return (
       <main className="flex h-full flex-col items-center justify-center gap-4 bg-white px-6 text-center" data-testid="play-no-room">
         <Mark size={34} />
-        <p className="text-sm text-ink">Scan the code on the big screen to join a game.</p>
+        <p className="text-sm text-ink">Scan the code on the big screen to join the simulation.</p>
       </main>
     );
   }
@@ -440,7 +440,7 @@ export function PlayApp() {
     return (
       <main className="flex h-full flex-col items-center justify-center gap-4 bg-white px-6 text-center" data-testid="play-gone">
         <Mark size={34} />
-        <h1 className="wordmark text-xl text-ink">This game has ended</h1>
+        <h1 className="wordmark text-xl text-ink">This simulation has ended</h1>
         <p className="text-sm text-muted">Scan the code on the big screen to join the next one.</p>
       </main>
     );
@@ -454,7 +454,7 @@ export function PlayApp() {
   const banner = room?.phase === 'paused'
     ? 'Paused by the host'
     : room?.phase === 'ended'
-      ? 'The game is over'
+      ? 'The simulation is over'
       : hit !== undefined && hit.seq > seenHit
         ? `Your plant: ${hit.text}`
         : null;
@@ -500,7 +500,7 @@ export function PlayApp() {
       </div>
 
       {room === null
-        ? <div className="shrink-0 border-t border-line bg-panel px-4 py-4 text-sm text-muted" role="status">{roomError ?? 'Finding the game…'}</div>
+        ? <div className="shrink-0 border-t border-line bg-panel px-4 py-4 text-sm text-muted" role="status">{roomError ?? 'Finding the simulation…'}</div>
         : playing && mySite !== null
           ? <PlantSheet room={room} site={mySite} />
           : room.phase !== 'lobby' && mySite === null

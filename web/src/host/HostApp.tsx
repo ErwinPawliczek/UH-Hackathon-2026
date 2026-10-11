@@ -52,20 +52,33 @@ function Mark() {
   );
 }
 
-function Landing({ onHost, busy, error }: { onHost: () => void; busy: boolean; error: string | null }) {
+function Landing({ onHost, busy, error }: { onHost: (password: string) => void; busy: boolean; error: string | null }) {
+  const [password, setPassword] = useState('');
   return (
     <div className="flex h-dvh w-full flex-col items-center justify-center gap-6 bg-white text-ink">
       <Mark />
-      <h1 className="font-display text-4xl font-bold">Host a multiplayer game</h1>
+      <h1 className="font-display text-4xl font-bold">Host a collaborative simulation</h1>
       <p className="max-w-[46ch] text-center text-base text-muted">
         Everyone joins on a phone with a QR code, takes a plant, and sets its price, rate and units. You run the
         clock and break things from this screen.
       </p>
-      <button className="btn btn-primary btn-lg" onClick={onHost} disabled={busy} data-testid="host-create">
-        {busy ? 'Opening a room…' : 'Host a game'}
-      </button>
+      <form className="flex flex-col items-center gap-3" onSubmit={(e) => { e.preventDefault(); onHost(password); }}>
+        <input
+          type="password"
+          className="w-64 border border-line bg-white px-3 py-2 text-center text-base text-ink outline-none focus:border-blue"
+          placeholder="Host password"
+          aria-label="Host password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          data-testid="host-password"
+        />
+        <button type="submit" className="btn btn-primary btn-lg" disabled={busy} data-testid="host-create">
+          {busy ? 'Opening a room…' : 'Start a session'}
+        </button>
+      </form>
       {error !== null && <p className="text-sm text-alarm" role="alert">{error}</p>}
-      <a className="text-sm text-muted underline" href="/">Back to the single-player simulation</a>
+      <a className="text-sm text-muted underline" href="/">Back to the main simulation</a>
     </div>
   );
 }
@@ -102,7 +115,7 @@ function Lobby({ room, url, onStart, busy }: { room: RoomInfo; url: string; onSt
   return (
     <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-start p-8">
       <section className="chamfer pointer-events-auto flex w-[430px] flex-col gap-4 p-6" style={CARD} data-testid="host-lobby">
-        <div className="flex items-center justify-between"><Mark /><span className="label">Multiplayer lobby</span></div>
+        <div className="flex items-center justify-between"><Mark /><span className="label">Collaborative simulation</span></div>
         <div className="flex flex-col items-center gap-2">
           <Qr text={url} size={300} testId="host-qr" />
           <div className="font-display text-6xl font-extrabold leading-none tracking-[0.12em] text-ink" data-testid="host-code">{room.code}</div>
@@ -112,7 +125,7 @@ function Lobby({ room, url, onStart, busy }: { room: RoomInfo; url: string; onSt
           <div className="label mb-1">{room.players.length === 0 ? 'Players' : `${room.players.length} joined · ${taken} with a plant · ${free} plants free`}</div>
           <div className="max-h-[190px] overflow-auto"><Players room={room} /></div>
         </div>
-        <button className="btn btn-primary btn-lg self-stretch" onClick={onStart} disabled={busy} data-testid="host-start">Start the game</button>
+        <button className="btn btn-primary btn-lg self-stretch" onClick={onStart} disabled={busy} data-testid="host-start">Start collaborative simulation</button>
         <p className="text-xs text-muted">Plants nobody takes run themselves. Late joiners can still scan and take a free one.</p>
       </section>
     </div>
@@ -169,7 +182,7 @@ function HostBar({ room, send, busy }: { room: RoomInfo; send: (a: HostAction) =
     <header className="absolute inset-x-0 top-0 z-[60] flex h-12 items-center gap-2 bg-panel px-4" data-testid="host-bar">
       <Mark />
       <span className="data ml-2 min-w-28 rounded-sm bg-panel-2 px-2 py-1" data-testid="host-clock">{tick === undefined ? '—' : fmtClock(Number(tick))}</span>
-      {room.phase === 'ended' ? <span className="text-sm text-muted">The game has ended.</span> : (
+      {room.phase === 'ended' ? <span className="text-sm text-muted">The simulation has ended.</span> : (
         <>
           <button className={`btn ${running ? 'btn-active' : 'btn-primary'}`} onClick={() => send({ action: running ? 'pause' : 'resume' })} disabled={busy} data-testid="host-pause">{running ? '⏸ Pause' : '▶ Resume'}</button>
           <span className="ml-1 text-xs text-muted">Speed</span>
@@ -185,7 +198,7 @@ function HostBar({ room, send, busy }: { room: RoomInfo; send: (a: HostAction) =
         </>
       )}
       <span className="ml-auto text-xs text-muted">{room.players.length} player{room.players.length === 1 ? '' : 's'}</span>
-      {room.phase !== 'ended' && <button className="btn" onClick={() => { if (window.confirm('End the game for everyone?')) send({ action: 'end' }); }} data-testid="host-end">End game</button>}
+      {room.phase !== 'ended' && <button className="btn" onClick={() => { if (window.confirm('End the simulation for everyone?')) send({ action: 'end' }); }} data-testid="host-end">End simulation</button>}
     </header>
   );
 }
@@ -236,7 +249,7 @@ function Game({ hosting, onLeave }: { hosting: Hosting; onLeave: () => void }) {
           {error !== null ? (
             <>
               <p className="text-alarm" role="alert">{error}</p>
-              <button className="btn btn-primary" onClick={onLeave}>Host a new game</button>
+              <button className="btn btn-primary" onClick={onLeave}>Host a new session</button>
             </>
           ) : 'Opening the room…'}
         </div>
@@ -250,10 +263,10 @@ export function HostApp() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const host = () => {
+  const host = (password: string) => {
     setBusy(true);
     setError(null);
-    createRoom()
+    createRoom(password)
       .then((h) => { sessionStorage.setItem(HOST_KEY, JSON.stringify(h)); setHosting(h); })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setBusy(false));
