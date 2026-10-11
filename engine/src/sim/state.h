@@ -74,6 +74,10 @@ struct Order {
   uint32_t vehicle = UINT32_MAX;
   uint64_t created_tick = 0, eta_tick = 0;
   OrdStatus status = OrdStatus::Open;
+  // Bookkeeping for the economy view, outside the state hash: the route
+  // length the lot was priced on and the tick it was delivered (0 = not yet).
+  double km = 0;
+  uint64_t delivered_tick = 0;
 };
 
 struct ProcState {
