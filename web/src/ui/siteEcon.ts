@@ -15,7 +15,10 @@ import { materialName, materialTitle } from './materials';
 
 export interface Band { lo: number; hi: number }
 export interface SiteEconTank {
-  tank: number; material: string; materialName?: string; role: 'feed' | 'product';
+  tank: number; material: string; materialName?: string;
+  /** "both": stock held on site, filled and drawn by the site itself — it has a feed side (hours, x, signal) and a room side (roomX, roomSignal) */
+  role: 'feed' | 'product' | 'both';
+  roomX?: number | null; roomSignal?: number | null; roomHours?: number | null;
   fill: number; hours: number | null; x: number | null; signal: number | null;
   cover?: number | null; urgency?: number | null; leadTimeH?: number | null; bestOfferRatio?: number | null; orderBelowCover?: number | null; fillTarget?: number | null;
   askRatio?: number | null; costDelta?: number | null; markup?: number | null;
@@ -26,7 +29,7 @@ export interface SiteEconReply {
   rules?: { priceAwareBuying?: boolean; demandElasticity?: number; marginControl?: boolean };
   curves?: {
     feed?: Band; room?: Band; urgency?: Band; ask?: { swing: number }; bid?: { swing: number };
-    buy?: { cheapRatio: number; dearRatio: number; cheapFill: number; normalFill: number; dearFill: number; cheapCover?: number; normalCover?: number; dearCover?: number };
+    buy?: { cheapRatio: number; dearRatio: number; cheapFill: number | null; normalFill: number | null; dearFill: number | null; cheapCover?: number; normalCover?: number; dearCover?: number };
     demand?: { elasticity: number; minFrac: number; maxFrac: number };
     margin?: { fullAtShareOfBase: number };
   };
@@ -49,7 +52,7 @@ export const urgencyAt = (cover: number, band: Band) => 1 - smooth(cover, band.l
 /** Curve 5: asking price over base from how full the tank is: +swing when empty, −swing when full. */
 export const askAt = (fill: number, swing: number) => 1 + swing * (1 - 2 * clamp(fill, 0, 1));
 /** Curve 6: the fill a buyer aims for at a best-offer price ratio: high when cheap, low when dear. */
-export function fillTargetAt(ratio: number, b: NonNullable<NonNullable<SiteEconReply['curves']>['buy']>): number {
+export function fillTargetAt(ratio: number, b: { cheapRatio: number; dearRatio: number; cheapFill: number; normalFill: number; dearFill: number }): number {
   if (ratio <= b.cheapRatio) return b.cheapFill;
   if (ratio >= b.dearRatio) return b.dearFill;
   return ratio <= 1
@@ -128,12 +131,19 @@ export function siteCharts(reply: SiteEconReply): EconChart[] {
   const plant = reply.plant ?? null;
   const limit = plant?.limitedBy;
   const out: EconChart[] = [];
-  const feed = tanks.filter((t) => t.role === 'feed');
-  const product = tanks.filter((t) => t.role === 'product');
+  // stock held on site sits on both sides: its feed side as it is, its room side from roomX / roomSignal
+  const feed = tanks.filter((t) => t.role === 'feed' || t.role === 'both');
+  const product = tanks.filter((t) => t.role === 'product' || t.role === 'both')
+    .map((t) => (t.role === 'both' ? { ...t, x: t.roomX ?? null, signal: t.roomSignal ?? null, hours: t.roomHours ?? (num(t.roomX) ? t.roomX * 4 : null) } : t));
+  // every site has a "plant" on the wire; what it is decides which rules apply to it:
+  // a plant turns feed into product, a source only makes, a customer only takes
+  const makes = tanks.some((t) => t.role === 'product');
+  const takes = tanks.some((t) => t.role === 'feed');
+  const isPlant = makes && takes;
   const held = plant === null ? '' : `: the plant is held to ${pct(plant.rate)}`;
 
   // 1 and 2 belong to a site that makes something out of something: one with a plant
-  if (plant !== null && feed.some((t) => num(t.x))) {
+  if (plant !== null && isPlant && feed.some((t) => num(t.x))) {
     const band = c.feed ?? DEFAULTS.feed;
     const worst = [...feed].filter((t) => num(t.signal)).sort((a, b) => (a.signal as number) - (b.signal as number))[0];
     const limiting = limit?.kind === 'feed' ? limit.tank ?? null : null;
@@ -146,7 +156,7 @@ export function siteCharts(reply: SiteEconReply): EconChart[] {
           : `${nameOf(worst)} has ${hoursWords(worst.hours)} of feed left${limiting === worst.tank ? held : `: on its own it would allow ${pct(worst.signal as number)}`}.`,
     });
   }
-  if (plant !== null && product.some((t) => num(t.x))) {
+  if (plant !== null && makes && product.some((t) => num(t.x))) {
     const band = c.room ?? DEFAULTS.room;
     const worst = [...product].filter((t) => num(t.signal)).sort((a, b) => (a.signal as number) - (b.signal as number))[0];
     const limiting = limit?.kind === 'room' ? limit.tank ?? null : null;
@@ -159,7 +169,7 @@ export function siteCharts(reply: SiteEconReply): EconChart[] {
           : `${nameOf(worst)} has ${hoursWords(worst.hours)} of room left${limiting === worst.tank ? held : `: on its own it would allow ${pct(worst.signal as number)}`}.`,
     });
   }
-  if (plant !== null) {
+  if (plant !== null && isPlant) {
     const min = (ts: SiteEconTank[]) => ts.filter((t) => num(t.signal)).reduce<number | null>((a, t) => (a === null ? (t.signal as number) : Math.min(a, t.signal as number)), null);
     const raw: { label: string; value: number | null; kind: string }[] = [
       { label: 'Feed', value: min(feed), kind: 'feed' },
@@ -201,23 +211,26 @@ export function siteCharts(reply: SiteEconReply): EconChart[] {
       curve: sample((x) => askAt(x, swing), 0, 1, 2), xDomain: [0, 1], yDomain: [Math.min(0.4, ...selling.map((t) => t.askRatio as number)), Math.max(1.6, ...selling.map((t) => t.askRatio as number))], xUnit: 'pct', yUnit: 'pct',
       dots: dotsOf(selling, (t) => ({ x: clamp(t.fill, 0, 1), y: t.askRatio as number }), null),
       sentence: Math.abs(off) < 0.005
-        ? `${nameOf(first)} is ${pct(first.fill)} full, so it asks ${signed((first.askRatio as number) - 1)} on the usual price.`
+        ? `${nameOf(first)} is ${pct(first.fill)} full, so it asks ${Math.abs((first.askRatio as number) - 1) < 0.005 ? 'the usual price' : `${signed((first.askRatio as number) - 1)} on the usual price`}.`
         : `${nameOf(first)} asks ${signed((first.askRatio as number) - 1)} on the usual price, off the line by ${reasons.length > 0 ? reasons.join(' and ') : signed(off)}.`,
     });
   }
   const market = reply.rules?.priceAwareBuying === true;
   const priced = tanks.filter((t) => num(t.bestOfferRatio) && num(t.fillTarget));
-  if (market && c.buy !== undefined && priced.length > 0) {
-    const b = c.buy;
+  if (market && c.buy !== undefined && num(c.buy.cheapFill) && num(c.buy.dearFill) && priced.length > 0) {
+    const first0 = [...priced].sort((a, z) => Math.abs((z.bestOfferRatio as number) - 1) - Math.abs((a.bestOfferRatio as number) - 1))[0];
+    // the fill aimed for at the usual price is each tank's own target: the line drawn is that of the tank the sentence is about
+    const b = { cheapRatio: c.buy.cheapRatio, dearRatio: c.buy.dearRatio, cheapFill: c.buy.cheapFill, dearFill: c.buy.dearFill, normalFill: c.buy.normalFill ?? (first0.fillTarget as number) };
     const first = [...priced].sort((a, z) => Math.abs((z.bestOfferRatio as number) - 1) - Math.abs((a.bestOfferRatio as number) - 1))[0];
     const r = first.bestOfferRatio as number;
     const x0 = Math.min(b.cheapRatio - 0.1, ...priced.map((t) => t.bestOfferRatio as number));
     const x1 = Math.max(b.dearRatio + 0.1, ...priced.map((t) => t.bestOfferRatio as number));
     out.push({
-      n: 6, key: 'buy', title: 'When and how much it buys', xLabel: 'best offer ÷ usual price', yLabel: 'fills up to',
+      n: 6, key: 'buy', title: `When and how much it buys${priced.length > 1 ? ` (line: ${lowerName(first0)})` : ''}`, xLabel: 'best offer ÷ usual price', yLabel: 'fills up to',
       curve: sample((x) => fillTargetAt(x, b), x0, x1), xDomain: [x0, x1], yDomain: [0, 1], xUnit: 'pct', yUnit: 'pct',
-      dots: dotsOf(priced, (t) => ({ x: t.bestOfferRatio as number, y: t.fillTarget as number }), null),
-      sentence: `${nameOf(first)} is on offer at ${signed(r - 1)} on the usual price: it ${r < 0.995 ? 'stocks up' : r > 1.005 ? 'holds off' : 'buys as usual'}, filling to ${pct(first.fillTarget as number)}`
+      // each tank's dot sits on its own curve: the same ends, through its own usual fill
+      dots: dotsOf(priced, (t) => ({ x: t.bestOfferRatio as number, y: fillTargetAt(t.bestOfferRatio as number, { ...b, normalFill: c.buy?.normalFill ?? (t.fillTarget as number) }) }), null),
+      sentence: `${nameOf(first)} is on offer at ${signed(r - 1)} on the usual price: it ${r < 0.995 ? 'stocks up' : r > 1.005 ? 'holds off' : 'buys as usual'}, filling to ${pct(fillTargetAt(r, b))} (${pct(b.normalFill)} at the usual price)`
         + `${num(first.orderBelowCover) ? ` and ordering once stock drops under ${first.orderBelowCover.toFixed(1)} deliveries` : ''}.`,
     });
   }
@@ -236,7 +249,7 @@ export function siteCharts(reply: SiteEconReply): EconChart[] {
         : `${nameOf(first)} is ${Math.abs(Math.round((r - 1) * 100))}% ${r > 1 ? 'dearer' : 'cheaper'} than usual: it wants ${pct(first.demandFactor as number)} of normal.`,
     });
   }
-  if (plant !== null && reply.rules?.marginControl === true && c.margin !== undefined && num(plant.marginSignal)) {
+  if (plant !== null && isPlant && reply.rules?.marginControl === true && c.margin !== undefined && num(plant.marginSignal) && num(plant.margin) && num(plant.marginBase)) {
     const fullAt = c.margin.fullAtShareOfBase;
     const share = num(plant.margin) && num(plant.marginBase) && plant.marginBase !== 0 ? plant.margin / plant.marginBase : null;
     const x1 = Math.max(1.2, fullAt + 0.3);
