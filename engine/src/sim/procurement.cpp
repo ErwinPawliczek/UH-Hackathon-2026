@@ -169,6 +169,8 @@ uint32_t bookLot(const World& world, State& state, uint32_t buyer_tank, uint32_t
   o.eta_tick = state.tick + static_cast<uint64_t>(std::ceil(eta_h / kTickHours));
   o.status = OrdStatus::Open;
   state.order.push_back(o);
+  state.mat_bought_t[buyer.material] += lot_t;
+  state.mat_bought_usd[buyer.material] += lot_t * price;
   state.tank[seller_tank].reserved_out_t += lot_t;
   state.tank[buyer_tank].inbound_t += lot_t;
   // Realized trades pull the index toward price ÷ base (§5.6 index).

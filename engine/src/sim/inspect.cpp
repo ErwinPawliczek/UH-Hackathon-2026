@@ -859,7 +859,16 @@ std::string summaryJson(const World& world, const State& state) {
                      {"to", to},
                      {"movedT", state.pipe_moved_t[i]}});
   }
+  json prices = json::array();
+  for (size_t m = 0; m < world.catalog.materials.size(); ++m) {
+    const double t = state.mat_bought_t[m];
+    prices.push_back({{"material", world.catalog.materials[m].key},
+                      {"name", world.catalog.materials[m].name},
+                      {"tonnes", t},
+                      {"avgUsdPerT", t > 0.0 ? state.mat_bought_usd[m] / t : 0.0}});
+  }
   return json{{"tick", state.tick},
+              {"prices", prices},
               {"economy",
                {{"lostSalesUsd", state.cum_unmet_usd},
                 {"deliveredT", state.cum_demand_t - state.cum_unmet_t},

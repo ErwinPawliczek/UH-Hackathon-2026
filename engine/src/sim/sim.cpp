@@ -80,6 +80,8 @@ std::unique_ptr<Sim> Sim::createOn(std::shared_ptr<World> world, uint64_t seed) 
   sim->state_.site_rate_share.assign(w.sites.size(), 1.0);
   sim->state_.site_trade.assign(w.sites.size(), SiteTrade{});
   sim->state_.pipe_moved_t.assign(w.pipelines.size(), 0.0);
+  sim->state_.mat_bought_t.assign(w.catalog.materials.size(), 0.0);
+  sim->state_.mat_bought_usd.assign(w.catalog.materials.size(), 0.0);
   // M2 logistics (§4.4): all edges open, market index at par, the fleet at
   // its home sites, no orders.
   sim->state_.edge_open.assign(w.edges.size(), 1);
