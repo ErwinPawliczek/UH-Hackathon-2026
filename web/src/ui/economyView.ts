@@ -9,7 +9,7 @@ export const ECONOMY_WINDOW_ID = 'economy';
 /** Where the window first appears: under the top bar, to the right. */
 export const ECONOMY_WINDOW_AT = { x: 630, y: 68 };
 
-export type EconomyTab = 'overview' | 'prices' | 'spending';
+export type EconomyTab = 'overview' | 'prices' | 'spending' | 'market';
 /** A fuller page opened from the Overview, with a link back to it. */
 export type EconomyDetail = 'impact' | 'plants' | 'supply';
 

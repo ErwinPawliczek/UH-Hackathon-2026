@@ -23,6 +23,8 @@ import { SiteBadge } from './SiteIcon';
 import { EconomySupply } from './EconomySupply';
 import { EconomyOverview } from './EconomyOverview';
 import { EconomyPrices } from './EconomyPrices';
+import { EconomyMarket } from './EconomyMarket';
+import { MARKET_WORLD } from '../store/roomTypes';
 import { EconomyProcurement, EconomyProduction } from './EconomyTabs';
 import { ECONOMY_WINDOW_AT, ECONOMY_WINDOW_ID, useEconomyView, type EconomyTab } from './economyView';
 import { costParts, rejectedPart, countdownSentence, fmtMoney, fmtTonnes, nothingBroken, useForecast } from './economyData';
@@ -40,6 +42,8 @@ const TABS: { key: EconomyTab; label: string }[] = [
   { key: 'spending', label: 'Spending' },
 ];
 
+const MARKET_TAB: { key: EconomyTab; label: string } = { key: 'market', label: 'Market' };
+
 const DETAIL_TITLE = { impact: 'Disruption impact', plants: 'Every plant, day by day', supply: 'Supply options' } as const;
 
 export function EconomyWindow() {
@@ -48,16 +52,20 @@ export function EconomyWindow() {
   const detail = useEconomyView((s) => s.detail);
   const setTab = useEconomyView((s) => s.setTab);
   const showDetail = useEconomyView((s) => s.showDetail);
+  // the Market tab exists only in the world where prices drive buying, demand and rates
+  const market = useSim((s) => (s.room !== null ? s.room.world === MARKET_WORLD : s.worldName === MARKET_WORLD));
+  // leaving the market world while on its tab: back to the overview
+  const shown = tab === 'market' && !market ? 'overview' : tab;
   return (
     <DraggableWindow id={ECONOMY_WINDOW_ID} title="Economy" width={WIDTH} maxHeight="80vh" at={ECONOMY_WINDOW_AT}>
       {/* the tabs stay put while a long page scrolls under them */}
       <div className="sticky top-0 z-10 flex gap-1.5 border-b border-line bg-panel px-3 py-2" role="tablist" aria-label="Economy views">
-        {TABS.map((t) => (
+        {(market ? [...TABS, MARKET_TAB] : TABS).map((t) => (
           <button
             key={t.key}
             role="tab"
-            aria-selected={tab === t.key}
-            className={`btn ${tab === t.key ? 'btn-active' : ''}`}
+            aria-selected={shown === t.key}
+            className={`btn ${shown === t.key ? 'btn-active' : ''}`}
             onClick={() => setTab(t.key)}
             data-testid={`economy-tab-${t.key}`}
           >
@@ -65,8 +73,8 @@ export function EconomyWindow() {
           </button>
         ))}
       </div>
-      {tab === 'overview' && detail === null && <EconomyOverview open={open} />}
-      {tab === 'overview' && detail !== null && (
+      {shown === 'overview' && detail === null && <EconomyOverview open={open} />}
+      {shown === 'overview' && detail !== null && (
         <>
           <div className="flex items-baseline gap-3 px-4 pt-2.5">
             <button className="cursor-pointer text-sm font-medium text-blue underline decoration-dotted underline-offset-2 hover:text-blue-strong" onClick={() => showDetail(null)} data-testid="economy-back">
@@ -79,8 +87,9 @@ export function EconomyWindow() {
           {detail === 'supply' && <EconomySupply open={open} />}
         </>
       )}
-      {tab === 'prices' && <EconomyPrices open={open} />}
-      {tab === 'spending' && <EconomyProcurement open={open} />}
+      {shown === 'market' && market && <EconomyMarket open={open} />}
+      {shown === 'prices' && <EconomyPrices open={open} />}
+      {shown === 'spending' && <EconomyProcurement open={open} />}
     </DraggableWindow>
   );
 }

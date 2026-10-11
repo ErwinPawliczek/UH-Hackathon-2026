@@ -73,6 +73,16 @@ const char* crx_summary(const crx_sim* sim);
    plus demand priced out (the summary's economy.lostSalesUsd). */
 double crx_lost_sales_usd(const crx_sim* sim);
 
+/* The market as it stands, as JSON: {"tick","rules":{"priceAwareBuying",
+   "demandElasticity","marginControl"},"materials":[{"material","name",
+   "baseUsdPerT","paidUsdPerT","changePct"}],"customers":[{"site","name",
+   "material","materialName","demandFactor","pricePaidUsdPerT","baseUsdPerT",
+   "pricedOutUsd","notServedUsd"}],"plants":[{"site","name","rate",
+   "marginUsdPerT","marginSignal","revenueUsdPerT","feedCostUsdPerT",
+   "energyUsdPerT"}]}. Plant money is per tonne of process basis, weighted
+   over the site's units, and null while margin control is off. */
+const char* crx_market(const crx_sim* sim);
+
 /* One site's trading partners as JSON: {"site","name","buyers":[{"site",
    "key","name","materials":[..],"blocked"}],"suppliers":[same]}: who can buy
    its products, who can supply its feeds, and which the trade_block command

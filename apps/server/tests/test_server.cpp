@@ -1725,3 +1725,63 @@ TEST_CASE("R11 room: a room can be opened on another world file, by name only") 
   CHECK(postJson(cli, "/api/room", {{"world", 7}}).at("ok") == false);
   CHECK(ts.rooms.size() == 2);
 }
+
+TEST_CASE("R12 market view: the same document for a session and a room, with margins only where the rule is on") {
+  TestServer ss;
+  auto scli = client(ss.port);
+  const std::string id = createSession(scli, R"({"seed":42,"world":"erwin-market-v1"})");
+  for (int i = 0; i < 4; ++i)
+    REQUIRE(scli.Post("/api/sim/" + id + "/step", R"({"ticks":240})", "application/json"));
+  const json m = getJson(scli, "/api/sim/" + id + "/market");
+  CHECK(m.at("tick") == 960);
+  CHECK(m.at("rules").at("priceAwareBuying") == true);
+  CHECK(m.at("rules").at("demandElasticity") == 0.2);
+  CHECK(m.at("rules").at("marginControl") == true);
+  REQUIRE(!m.at("materials").empty());
+  for (const json& row : m.at("materials")) {
+    CHECK(row.at("paidUsdPerT").get<double>() > 0.0);
+    CHECK(row.at("changePct").get<double>() ==
+          doctest::Approx((row.at("paidUsdPerT").get<double>() / row.at("baseUsdPerT").get<double>() - 1.0) * 100.0).epsilon(0.01).scale(1.0));
+  }
+  CHECK(m.at("customers").size() == 15);  // one row per customer line
+  for (const json& row : m.at("customers")) {
+    CHECK(row.at("demandFactor").get<double>() >= 0.6);
+    CHECK(row.at("demandFactor").get<double>() <= 1.2);
+    CHECK(row.at("pricedOutUsd").get<double>() >= 0.0);
+    CHECK(row.at("notServedUsd").get<double>() >= 0.0);
+  }
+  CHECK(m.at("plants").size() == 9);
+  for (const json& row : m.at("plants")) {
+    CHECK(row.at("rate").get<double>() > 0.0);
+    CHECK(row.at("rate").get<double>() <= 1.0);
+    REQUIRE(row.at("marginUsdPerT").is_number());
+    CHECK(row.at("marginUsdPerT").get<double>() ==
+          doctest::Approx(row.at("revenueUsdPerT").get<double>() - row.at("feedCostUsdPerT").get<double>() -
+                          row.at("energyUsdPerT").get<double>()).epsilon(0.001).scale(1.0));
+    CHECK(row.at("marginSignal").get<double>() >= 0.0);
+    CHECK(row.at("marginSignal").get<double>() <= 1.0);
+  }
+  CHECK(scli.Get("/api/sim/nope/market")->status == 404);
+
+  // A room on the default world: rules off, margins null, signal 1.
+  RoomServer ts(false);
+  auto cli = client(ts.port);
+  const json made = postJson(cli, "/api/room", json::object());
+  const std::string base = "/api/room/" + made.at("code").get<std::string>();
+  postJson(cli, base + "/host", {{"hostToken", made.at("hostToken")}, {"action", "start"}});
+  for (int i = 0; i < 6; ++i) ts.rooms.find(made.at("code").get<std::string>())->beat(3.0);
+  const json r = getJson(cli, base + "/market");
+  CHECK(r.at("rules").at("priceAwareBuying") == false);
+  CHECK(r.at("rules").at("demandElasticity") == 0.0);
+  CHECK(r.at("rules").at("marginControl") == false);
+  CHECK(r.at("plants").size() == 9);
+  for (const json& row : r.at("plants")) {
+    CHECK(row.at("marginUsdPerT").is_null());
+    CHECK(row.at("marginSignal") == 1.0);
+  }
+  for (const json& row : r.at("customers")) {
+    CHECK(row.at("demandFactor") == 1.0);
+    CHECK(row.at("pricePaidUsdPerT").is_null());
+  }
+  CHECK(!r.at("materials").empty());  // falls back to the average of all lots so far
+}

@@ -2,7 +2,7 @@
 // the same run with no changes at all, then what broke and who broke it.
 // Used on the host's big screen and, narrower, on a player's phone.
 
-import type { RoomInfo, RoomSummary, SummarySite } from '../store/roomTypes';
+import type { RoomInfo, RoomSummary, SummarySite, SummaryTotals } from '../store/roomTypes';
 import { ownedName, playerColor } from '../store/roomTypes';
 import { fmtMoney } from './economyData';
 import { materialName } from './materials';
@@ -18,6 +18,22 @@ function siteWords(s: SummarySite): string {
   if (extra >= 6) return `stopped for ${fmtDays(extra)}`;
   if (s.baselineOutputT > 0) return `made ${Math.max(0, Math.round((1 - s.outputT / s.baselineOutputT) * 100))}% less`;
   return 'ran worse';
+}
+
+/**
+ * The lost-sales rows of the comparison. Where either run has sales that
+ * were priced out (the market world), the one row becomes two: what was
+ * wanted and not delivered, and what was given up over price. Otherwise it
+ * stays the single row it always was.
+ */
+export function lostSalesRows(baseline: SummaryTotals, actual: SummaryTotals): { label: string; before: number; after: number }[] {
+  const priced = (t: SummaryTotals) => t.pricedOutUsd ?? 0;
+  if (priced(baseline) === 0 && priced(actual) === 0) return [{ label: 'Customer sales lost', before: baseline.lostSalesUsd, after: actual.lostSalesUsd }];
+  const notServed = (t: SummaryTotals) => t.notServedUsd ?? Math.max(0, t.lostSalesUsd - priced(t));
+  return [
+    { label: 'Not delivered', before: notServed(baseline), after: notServed(actual) },
+    { label: 'Priced out', before: priced(baseline), after: priced(actual) },
+  ];
 }
 
 function Compare({ label, before, after, worse }: { label: string; before: string; after: string; worse: boolean }) {
@@ -57,7 +73,9 @@ export function DamageSummary({ summary, room, me }: { summary: RoomSummary; roo
           </tr>
         </thead>
         <tbody>
-          <Compare label="Customer sales lost" before={fmtMoney(baseline.lostSalesUsd)} after={fmtMoney(actual.lostSalesUsd)} worse={actual.lostSalesUsd > baseline.lostSalesUsd} />
+          {lostSalesRows(baseline, actual).map((r) => (
+            <Compare key={r.label} label={r.label} before={fmtMoney(r.before)} after={fmtMoney(r.after)} worse={r.after > r.before} />
+          ))}
           <Compare label="Delivered to customers" before={fmtT(baseline.deliveredT)} after={fmtT(actual.deliveredT)} worse={actual.deliveredT < baseline.deliveredT} />
           <Compare label="Plants stopped right now" before={String(baseline.plantsStoppedNow)} after={String(actual.plantsStoppedNow)} worse={actual.plantsStoppedNow > baseline.plantsStoppedNow} />
         </tbody>

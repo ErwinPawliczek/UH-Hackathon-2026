@@ -650,6 +650,19 @@ void registerRoutes(httplib::Server& svr, SessionRegistry& sessions, const std::
             sendJson(res, status, std::move(doc));
           });
 
+  // The market as it stands: rules, prices, customers' appetite, plant margins.
+  svr.Get("/api/sim/" + id + "/market",
+          [&sessions](const httplib::Request& req, httplib::Response& res) {
+            std::string doc;
+            const bool found = sessions.withSession(
+                req.matches[1].str(), [&](Session& s) { doc = crx_market(s.sim); });
+            if (!found) {
+              sendJson(res, 404, jsonError("unknown session"));
+              return;
+            }
+            sendJson(res, 200, std::move(doc));
+          });
+
   // The run so far in time buckets: ?bucket_h=1..168 (default 24).
   svr.Get("/api/sim/" + id + "/economy",
           [&sessions](const httplib::Request& req, httplib::Response& res) {

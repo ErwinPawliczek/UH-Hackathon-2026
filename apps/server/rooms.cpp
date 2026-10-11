@@ -629,6 +629,9 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
                       "application/octet-stream");
     });
   });
+  svr.Get("/api/room/" + code + "/market", [view](const Req& req, Res& res) {
+    view(req, res, [](Room& r, Res& out) { sendJson(out, 200, crx_market(r.sim)); });
+  });
   svr.Get("/api/room/" + code + "/partners", [view](const Req& req, Res& res) {
     uint32_t site = 0;
     try {

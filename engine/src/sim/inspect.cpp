@@ -905,5 +905,92 @@ std::string summaryJson(const World& world, const State& state) {
       .dump();
 }
 
+std::string marketJson(const Sim& sim) {
+  const World& world = sim.world();
+  const State& state = sim.state();
+  const MarketParams& params = sim.marketParams();
+  const Catalog& catalog = world.catalog;
+  const auto usd = [](double v) { return std::round(v * 100.0) / 100.0; };
+
+  // Materials: the rolling price paid across the tanks that buy it, weighted
+  // by their draw; with no rolling figure, the average of every lot so far.
+  json materials = json::array();
+  for (size_t m = 0; m < catalog.materials.size(); ++m) {
+    double sum = 0, weight = 0;
+    bool traded = state.mat_bought_t[m] > 0.0;
+    for (size_t t = 0; t < world.tanks.size(); ++t) {
+      if (world.tanks[t].material != m || state.tank[t].paid_avg <= 0.0) continue;
+      const double w = std::max(world.tanks[t].design_out_t_h, 1e-9);
+      sum += w * state.tank[t].paid_avg;
+      weight += w;
+    }
+    if (!traded && weight <= 0.0) continue;
+    const double base = catalog.materials[m].base_price;
+    const double paid = weight > 0.0 ? sum / weight : state.mat_bought_usd[m] / state.mat_bought_t[m];
+    materials.push_back({{"material", catalog.materials[m].key},
+                         {"name", catalog.materials[m].name},
+                         {"baseUsdPerT", usd(base)},
+                         {"paidUsdPerT", usd(paid)},
+                         {"changePct", base > 0.0 ? usd((paid / base - 1.0) * 100.0) : 0.0}});
+  }
+
+  json customers = json::array(), plants = json::array();
+  for (size_t s = 0; s < world.sites.size(); ++s) {
+    double rate = 0, design = 0, revenue = 0, feed = 0, energy = 0, signal = 1.0;
+    bool plant = false;
+    for (size_t p = 0; p < world.processes.size(); ++p) {
+      const Process& proc = world.processes[p];
+      if (proc.site.v != s) continue;
+      const ProcessType& type = catalog.process_types[proc.type];
+      if (type.boundary == Boundary::Sink) {
+        const double base = catalog.materials[type.basis.v].base_price;
+        double paid = 0;
+        for (size_t t = 0; t < world.tanks.size(); ++t)
+          if (world.tanks[t].site.v == s && world.tanks[t].material == type.basis.v)
+            paid = state.tank[t].paid_avg;
+        const ProcTotals& pt = state.proc_totals[p];
+        customers.push_back({{"site", s},
+                             {"name", world.sites[s].name},
+                             {"material", catalog.materials[type.basis.v].key},
+                             {"materialName", catalog.materials[type.basis.v].name},
+                             {"demandFactor", state.demand_factor[p]},
+                             {"pricePaidUsdPerT", paid > 0.0 ? json(usd(paid)) : json(nullptr)},
+                             {"baseUsdPerT", usd(base)},
+                             {"pricedOutUsd", usd(pt.priced_out_t * base)},
+                             {"notServedUsd", usd(std::max(0.0, pt.demand_t - pt.served_t) * base)}});
+      }
+      if (type.boundary != Boundary::None) continue;
+      plant = true;
+      const double w = proc.design_rate_t_h;
+      rate += state.proc[p].rate_t_h;
+      design += w;
+      revenue += w * state.proc_revenue[p];
+      feed += w * state.proc_feed_cost[p];
+      energy += w * state.proc_energy[p];
+      signal = std::min(signal, state.margin_signal[p]);
+    }
+    if (!plant || design <= 0.0) continue;
+    const bool on = state.margin_control && state.tick > 0;
+    const auto per_t = [&](double v) { return on ? json(usd(v / design)) : json(nullptr); };
+    plants.push_back({{"site", s},
+                      {"name", world.sites[s].name},
+                      {"rate", std::clamp(rate / design, 0.0, 1.0)},
+                      {"marginUsdPerT", per_t(revenue - feed - energy)},
+                      {"marginSignal", signal},
+                      {"revenueUsdPerT", per_t(revenue)},
+                      {"feedCostUsdPerT", per_t(feed)},
+                      {"energyUsdPerT", per_t(energy)}});
+  }
+  return json{{"tick", state.tick},
+              {"rules",
+               {{"priceAwareBuying", params.price_aware_buying},
+                {"demandElasticity", params.demand_elasticity},
+                {"marginControl", params.margin_control}}},
+              {"materials", materials},
+              {"customers", customers},
+              {"plants", plants}}
+      .dump();
+}
+
 }  // namespace sim
 }  // namespace crx
