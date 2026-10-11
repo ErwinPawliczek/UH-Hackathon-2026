@@ -169,7 +169,7 @@ export class TripOverlay {
         const geometry = new LineGeometry();
         geometry.setPositions(positions);
         this.line = new Line2(geometry, this.material);
-        this.line.renderOrder = LINE_RENDER_ORDER + 0.8; // above routes, rails and pipelines
+        this.line.renderOrder = LINE_RENDER_ORDER + 0.8; // above routes and pipelines
         this.line.frustumCulled = false;
         this.group.add(this.line);
       }
