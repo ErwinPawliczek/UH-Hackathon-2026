@@ -35,6 +35,12 @@ struct MarketParams {
   // time. Off unless both are > 0.
   double min_lot_cap_frac = 0.0;
   double min_lot_target_frac = 0.0;
+  // Dispatch queue order (§5.7). Negative: open orders go most urgent
+  // first, then oldest — an order placed at low urgency can wait forever
+  // behind fresher, more urgent ones while its class is busy. >= 0: first
+  // come first served, with urgency worth a head start of at most this
+  // many hours (sort key = created − urgency x boost).
+  double dispatch_urgency_boost_h = -1.0;
 };
 
 struct ProcurementStats {

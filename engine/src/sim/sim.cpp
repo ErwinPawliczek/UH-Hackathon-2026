@@ -78,6 +78,7 @@ std::unique_ptr<Sim> Sim::createNamed(const std::string& world_name, uint64_t se
   if (mk.beta >= 0) mp.beta = mk.beta;
   if (mk.min_lot_cap_frac >= 0) mp.min_lot_cap_frac = mk.min_lot_cap_frac;
   if (mk.min_lot_target_frac >= 0) mp.min_lot_target_frac = mk.min_lot_target_frac;
+  if (mk.dispatch_urgency_boost_h >= 0) mp.dispatch_urgency_boost_h = mk.dispatch_urgency_boost_h;
   if (mk.max_lots_per_tank >= 1)
     mp.max_lots_per_tank = static_cast<uint32_t>(std::min(mk.max_lots_per_tank, 100000.0));
   sim->signals.assign(w.tanks.size(), TankSignals{});
@@ -154,7 +155,7 @@ void Sim::step(uint32_t ticks) {
     if (state_.tick % 4 == 0) {
       ProcurementStats pstats;
       stepProcurement(w, state_, paths_, signals, market_params_, pstats, rec_);
-      stepDispatch(w, state_, paths_, rec_);
+      stepDispatch(w, state_, paths_, rec_, market_params_.dispatch_urgency_boost_h);
     }
     stepTransport(w, state_, paths_, rec_);
     stepAdaptation(w, state_);

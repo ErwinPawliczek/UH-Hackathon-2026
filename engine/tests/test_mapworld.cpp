@@ -8,6 +8,10 @@
 //   M4 a bad name or a malformed file is an error, never a crash
 //   M5 market settings and per-tank lead times come through from the file
 //   M6 no "world" key still means the six-site world, unchanged
+//   M7 every unit can pass 110 % of its process's design rate (capacity
+//      and R_max use the same per-unit throughput), in both worlds
+//   M8 dispatch queue order: urgency first by default; with a boost, first
+//      come first served with urgency worth a bounded head start
 //
 // The 60-day service gate is deliberately not here: it belongs with the
 // tuned rates, not with the loader.
@@ -15,6 +19,7 @@
 
 #include <doctest/doctest.h>
 
+#include "sim/dispatch.h"
 #include "sim/routes.h"
 #include "sim/sim.h"
 #include "sim/worldfile.h"
@@ -308,7 +313,7 @@ TEST_CASE("M5: market settings and tank lead times come from the file") {
   json doc = json::parse(readWorldFile(), nullptr, true, true);
   doc["market"] = {{"min_lot_cap_frac", 0.8}, {"min_lot_target_frac", 0.4}, {"beta", 0.25},
                    {"value_of_time_usd_t_h", 1.5}, {"switch_cost_frac", 0.0},
-                   {"max_lots_per_tank", 8}};
+                   {"max_lots_per_tank", 8}, {"dispatch_urgency_boost_h", 48}};
   doc["sites"][0]["tanks"][0]["lead_time_h"] = 36.0;
   doc["sites"][0]["tanks"][0]["pickup_gap_h"] = 9.0;
   doc["sites"][0]["tanks"][0]["init_frac"] = 0.25;
@@ -325,6 +330,7 @@ TEST_CASE("M5: market settings and tank lead times come from the file") {
   CHECK(w.market.value_of_time_usd_t_h == doctest::Approx(1.5));
   CHECK(w.market.switch_cost_frac == doctest::Approx(0.0));
   CHECK(w.market.max_lots_per_tank == doctest::Approx(8));
+  CHECK(w.market.dispatch_urgency_boost_h == doctest::Approx(48));
   CHECK(w.tanks[0].init_lead_time_h == doctest::Approx(36.0));
   CHECK(w.tanks[0].init_pickup_gap_h == doctest::Approx(9.0));
   CHECK(w.tanks[0].init_frac == doctest::Approx(0.25));
@@ -349,4 +355,101 @@ TEST_CASE("M6: no world key is still the six-site world") {
   named->step(96);
   CHECK(plain->stateHash() == cfg->stateHash());
   CHECK(plain->stateHash() == named->stateHash());
+}
+
+// ---------------------------------------------------------------------------
+TEST_CASE("M7: every unit passes 110 % of its process's design rate") {
+  std::string error;
+  auto six = Sim::create(42, error);
+  REQUIRE(six != nullptr);
+  auto map = makeMapSim();
+  for (const Sim* sim : {six.get(), map.get()}) {
+    const World& w = sim->world();
+    for (size_t p = 0; p < w.processes.size(); ++p) {
+      const Process& proc = w.processes[p];
+      const ProcessType& type = w.catalog.process_types[proc.type];
+      for (uint32_t u = proc.units.begin; u < rangeEnd(proc.units); ++u) {
+        const UnitSlot& slot = type.units[w.units[u].slot];
+        // What control.cpp's R_max makes of this unit with all trains online.
+        const double r_max =
+            w.units[u].cap_per_train_t_h * slot.trains / unitThroughputPerBasis(slot);
+        CHECK_MESSAGE(r_max == doctest::Approx(1.10 * proc.design_rate_t_h),
+                      w.name << " " << w.sites[proc.site.v].key << "/" << type.key << " unit "
+                             << slot.key << ": R_max " << r_max << " vs design "
+                             << proc.design_rate_t_h);
+      }
+    }
+  }
+
+  // And in the run: with no outage, no plant on the map is held below its
+  // design rate by its own units (electrolysis and VCM were, at 51 % and
+  // 69 %, when capacity ignored the unit's throughput per basis tonne).
+  map->step(96);
+  const World& w = map->world();
+  for (size_t p = 0; p < w.processes.size(); ++p) {
+    const std::string& key = w.catalog.process_types[w.processes[p].type].key;
+    if (key != "ELECTROLYSIS" && key != "VCM") continue;
+    CHECK_MESSAGE(map->state().proc[p].rate_t_h > 0.9 * w.processes[p].design_rate_t_h,
+                  key << " runs at " << map->state().proc[p].rate_t_h << " of "
+                      << w.processes[p].design_rate_t_h << " t/h after one day");
+  }
+}
+
+// ---------------------------------------------------------------------------
+TEST_CASE("M8: dispatch queue order — urgency first, or first come with a head start") {
+  // Two open fuel-oil lots on the six-site world's truck lane, one idle
+  // truck: which lot gets it? Returns the order index that was assigned.
+  auto assigned = [](uint64_t created_a, double urgency_a, uint64_t created_b, double urgency_b,
+                     double boost_h) {
+    std::string error;
+    auto sim = Sim::create(42, error);
+    REQUIRE(sim != nullptr);
+    const World& w = sim->world();
+    State& st = sim->state();
+    const int from = w.findTank("STEAM_CRACKER/FUEL_OIL");
+    const int to = w.findTank("PORT_TERMINAL/FUEL_OIL");
+    const int cls = w.catalog.findVehicle("TRUCK_TANK");
+    REQUIRE(from >= 0);
+    REQUIRE(to >= 0);
+    REQUIRE(cls >= 0);
+    REQUIRE(st.vehicle.size() == 2);
+    st.vehicle[1].status = VehStatus::ToDropoff;  // only vehicle 0 is free
+    st.tick = 2000;
+    const uint64_t created[2] = {created_a, created_b};
+    const double urgency[2] = {urgency_a, urgency_b};
+    for (int i = 0; i < 2; ++i) {
+      Order o;
+      o.from = static_cast<uint32_t>(from);
+      o.to = static_cast<uint32_t>(to);
+      o.material = w.tanks[static_cast<size_t>(from)].material;
+      o.qty_t = 25;
+      o.price = 1;
+      o.urgency = urgency[i];
+      o.cls = static_cast<uint16_t>(cls);
+      o.created_tick = created[i];
+      st.order.push_back(o);
+    }
+    PathCache paths;
+    stepDispatch(w, st, paths, sim->recorder(), boost_h);
+    int got = -1, count = 0;
+    for (size_t i = 0; i < st.order.size(); ++i)
+      if (st.order[i].status == OrdStatus::Assigned) {
+        got = static_cast<int>(i);
+        ++count;
+      }
+    CHECK(count == 1);
+    return got;
+  };
+
+  // Default: the urgent lot wins however long the other has waited.
+  CHECK(assigned(0, 0.1, 1600, 0.9, -1.0) == 1);
+  // 48 h boost: a lot 400 h older is served first...
+  CHECK(assigned(0, 0.1, 1600, 0.9, 48.0) == 0);
+  // ...but urgency still jumps a queue it is less than its head start behind
+  // (0.8 x 48 h = 38.4 h; here the urgent lot is 25 h younger).
+  CHECK(assigned(0, 0.1, 100, 0.9, 48.0) == 1);
+  // Equal urgency: plain first come first served.
+  CHECK(assigned(40, 0.5, 8, 0.5, 48.0) == 1);
+  // Boost 0: age alone decides.
+  CHECK(assigned(0, 0.1, 4, 1.0, 0.0) == 0);
 }

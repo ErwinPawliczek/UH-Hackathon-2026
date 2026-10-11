@@ -487,7 +487,8 @@ bool loadWorld(const std::string& name, const std::string& text, uint64_t seed, 
                      : k == "min_lot_cap_frac"    ? &market.min_lot_cap_frac
                      : k == "min_lot_target_frac" ? &market.min_lot_target_frac
                      : k == "max_lots_per_tank"   ? &market.max_lots_per_tank
-                                                  : nullptr;
+                     : k == "dispatch_urgency_boost_h" ? &market.dispatch_urgency_boost_h
+                                                       : nullptr;
       if (slot == nullptr) bad("market: unknown key \"" + k + "\"");
       *slot = numField(jm, k.c_str(), "market");
       if (*slot < 0) bad("market: \"" + k + "\" must be >= 0");

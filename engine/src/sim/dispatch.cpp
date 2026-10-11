@@ -109,18 +109,31 @@ void advanceTravel(const World& world, State& state, const PathCache& paths, uin
 
 }  // namespace
 
-void stepDispatch(const World& world, State& state, PathCache& paths, Recorder& rec) {
+void stepDispatch(const World& world, State& state, PathCache& paths, Recorder& rec,
+                  double urgency_boost_h) {
   refreshPaths(world, state, paths);  // pick up edge toggles from events
 
-  // Open orders, most urgent first; ties break to earlier creation, then
-  // lower order id (deterministic; §5.7).
+  // Open orders in service order (deterministic; §5.7). Default: most
+  // urgent first, ties to earlier creation, then lower order id. With an
+  // urgency boost: first come first served, each order's place in the queue
+  // moved up by urgency x boost hours — so urgency still jumps the queue,
+  // but an old order cannot be overtaken forever.
   std::vector<uint32_t> open;
   for (uint32_t i = 0; i < state.order.size(); ++i)
     if (state.order[i].status == OrdStatus::Open) open.push_back(i);
+  const bool fifo = urgency_boost_h >= 0.0;
+  auto queueKey = [&](const Order& o) {
+    return static_cast<double>(o.created_tick) - o.urgency * urgency_boost_h / kTickHours;
+  };
   std::sort(open.begin(), open.end(), [&](uint32_t a, uint32_t b) {
     const Order& oa = state.order[a];
     const Order& ob = state.order[b];
-    if (oa.urgency != ob.urgency) return oa.urgency > ob.urgency;
+    if (fifo) {
+      const double ka = queueKey(oa), kb = queueKey(ob);
+      if (ka != kb) return ka < kb;
+    } else if (oa.urgency != ob.urgency) {
+      return oa.urgency > ob.urgency;
+    }
     if (oa.created_tick != ob.created_tick) return oa.created_tick < ob.created_tick;
     return a < b;
   });

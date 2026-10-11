@@ -110,8 +110,16 @@ struct Process {
 struct Unit {
   ProcessId process;
   uint8_t slot = 0;  // UnitSlot index within the process type
+  // What one train can pass, in t/h of the unit's own throughput (its
+  // recipe in-sum, see unitThroughputPerBasis) — not of process basis.
   double cap_per_train_t_h = 0;
 };
+
+// Tonnes a unit passes per tonne of process basis: its mode-0 recipe in-sum
+// (1 when the unit has no inputs, i.e. a source). Not 1 everywhere — a
+// chlor-alkali cell passes 2.156 t per tonne of chlorine, a VCM unit 1.6 —
+// so unit capacity (sized here) and R_max (control) must use the same value.
+double unitThroughputPerBasis(const UnitSlot& slot);
 
 struct Pipeline {
   TankId from, to;
@@ -167,6 +175,7 @@ struct World {
     double value_of_time_usd_t_h = -1, switch_cost_frac = -1, beta = -1;
     double min_lot_cap_frac = -1, min_lot_target_frac = -1;
     double max_lots_per_tank = -1;
+    double dispatch_urgency_boost_h = -1;
   };
   Market market;
 

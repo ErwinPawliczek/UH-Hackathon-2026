@@ -30,6 +30,13 @@ constexpr double kOverdesign = 1.10;  // §3.2: trains sized at 110 % of namepla
 
 }  // namespace
 
+double unitThroughputPerBasis(const UnitSlot& slot) {
+  double tput = 0.0;
+  if (!slot.by_mode.empty())
+    for (const Stream& s : slot.by_mode[0].in) tput += s.t_per_t;
+  return tput > 0.0 ? tput : 1.0;
+}
+
 bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, World& out,
                 std::string& error) {
   auto fail = [&](const std::string& msg) {
@@ -170,11 +177,15 @@ bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, Wo
       }
     }
 
-    // §3.2: trains together are sized at 110 % of the process nameplate
-    // (nameplate is in basis t/h, so unit capacity is basis t/h per train).
+    // §3.2: trains together are sized at 110 % of the process nameplate.
+    // Nameplate is in basis t/h; a unit passes unitThroughputPerBasis() of
+    // its own tonnes per basis tonne, so its capacity carries that factor —
+    // R_max (control.cpp) divides it back out and lands on 110 % of
+    // nameplate for every unit with all trains online.
     for (uint32_t u = proc.units.begin; u < rangeEnd(proc.units); ++u) {
       const UnitSlot& slot = type.units[out.units[u].slot];
-      out.units[u].cap_per_train_t_h = kOverdesign * proc.design_rate_t_h / slot.trains;
+      out.units[u].cap_per_train_t_h =
+          kOverdesign * proc.design_rate_t_h * unitThroughputPerBasis(slot) / slot.trains;
     }
   }
 

@@ -51,8 +51,9 @@ std::vector<ProcView> makeViews(const World& world) {
 }
 
 // R_max (§5.3): minimum over units of what the online trains can pass, in
-// t/h of process basis. Unit throughput per tonne of basis comes from the
-// unit's mode-0 recipe in-sum (all modes are ≈ 1 t/t in this catalog).
+// t/h of process basis. A unit's capacity is in its own throughput tonnes;
+// unitThroughputPerBasis() (world.h) converts it back to basis, the same
+// factor the world builder sized the capacity with.
 double computeRMax(const World& world, const Process& proc, const State& state) {
   const ProcessType& type = world.catalog.process_types[proc.type];
   double r_max = std::numeric_limits<double>::infinity();
@@ -61,11 +62,7 @@ double computeRMax(const World& world, const Process& proc, const State& state) 
     const UnitSlot& slot = type.units[unit.slot];
     const int online = static_cast<int>(slot.trains) - state.unit[u].trains_down;
     if (online <= 0) return 0.0;
-    double tput = 0.0;
-    if (!slot.by_mode.empty())
-      for (const Stream& s : slot.by_mode[0].in) tput += s.t_per_t;
-    if (tput <= 0.0) tput = 1.0;
-    r_max = std::min(r_max, unit.cap_per_train_t_h * online / tput);
+    r_max = std::min(r_max, unit.cap_per_train_t_h * online / unitThroughputPerBasis(slot));
   }
   // §3.2 sizes trains at 110% of nameplate so the process still reaches
   // nameplate with one train down; the process rate itself never exceeds it.
