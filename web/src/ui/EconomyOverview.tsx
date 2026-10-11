@@ -51,9 +51,6 @@ function Served({ reply }: { reply: EconomyReply | null }) {
 
 function Cost({ f }: { f: ForecastReply | null }) {
   const showDetail = useEconomyView((s) => s.showDetail);
-  const shared = useSim((s) => s.room !== null);
-  // the forecast runs the world forward twice, which a shared game does not offer
-  if (shared) return <p className="text-sm text-muted">Not available in a shared simulation.</p>;
   if (f === null) return waiting;
   if (nothingBroken(f)) {
     return (

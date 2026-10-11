@@ -22,6 +22,10 @@ import { SiteBadge } from '../ui/SiteIcon';
 import { SpeedControl } from '../ui/SpeedControl';
 import { SiteWindow } from '../ui/SiteWindow';
 import { VehicleWindow } from '../ui/VehicleWindow';
+import { ECONOMY_WINDOW_AT, ECONOMY_WINDOW_ID, EconomyWindow } from '../ui/EconomyWindow';
+import { EventLog, LOG_WINDOW_AT, LOG_WINDOW_ID } from '../ui/EventLog';
+import { SITES_WINDOW_AT, SITES_WINDOW_ID, SitesKey } from '../ui/SitesKey';
+import { useWindows } from '../ui/windows';
 import { fmtMoney } from '../ui/economyData';
 import { fmtClock } from '../ui/format';
 import { Qr } from './Qr';
@@ -163,7 +167,7 @@ function Leaderboard({ source, room }: { source: RoomSource; room: RoomInfo }) {
     .filter((r) => r.owner !== null)
     .sort((a, b) => b.value - a.value);
   return (
-    <section className="chamfer pointer-events-auto absolute right-4 top-16 z-30 w-[360px] p-3" style={CARD} data-testid="host-leaderboard">
+    <section className="chamfer pointer-events-auto absolute right-4 top-16 z-[5] w-[360px] p-3" style={CARD} data-testid="host-leaderboard">
       <div className="label mb-1">Damage to the economy</div>
       <p className="mb-1 text-xs text-muted">Customer sales lost because of each player, against the same run without them.</p>
       {rows.length === 0 && <p className="text-sm text-muted">Nobody has taken a plant yet.</p>}
@@ -250,6 +254,9 @@ function HostBar({ room, send, busy, onSummary }: { room: RoomInfo; send: (a: Ho
   const scenarios = useMemo(() => scenariosFor(world), [world]);
   const [fired, setFired] = useState<string[]>([]);
   const [playersOnly, setPlayersOnly] = useState(false);
+  const sitesOpen = useWindows((w) => w.windows[SITES_WINDOW_ID]?.open === true);
+  const economyOpen = useWindows((w) => w.windows[ECONOMY_WINDOW_ID]?.open === true);
+  const logOpen = useWindows((w) => w.windows[LOG_WINDOW_ID]?.open === true);
   useEffect(() => {
     document.documentElement.dataset.playersOnly = playersOnly ? '1' : '';
     return () => { document.documentElement.dataset.playersOnly = ''; };
@@ -274,6 +281,10 @@ function HostBar({ room, send, busy, onSummary }: { room: RoomInfo; send: (a: Ho
       {room.phase !== 'ended' && <button className="btn" onClick={() => { send({ action: 'scenario', command: { type: 'end_events' } }); setFired([]); }} disabled={busy} title="End every running scenario now" data-testid="host-end-events">End events</button>}
       <button className={`btn ${playersOnly ? 'btn-active' : ''}`} aria-pressed={playersOnly} onClick={() => setPlayersOnly(!playersOnly)} data-testid="host-players-only">Players only: {playersOnly ? 'on' : 'off'}</button>
       <span className="ml-auto text-xs text-muted">Code <span className="data text-ink">{room.code}</span> · {room.players.length} player{room.players.length === 1 ? '' : 's'}</span>
+      {/* the same windows as the main app: everything a visitor can open, the host can too */}
+      <button className={`btn ${sitesOpen ? 'btn-active' : ''}`} aria-pressed={sitesOpen} onClick={() => useWindows.getState().toggle(SITES_WINDOW_ID, SITES_WINDOW_AT)} data-testid="host-sites">Sites</button>
+      <button className={`btn ${economyOpen ? 'btn-active' : ''}`} aria-pressed={economyOpen} onClick={() => useWindows.getState().toggle(ECONOMY_WINDOW_ID, ECONOMY_WINDOW_AT)} data-testid="host-economy">Economy</button>
+      <button className={`btn ${logOpen ? 'btn-active' : ''}`} aria-pressed={logOpen} onClick={() => useWindows.getState().toggle(LOG_WINDOW_ID, LOG_WINDOW_AT)} data-testid="host-log">Log</button>
       <button className="btn" onClick={onSummary} data-testid="host-summary-open">Damage summary</button>
       {room.phase !== 'ended' && <button className="btn btn-danger" onClick={() => { if (window.confirm('End the session for everyone and show the damage summary?')) { send({ action: 'end' }); onSummary(); } }} data-testid="host-end">End and show damage</button>}
     </header>
@@ -318,7 +329,7 @@ function Game({ hosting, onLeave }: { hosting: Hosting; onLeave: () => void }) {
     <div className="relative h-dvh w-full overflow-hidden bg-white text-ink" data-testid="host-game">
       {world !== null && <SceneCanvas />}
       {/* click a plant or a vehicle on the map: the same windows as the main app */}
-      {world !== null && room !== null && room.phase !== 'lobby' && <><VehicleWindow /><SiteWindow /></>}
+      {world !== null && room !== null && room.phase !== 'lobby' && <><EventLog /><SitesKey /><EconomyWindow /><VehicleWindow /><SiteWindow /></>}
       {room !== null && room.phase !== 'lobby' && <HostBar room={room} send={send} busy={busy} onSummary={() => { useSim.setState({ damageView: null }); setShowSummary(true); }} />}
       {room !== null && room.phase === 'lobby' && <Lobby room={room} url={url} onSources={(allow) => send({ action: 'sources', allow })} onStart={() => { send({ action: 'start' }); window.setTimeout(() => send({ action: 'speed', speed: 8 }), 400); }} busy={busy} />}
       {room !== null && room.phase !== 'lobby' && <Leaderboard source={source} room={room} />}
