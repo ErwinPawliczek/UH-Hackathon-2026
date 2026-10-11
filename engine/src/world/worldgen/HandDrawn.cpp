@@ -1142,10 +1142,16 @@ bool loadHandDrawnWorld(const std::string& jsonPath, const CatalogView& catalog,
     const double rt = 2.0 * km / vc->speed_kmh + 2.0 * vc->capacity_t / vc->load_t_h;
     const int count = std::max(1, static_cast<int>(std::ceil(kFleetSpare * t_d * (rt / 24.0) /
                                                              vc->capacity_t)));
-    // Berths are needed at BOTH ends: vehicles home at the seller still
-    // unload at the buyer, so bay floors must count both endpoints.
-    vehBySiteMode[{f.from, static_cast<int>(f.mode)}] += count;
-    vehBySiteMode[{f.to, static_cast<int>(f.mode)}] += count;
+    // Berths are needed at BOTH ends, in EVERY mode the material allows:
+    // procurement re-picks the class per order by cost, so a flow planned as
+    // river can be served by a ship or a truck — and a ship queued at a site
+    // with zero sea berths wedges its whole cargo forever.
+    if (const MaterialInfo* fmat = catalog.material(f.material))
+      for (int m = 0; m < 3; ++m) {
+        if (!(fmat->modes_mask & (1u << m))) continue;
+        vehBySiteMode[{f.from, m}] += count;
+        vehBySiteMode[{f.to, m}] += count;
+      }
     // Trucks are the universal overflow carrier (procurement re-picks the
     // class per order): give every flow a road detachment homed at the
     // seller so a busy primary fleet cannot starve the order book.
