@@ -61,6 +61,14 @@ std::vector<uint16_t> tradedMaterials(const World& world, uint32_t seller, uint3
 // "suppliers":[same]}. Empty string when `site` is not a site.
 std::string partnersJson(const World& world, const State& state, uint32_t site);
 
+// The run so far in the few cumulative figures a before/after comparison
+// needs: {"tick","economy":{"lostSalesUsd","deliveredT","plantsStoppedNow"},
+// "sites":[{"site","key","name","customer","status","stoppedHours","outputT",
+// "lostSalesUsd"}],"pipelines":[{"index","name","from","to","movedT"}]}.
+// status is the snapshot's site status byte; outputT is tonnes produced, or
+// tonnes consumed at a customer. Reads state only, so it works on a muted run.
+std::string summaryJson(const World& world, const State& state);
+
 std::string economyJson(const World& world, const State& state, const Recorder& rec,
                         uint32_t bucket_h);
 

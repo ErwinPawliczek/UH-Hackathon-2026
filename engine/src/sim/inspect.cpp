@@ -815,5 +815,59 @@ std::string partnersJson(const World& world, const State& state, uint32_t site) 
       .dump();
 }
 
+std::string summaryJson(const World& world, const State& state) {
+  json sites = json::array();
+  int stopped_now = 0;
+  for (size_t s = 0; s < world.sites.size(); ++s) {
+    bool down = false, restarting = false, holding = false, customer = true, any = false;
+    for (size_t p = 0; p < world.processes.size(); ++p) {
+      if (world.processes[p].site.v != s) continue;
+      any = true;
+      down = down || state.proc[p].status == ProcStatus::Shutdown;
+      restarting = restarting || state.proc[p].status == ProcStatus::Restarting;
+      holding = holding || state.proc[p].status == ProcStatus::HoldMin;
+      customer = customer &&
+                 world.catalog.process_types[world.processes[p].type].boundary == Boundary::Sink;
+    }
+    customer = customer && any;
+    bool limited = false;
+    for (const EventDef& ev : state.active)
+      limited = limited || (ev.site == s && ev.multiplier != 1.0 &&
+                            (ev.type == EventDef::Type::SupplyShock ||
+                             ev.type == EventDef::Type::DemandShock));
+    const int status = down ? 3 : restarting ? 4 : holding ? 1 : limited ? 5 : 0;
+    stopped_now += (status == 3 || status == 4) ? 1 : 0;
+    const Ledger& l = state.ledger[s];
+    sites.push_back({{"site", s},
+                     {"key", world.sites[s].key},
+                     {"name", world.sites[s].name},
+                     {"customer", customer},
+                     {"status", status},
+                     {"stoppedHours", state.site_trade[s].stopped_h},
+                     {"outputT", customer ? l.consumed_t : l.produced_t},
+                     {"lostSalesUsd", state.site_trade[s].unmet_usd}});
+  }
+  json pipes = json::array();
+  for (size_t i = 0; i < world.pipelines.size(); ++i) {
+    const Pipeline& pipe = world.pipelines[i];
+    const uint32_t from = world.tanks[pipe.from.v].site.v, to = world.tanks[pipe.to.v].site.v;
+    std::string what = materialWord(world.catalog, world.tanks[pipe.to.v].material);
+    if (!what.empty()) what[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(what[0])));
+    pipes.push_back({{"index", i},
+                     {"name", what + " pipeline from " + world.sites[from].name + " to " + world.sites[to].name},
+                     {"from", from},
+                     {"to", to},
+                     {"movedT", state.pipe_moved_t[i]}});
+  }
+  return json{{"tick", state.tick},
+              {"economy",
+               {{"lostSalesUsd", state.cum_unmet_usd},
+                {"deliveredT", state.cum_demand_t - state.cum_unmet_t},
+                {"plantsStoppedNow", stopped_now}}},
+              {"sites", sites},
+              {"pipelines", pipes}}
+      .dump();
+}
+
 }  // namespace sim
 }  // namespace crx

@@ -124,6 +124,7 @@ export function mockRoom(code = 'MOCK'): RoomSource {
       return { ok: true };
     },
     partners: async () => ({ buyers: [], suppliers: [] }),
+      summary: async () => null,
     async play(token, action) {
       await ready;
       const me = joined.find((j) => j.token === token);

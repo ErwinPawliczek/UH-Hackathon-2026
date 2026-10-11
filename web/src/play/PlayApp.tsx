@@ -1,7 +1,7 @@
 // The player's phone screen at /play/?room=CODE (MULTIPLAYER-CONTRACT.md).
 //
 // Three screens in one frame: give a name; pick a plant in the lobby; then
-// run that plant — its price, its rate and its units — and watch what that
+// run that plant — its rate, its trading partners and its units — and watch what that
 // does to its profit and its rank. The frame is a top bar (the mark and one
 // menu hexagon that holds everything else), the 3D map, and a bottom sheet
 // with two heights: a peek that leaves the map usable, and open.
@@ -18,12 +18,14 @@ import { Sparkline } from '../ui/charts/Sparkline';
 import { fmtMomentWords } from '../ui/format';
 import { eventLabel } from '../ui/eventKinds';
 import {
-  PRICE_MAX, PRICE_MIN, PRICE_STEP, fmtProfit, fmtSold, isHit, makesWords, minRate, myScore, othersWords, pctSigned, plantState,
-  priceWords, rankWords, rateWords, roomCode, siteUnits,
+  fmtProfit, isHit, makesWords, minRate, myScore, othersWords, plantState,
+  rankWords, rateWords, roomCode, siteUnits,
 } from './playLogic';
 import { openRoom, roomSource } from '../store/room';
 import { mockRoom, mockRoomWanted } from '../store/roomMock';
-import type { RoomInfo, RoomPartner, RoomPartners } from '../store/roomTypes';
+import type { RoomInfo, RoomPartner, RoomPartners, RoomSummary } from '../store/roomTypes';
+import { useSummary } from '../store/useSummary';
+import { DamageSummary } from '../ui/DamageSummary';
 import { mePlayer, startScoresLoop, usePlay } from './playStore';
 
 type Menu = 'leaderboard' | 'economy' | 'log' | 'how' | null;
@@ -276,7 +278,7 @@ function Slider({ id, label, value, min, max, step, shown, words, onChange }: {
 }
 
 /** Screen 3: your plant. */
-function PlantSheet({ room, site }: { room: RoomInfo; site: number }) {
+function PlantSheet({ room, site, summary }: { room: RoomInfo; site: number; summary: RoomSummary | null }) {
   const world = useSim((s) => s.world);
   const snap = useSim((s) => s.snap);
   const scores = usePlay((s) => s.scores);
@@ -285,11 +287,16 @@ function PlantSheet({ room, site }: { room: RoomInfo; site: number }) {
   const sending = usePlay((s) => s.sending);
   const confirmedAt = usePlay((s) => s.confirmedAt);
   const error = usePlay((s) => s.error);
-  const { setPrice, setRate, setUnit } = usePlay.getState();
+  const { setRate, setUnit } = usePlay.getState();
   const [open, setOpen] = useState(true);
-  const { score, of } = myScore(scores, site);
+  const { score } = myScore(scores, site);
+  const damage = score?.damageUsd ?? 0;
+  // rank among the players, the most damage first
+  const owners = scores.filter((x) => x.owner !== null).sort((a, b) => (b.damageUsd ?? 0) - (a.damageUsd ?? 0));
+  const rank = owners.findIndex((x) => x.site === site) + 1;
+  const seatId = usePlay((s) => s.seat?.playerId ?? null);
+  const mine = summary?.players.find((p) => p.id === seatId);
   // what the slider shows: the player's own last setting until the server's figure catches up
-  const [markup, setMarkup] = useState<number | null>(null);
   const [share, setShare] = useState<number | null>(null);
   const units = useMemo(() => (world === null ? [] : siteUnits(world, site)), [world, site]);
   const [, tick] = useState(0);
@@ -301,7 +308,6 @@ function PlantSheet({ room, site }: { room: RoomInfo; site: number }) {
   const spec = room.sites.find((s) => s.index === site);
   const state = plantState(snap, site);
   const low = minRate(world, site);
-  const m = markup ?? score?.markup ?? 0;
   const r = share ?? score?.rateShare ?? 1;
   const waiting = sending || Object.keys(pending).length > 0;
   const saved = confirmedAt !== null && performance.now() - confirmedAt < 4000;
@@ -318,36 +324,32 @@ function PlantSheet({ room, site }: { room: RoomInfo; site: number }) {
             <span className="block text-xs leading-tight" style={{ color: state.alarm ? 'var(--alarm)' : 'var(--muted)' }}>{state.text}</span>
           </span>
           <span className="text-right">
-            <span className="data block text-lg font-semibold leading-tight text-ink" data-testid="play-profit">{score === null ? '—' : fmtProfit(score.profitUsd)}</span>
-            <span className="block text-xs leading-tight text-muted" data-testid="play-rank">{score === null ? 'no rank yet' : rankWords(score.rank, of)}</span>
+            <span className={`data block text-lg font-semibold leading-tight ${damage > 0 ? 'text-alarm' : 'text-ink'}`} data-testid="play-damage">{score === null ? '—' : fmtProfit(damage)}</span>
+            <span className="block text-xs leading-tight text-muted" data-testid="play-rank">{rank === 0 ? 'damage' : `${rankWords(rank, owners.length)} for damage`}</span>
           </span>
         </span>
       )}
     >
       <div className="mb-2 flex items-end justify-between gap-3">
         <div>
-          <div className="label">Profit so far</div>
-          <div className="text-4xl font-semibold leading-none text-ink">{score === null ? '—' : fmtProfit(score.profitUsd)}</div>
-          <div className="mt-1 text-xs text-muted">{score === null ? '' : `${fmtSold(score.soldT)} sold · ${rankWords(score.rank, of)}`}</div>
+          <div className="label">Damage you have done to the economy</div>
+          <div className={`text-4xl font-semibold leading-none ${damage > 0 ? 'text-alarm' : 'text-ink'}`}>{score === null ? '—' : fmtProfit(damage)}</div>
+          <div className="mt-1 text-xs text-muted">{rank === 0 ? '' : `${rankWords(rank, owners.length)} of the players`} · sales customers lost because of you</div>
         </div>
-        <Sparkline values={trend} width={120} height={36} color="#1764d6" />
+        <Sparkline values={trend} width={120} height={36} color="#d1372f" />
       </div>
+      <p className="mb-1 text-sm" data-testid="play-broke">
+        {mine === undefined || mine.moves === 0
+          ? <span className="text-muted">Change something below and watch what it breaks.</span>
+          : mine.tookDown.length === 0
+            ? <span className="text-muted">Nothing has broken because of you yet. It takes a few days to spread.</span>
+            : <><span className="font-semibold text-alarm">You broke:</span> <span className="text-ink">{mine.tookDown.map((i) => summary?.sites.find((x) => x.site === i)?.name ?? '').filter(Boolean).join(', ')}</span></>}
+      </p>
 
       <p className="min-h-[18px] text-xs" role="status" data-testid="play-saved" style={{ color: error !== null ? 'var(--alarm)' : 'var(--muted)' }}>
         {error !== null ? error : waiting ? 'Sending…' : saved ? 'Saved: your settings are in.' : room.phase === 'lobby' ? 'Settings take effect when the host starts.' : ''}
       </p>
 
-      <Slider
-        id="play-price"
-        label="Price"
-        value={m}
-        min={PRICE_MIN}
-        max={PRICE_MAX}
-        step={PRICE_STEP}
-        shown={pctSigned(m)}
-        words={priceWords(m)}
-        onChange={(v) => { setMarkup(v); setPrice(Math.round(v * 100) / 100); }}
-      />
       <Slider
         id="play-rate"
         label="Rate"
@@ -405,64 +407,20 @@ function Panel({ title, onClose, children }: { title: string; onClose: () => voi
 function Leaderboard({ mySite }: { mySite: number | null }) {
   const scores = usePlay((s) => s.scores);
   const room = useSim((s) => s.room);
-  const [board, setBoard] = useState<'profit' | 'damage'>('profit');
-  if (scores.length === 0) return <p className="text-sm text-muted">No scores yet: they start when the host starts the clock.</p>;
-  const rows = board === 'profit'
-    ? [...scores].sort((a, b) => b.profitUsd - a.profitUsd)
-    : scores.filter((s) => s.owner !== null).sort((a, b) => (b.damageUsd ?? 0) - (a.damageUsd ?? 0));
+  const rows = scores.filter((s) => s.owner !== null).sort((a, b) => (b.damageUsd ?? 0) - (a.damageUsd ?? 0));
+  if (rows.length === 0) return <p className="text-sm text-muted">Nobody has taken a plant yet.</p>;
   return (
     <div>
-      <div className="mb-3 flex gap-2" role="tablist">
-        {([['profit', 'Profit'], ['damage', 'Damage to economy']] as const).map(([key, label]) => (
-          <button key={key} type="button" role="tab" aria-selected={board === key} className={`btn ${board === key ? 'btn-active' : ''}`} style={TOUCH} onClick={() => setBoard(key)} data-testid={`play-board-${key}`}>{label}</button>
-        ))}
-      </div>
-      {board === 'damage' && <p className="mb-2 text-xs text-muted">Sales customers lost because of what each player did, compared with the same run without them.</p>}
-      {rows.length === 0 && <p className="text-sm text-muted">Nobody has taken a plant yet.</p>}
+      <p className="mb-2 text-xs text-muted">Sales customers lost because of what each player did, compared with the same run without them.</p>
       <ol className="divide-y divide-line" data-testid="play-leaderboard">
         {rows.map((s, i) => (
           <li key={s.site} className={`flex min-h-[44px] items-center gap-3 px-1 text-sm ${s.site === mySite ? 'bg-blue-soft' : ''}`}>
             <span className="data w-7 text-muted">{i + 1}</span>
-            <span className="min-w-0 flex-1 truncate font-semibold" style={{ color: playerColor(room, s.owner) ?? undefined }}>
-              {s.owner !== null ? ownedName(s.ownerName, s.name) : <span className="font-normal text-muted">{s.name}</span>}
-            </span>
-            <span className={`data font-semibold ${board === 'damage' ? 'text-alarm' : 'text-ink'}`}>{fmtProfit(board === 'damage' ? s.damageUsd ?? 0 : s.profitUsd)}</span>
+            <span className="min-w-0 flex-1 truncate font-semibold" style={{ color: playerColor(room, s.owner) ?? undefined }}>{ownedName(s.ownerName, s.name)}</span>
+            <span className={`data font-semibold ${(s.damageUsd ?? 0) > 0 ? 'text-alarm' : 'text-ink'}`}>{fmtProfit(s.damageUsd ?? 0)}</span>
           </li>
         ))}
       </ol>
-    </div>
-  );
-}
-
-/** The economy on a phone, from what a room reports: read-only. */
-function EconomyOverview({ room }: { room: RoomInfo }) {
-  const scores = usePlay((s) => s.scores);
-  const snap = useSim((s) => s.snap);
-  const total = (f: (s: (typeof scores)[number]) => number) => scores.reduce((a, s) => a + f(s), 0);
-  const running = room.sites.filter((s) => s.playable && ![3, 4].includes(snap?.siteStatus[s.index] ?? 0)).length;
-  const playable = room.sites.filter((s) => s.playable).length;
-  const top = [...scores].sort((a, b) => b.markup - a.markup).filter((s) => Math.abs(s.markup) > 0.001).slice(0, 4);
-  const Tile = ({ label, value, note }: { label: string; value: string; note: string }) => (
-    <div className="chamfer chamfer-sm p-3" style={{ '--chamfer-fill': 'var(--white)' } as React.CSSProperties}>
-      <div className="label">{label}</div>
-      <div className="text-2xl font-semibold leading-tight text-ink">{value}</div>
-      <div className="text-xs text-muted">{note}</div>
-    </div>
-  );
-  return (
-    <div className="flex flex-col gap-3" data-testid="play-economy">
-      <Tile label="Plants running" value={`${running} of ${playable}`} note="not shut down or restarting" />
-      <Tile label="Sold so far" value={fmtSold(total((s) => s.soldT))} note={`worth ${fmtProfit(total((s) => s.revenueUsd))} across every plant`} />
-      <Tile label="Profit so far" value={fmtProfit(total((s) => s.profitUsd))} note="every plant together" />
-      <Tile label="Spent" value={fmtProfit(total((s) => s.feedUsd + s.freightUsd + s.energyUsd))} note={`feed ${fmtProfit(total((s) => s.feedUsd))} · freight ${fmtProfit(total((s) => s.freightUsd))} · energy ${fmtProfit(total((s) => s.energyUsd))}`} />
-      <div className="chamfer chamfer-sm p-3" style={{ '--chamfer-fill': 'var(--white)' } as React.CSSProperties}>
-        <div className="label mb-1">Prices set by players</div>
-        {top.length === 0
-          ? <p className="text-sm text-muted">Everyone is selling at the going rate.</p>
-          : top.map((s) => (
-            <div key={s.site} className="flex justify-between text-sm text-ink"><span className="truncate">{s.name}</span><span className="data">{pctSigned(s.markup)}</span></div>
-          ))}
-      </div>
     </div>
   );
 }
@@ -485,10 +443,10 @@ function LogList() {
 
 const HOW = [
   'You run one plant. Everyone else runs theirs; the rest run themselves.',
-  'Price: ask more and you earn more per tonne but sell less. Ask less and you sell more.',
   'Rate: make less and you buy less feed. Units can be taken down and brought back.',
   'Trading: stop selling to one buyer, or stop buying from one supplier, and watch what it does to them.',
-  'The host runs the clock and sets off trouble. There are two boards: most profit, and most damage to the economy.',
+  'The host runs the clock and sets off trouble. Your score is the damage you do: sales customers lose because of your changes.',
+  'At the end everyone sees the damage summary: the session against the same run with nothing changed.',
 ];
 
 export function PlayApp() {
@@ -515,6 +473,11 @@ export function PlayApp() {
   }, [code, open]);
 
   const me = mePlayer(room, seat);
+  const source = usePlay((s) => s.source);
+  const summary = useSummary(room !== null && room.phase !== 'lobby' ? source : null, 5000); // the summary is costly for the server: phones ask rarely
+  // the session is over: straight to the summary
+  const over = room?.phase === 'ended';
+  useEffect(() => { if (over) setMenu('economy'); }, [over]);
   // tell the scene which plant is mine: its label says "yours"
   const mySiteNow = me?.site ?? null;
   useEffect(() => { useSim.getState().setMySite(mySiteNow); }, [mySiteNow]);
@@ -565,7 +528,7 @@ export function PlayApp() {
           </button>
           {menuOpen && (
             <ul className="chamfer chamfer-sm absolute right-0 top-12 z-50 w-56 py-1" role="menu" data-testid="play-menu-list">
-              {([['leaderboard', 'Leaderboard'], ['economy', 'Economy overview'], ['log', 'Log'], ['how', 'How to play']] as const).map(([key, label]) => (
+              {([['leaderboard', 'Damage leaderboard'], ['economy', 'Damage summary'], ['log', 'Log'], ['how', 'How to play']] as const).map(([key, label]) => (
                 <li key={key} role="none">
                   <button type="button" role="menuitem" className="menu-item flex min-h-[44px] w-full items-center px-3 text-left text-sm" onClick={() => { setMenu(key); setMenuOpen(false); }} data-testid={`play-menu-${key}`}>{label}</button>
                 </li>
@@ -598,13 +561,13 @@ export function PlayApp() {
       {room === null
         ? <div className="shrink-0 border-t border-line bg-panel px-4 py-4 text-sm text-muted" role="status">{roomError ?? 'Finding the simulation…'}</div>
         : playing && mySite !== null
-          ? <PlantSheet room={room} site={mySite} />
+          ? <PlantSheet room={room} site={mySite} summary={summary} />
           : room.phase !== 'lobby' && mySite === null
             ? <LobbySheet room={room} />
             : <LobbySheet room={room} />}
 
-      {menu === 'leaderboard' && <Panel title="Leaderboard" onClose={() => setMenu(null)}><Leaderboard mySite={mySite} /></Panel>}
-      {menu === 'economy' && room !== null && <Panel title="Economy overview" onClose={() => setMenu(null)}><EconomyOverview room={room} /></Panel>}
+      {menu === 'leaderboard' && <Panel title="Damage leaderboard" onClose={() => setMenu(null)}><Leaderboard mySite={mySite} /></Panel>}
+      {menu === 'economy' && room !== null && <Panel title="Damage summary" onClose={() => setMenu(null)}>{summary === null ? <p className="text-sm text-muted">Working out the damage…</p> : <DamageSummary summary={summary} room={room} me={seat?.playerId ?? null} />}</Panel>}
       {menu === 'log' && <Panel title="Log" onClose={() => setMenu(null)}><LogList /></Panel>}
       {menu === 'how' && (
         <Panel title="How to play" onClose={() => setMenu(null)}>

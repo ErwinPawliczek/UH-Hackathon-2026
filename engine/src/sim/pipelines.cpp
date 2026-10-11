@@ -33,6 +33,7 @@ void stepPipelines(const World& world, State& state) {
     from.level_t = std::max(0.0, from.level_t - flow * dt);
     to.level_t = std::min(dst.capacity_t, to.level_t + flow * dt);
     state.pipe_flow_t_h[i] = flow;
+    state.pipe_moved_t[i] += flow * dt;
     // A pipeline between two sites is a sale all the same; it books no
     // order, so the scores view values it here at the base price.
     const uint32_t seller = world.tanks[pipe.from.v].site.v;

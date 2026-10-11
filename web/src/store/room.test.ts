@@ -22,6 +22,7 @@ describe('room', () => {
     const stop = openRoom('ABCD', {
       code: 'ABCD',
       partners: async () => ({ buyers: [], suppliers: [] }),
+      summary: async () => null,
       info: async () => ({ code: 'ABCD', phase: 'running', tick, speed: 4, players: [], sites: [] }),
       world: async () => ({ sites: [], tanks: [], routes: [], pipelines: [], vehicles: [] }),
       snapshot: async (last) => { calls.push('snapshot'); return last === tick ? null : snap(tick); },

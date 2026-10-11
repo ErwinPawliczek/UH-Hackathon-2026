@@ -20,7 +20,7 @@ export interface PlayState {
   source: RoomSource | null;
   seat: Seat | null;
   scores: RoomScore[];
-  /** my profit at each scores poll, for the small trend */
+  /** the damage I have caused at each scores poll, for the small trend */
   profitTrend: number[];
   /** why the last request failed, in a sentence */
   error: string | null;
@@ -182,7 +182,7 @@ export function startScoresLoop(): () => void {
         if (stopped) return;
         const room = useSim.getState().room;
         const mine = mePlayer(room, seat)?.site ?? null;
-        const profit = reply.scores.find((x) => x.site === mine)?.profitUsd;
+        const profit = reply.scores.find((x) => x.site === mine)?.damageUsd;
         usePlay.setState((s) => ({
           scores: reply.scores,
           profitTrend: profit === undefined || room?.phase !== 'running' ? s.profitTrend : [...s.profitTrend, profit].slice(-120),
