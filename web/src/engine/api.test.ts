@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HttpBackend } from './httpBackend';
+import { HttpBackend, HttpError } from './httpBackend';
 import { StubBackend } from './stubBackend';
 import { createBackend, type SimBackend } from './api';
 import { encodeStub } from './stub';
@@ -148,6 +148,24 @@ describe('HttpBackend request mapping', () => {
     expect(calls[1].url).toBe('http://x/api/sim/sim-7/series?kind=2&id=31');
   });
 
+  it('rewinds by posting {"tick":N} and returns the tick the server went back to', async () => {
+    const { calls, impl } = fakeFetch({ 'POST /api/sim/sim-7/rewind': () => ({ ok: true, tick: 288 }) });
+    const b = new HttpBackend('http://x', impl);
+    expect(await b.rewind('sim-7', 288)).toEqual({ tick: 288 });
+    expect(calls[0].url).toBe('http://x/api/sim/sim-7/rewind');
+    expect(JSON.parse(calls[0].body)).toEqual({ tick: 288 });
+  });
+
+  it('carries the server\'s reason when a rewind is refused', async () => {
+    const impl: typeof fetch = async () =>
+      new Response('{"error":"tick is ahead of the run"}', { status: 400 });
+    const b = new HttpBackend('http://x', impl);
+    const err = await b.rewind('sim-7', 9999).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HttpError);
+    expect((err as HttpError).status).toBe(400);
+    expect((err as HttpError).reason).toBe('tick is ahead of the run');
+  });
+
   it('throws with the status on a failed request', async () => {
     const impl: typeof fetch = async () => new Response('gone', { status: 410 });
     const b = new HttpBackend('http://x', impl);
@@ -229,6 +247,23 @@ describe('StubBackend', () => {
     expect(twin.tick).toBe(192n);
     const parent = await b.step(id, 0);
     expect(parent.tick).toBe(96n);
+  });
+
+  it('goes back in time: the tick resets and later outages are forgotten', async () => {
+    const { id } = await b.create({ seed: 7, scenario: 'none' });
+    await b.step(id, 100);
+    const world = await b.world(id);
+    const unit = world.sites[0].processes[0].units[0].key;
+    await b.command(id, { type: 'unit_outage', site: 0, unit, trains: 1, duration_h: 48 });
+    await b.step(id, 100);
+    expect((await b.events(id, -1)).some((e) => e.type === 'unit_failed' && e.tick === 100)).toBe(true);
+
+    expect(await b.rewind(id, 100)).toEqual({ tick: 100 }); // the outage was commanded AT 100: forgotten
+    expect((await b.step(id, 0)).tick).toBe(100n);
+    await b.step(id, 50);
+    expect((await b.events(id, -1)).some((e) => e.type === 'unit_failed' && e.tick === 100)).toBe(false);
+
+    await expect(b.rewind(id, 9999)).rejects.toThrow(/ahead of the run/);
   });
 
   it('echoes commands and throws on unknown sessions', async () => {

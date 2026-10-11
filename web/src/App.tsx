@@ -1,5 +1,5 @@
 // App shell: mounts the engine hook once, layers the scene, top bar,
-// inspectors and timeline over it, and shows loading/error states.
+// inspectors and floating windows over it, and shows loading/error states.
 
 import { useEffect } from 'react';
 import { useSimEngine } from './store/useSimEngine';
@@ -9,7 +9,7 @@ import { TopBar } from './ui/TopBar';
 import { EngineErrorOverlay } from './ui/EngineErrorOverlay';
 import { SiteInspector } from './ui/SiteInspector';
 import { VehicleInspector } from './ui/VehicleInspector';
-import { Timeline } from './ui/Timeline';
+import { RewindWindow } from './ui/RewindWindow';
 import { EventLog } from './ui/EventLog';
 
 function InspectorPanel() {
@@ -43,12 +43,12 @@ export default function App() {
       <SceneCanvas />
       <TopBar />
       <InspectorPanel />
-      <Timeline />
       <EventLog />
+      <RewindWindow />
 
       {/* A new run waits here, paused at day 0, until the visitor starts it. */}
       {world !== null && snap !== null && !started && error === null && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-20 z-10 flex justify-center">
+        <div className="pointer-events-none absolute inset-x-0 bottom-8 z-10 flex justify-center">
           <button
             className="btn btn-primary btn-lg pointer-events-auto"
             onClick={togglePlay}

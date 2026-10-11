@@ -50,6 +50,14 @@ export interface SimBackend {
   /** GET /api/sim/{id}/series?kind=&id= — hourly history. */
   series(id: string, kind: number, refId: number): Promise<number[]>;
   /**
+   * POST /api/sim/{id}/rewind — make the session exactly what it was at
+   * `tick` (commands issued at that tick or later are forgotten). Afterwards
+   * events, series and KPIs reflect only ticks up to it, with event sequence
+   * numbers as a fresh run would have them. Rejects when the tick is ahead of
+   * the run or the session is unknown.
+   */
+  rewind(id: string, tick: number): Promise<{ tick: number }>;
+  /**
    * DELETE /api/sim/{id} — release the session now: the client calls it
    * whenever it replaces a session (retry, settings change, new world/preset
    * load) and on page unload. Best-effort: never throws.

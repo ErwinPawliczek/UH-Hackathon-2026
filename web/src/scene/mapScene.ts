@@ -24,9 +24,9 @@ export interface PickHit {
   index: number;
 }
 
-/** Screen pixels the top bar and the timeline strip cover — the map is framed between them. */
+/** Screen pixels the top bar covers, and a margin at the bottom — the map is framed between them. */
 const TOP_INSET_PX = 64;
-const BOTTOM_INSET_PX = 84;
+const BOTTOM_INSET_PX = 16;
 /** Vehicle statuses (§4.4 VehStatus) at which a vehicle stands at a site: idle, queueing, loading, unloading. */
 const AT_SITE = new Set([0, 2, 3, 5, 6]);
 /** Trucks standing at a site park in rows on its near side, this many per row. */
@@ -208,7 +208,7 @@ export class MapScene {
   }
 
   /**
-   * Frame the whole map between the top bar and the timeline: the closest
+   * Frame the whole map below the top bar: the closest
    * camera distance (along the default tilt) at which all four map corners
    * are on screen, with the map centred in the free band. Runs on every
    * resize until the visitor moves the camera.

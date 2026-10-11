@@ -31,6 +31,7 @@ function fakeBackend() {
     events: vi.fn(async () => [] as SimEvent[]),
     kpis: vi.fn(async () => [] as number[]),
     series: vi.fn(async () => [] as number[]),
+    rewind: vi.fn(async (_id: string, tick: number) => ({ tick })),
     release: vi.fn(async (_id: string) => undefined),
   };
 }
@@ -167,6 +168,61 @@ describe('session lifecycle', () => {
     // sendBeacon cannot send DELETE; keepalive survives page teardown.
     expect(deletes[0].init?.keepalive).toBe(true);
     expect(engineSession()).toBeNull();
+    cleanup();
+  });
+
+  it('going back in time reloads the run and forgets what came after', async () => {
+    const backend = fakeBackend();
+    backend.step.mockImplementation(async (_id: string, _ticks: number) => decode(encodeStub(42, 288)));
+    backend.events.mockImplementation(async () => [
+      { seq: 0, tick: 40, type: 'process_shutdown', text: 'early' },
+      { seq: 1, tick: 250, type: 'unit_repaired', text: 'kept' },
+    ] as SimEvent[]);
+    const cleanup = openEngineSession({ kind: 'http', seed: 42, scenario: 'none' }, backend);
+    await vi.waitFor(() => expect(useSim.getState().rewindTo).not.toBeNull());
+
+    // a run that went on to tick 900 with two scenarios triggered on the way
+    useSim.setState({
+      playing: true,
+      started: true,
+      lastSeq: 57,
+      triggered: ['early_one', 'late_one'],
+      triggeredAt: { early_one: 100, late_one: 288 },
+      events: [
+        { seq: -1, tick: 100, type: 'scenario', text: 'Early one' },
+        { seq: -2, tick: 288, type: 'scenario', text: 'Late one' },
+        { seq: 57, tick: 880, type: 'process_shutdown', text: 'from the abandoned future' },
+      ],
+    });
+
+    const epoch = useSim.getState().runEpoch;
+    await useSim.getState().rewindTo!(288);
+    expect(useSim.getState().runEpoch).toBe(epoch + 1); // buffered state must be dropped
+
+    expect(backend.rewind).toHaveBeenCalledWith('sim-1', 288);
+    const s = useSim.getState();
+    expect(s.playing).toBe(false); // waits there, Resume showing
+    expect(s.started).toBe(true);
+    expect(Number(s.snap?.tick)).toBe(288);
+    expect(s.prevSnap).toBeNull(); // nothing to interpolate from
+    // triggered before 288 is kept; triggered AT 288 is forgotten by the engine and available again
+    expect(s.triggered).toEqual(['early_one']);
+    expect(s.triggeredAt).toEqual({ early_one: 100 });
+    expect(s.events.map((e) => e.text)).toEqual(['early', 'Early one', 'kept']);
+    expect(s.lastSeq).toBe(1); // the engine's log restarts its numbering
+    cleanup();
+  });
+
+  it('a refused rewind rejects with the server\'s reason and leaves the run as it was', async () => {
+    const backend = fakeBackend();
+    backend.rewind.mockImplementation(async () => {
+      throw new HttpError(400, 'POST /rewind -> 400', '{"error":"tick is ahead of the run"}');
+    });
+    const cleanup = openEngineSession({ kind: 'http', seed: 42, scenario: 'none' }, backend);
+    await vi.waitFor(() => expect(useSim.getState().rewindTo).not.toBeNull());
+    useSim.setState({ triggered: ['x'], triggeredAt: { x: 5 } });
+    await expect(useSim.getState().rewindTo!(999)).rejects.toThrow('tick is ahead of the run');
+    expect(useSim.getState().triggered).toEqual(['x']);
     cleanup();
   });
 
