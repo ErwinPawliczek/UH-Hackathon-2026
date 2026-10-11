@@ -73,6 +73,13 @@ const char* crx_economy(const crx_sim* sim, uint32_t bucket_h);
    {"error": "..."}. Reply valid until the next call. */
 const char* crx_sourcing(const crx_sim* sim, const char* site, const char* material);
 
+/* The map builder's check (no sim needed): lays `layout_json` over the named
+   world, and returns {"ok","errors","warnings","summary","trial"} as JSON,
+   with a 30-day trial run when the world builds. Never fails: every problem
+   is an entry in "errors". The reply is valid until the next call on this
+   thread. */
+const char* crx_check_layout(const char* world_name, const char* layout_json);
+
 uint64_t crx_tick(const crx_sim* sim);
 uint64_t crx_state_hash(const crx_sim* sim);
 const char* crx_version(void);

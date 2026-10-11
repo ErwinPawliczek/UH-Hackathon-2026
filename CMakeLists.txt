@@ -21,6 +21,7 @@ add_library(crx_engine STATIC
   engine/src/sim/dispatch.cpp
   engine/src/sim/events.cpp
   engine/src/sim/inspect.cpp
+  engine/src/sim/layout.cpp
   engine/src/sim/pipelines.cpp
   engine/src/sim/production.cpp
   engine/src/sim/procurement.cpp
@@ -90,6 +91,8 @@ target_link_libraries(crx-server PRIVATE crx_server_core)
 
 add_executable(crx_server_tests apps/server/tests/test_server.cpp)
 target_link_libraries(crx_server_tests PRIVATE crx_server_core doctest::doctest)
+target_compile_definitions(crx_server_tests PRIVATE
+  CRX_TEST_LAYOUT_DIR="${CMAKE_SOURCE_DIR}/design/worlds")
 add_test(NAME server COMMAND crx_server_tests)
 
 add_executable(crx_catalog_tests engine/tests/test_catalog.cpp)

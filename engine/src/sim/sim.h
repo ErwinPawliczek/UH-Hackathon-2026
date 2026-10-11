@@ -53,6 +53,12 @@ class Sim {
   // rejected so typos do not silently default.
   static std::unique_ptr<Sim> createFromConfig(const char* config_json, std::string& error);
 
+  // A named world with a redrawn map laid over it (layout.h): config key
+  // "layout". The first problem with the layout comes back in `error`.
+  static std::unique_ptr<Sim> createWithLayout(const std::string& world_name,
+                                               const std::string& layout_json, uint64_t seed,
+                                               std::string& error);
+
   // Deep copy: World shared, State and Recorder copied. Forks the run.
   Sim(const Sim&) = default;
   Sim& operator=(const Sim&) = delete;
@@ -84,6 +90,7 @@ class Sim {
 
  private:
   Sim() = default;
+  static std::unique_ptr<Sim> createOn(std::shared_ptr<World> world, uint64_t seed);
   std::shared_ptr<const World> world_;
   State state_;
   Recorder rec_;

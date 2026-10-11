@@ -35,6 +35,10 @@ bool buildNamedWorld(const std::string& name, uint64_t seed, World& out, std::st
 
 // The same, from JSON text already in memory (tests, tools). `name` only
 // labels the world (World::name) and the error messages.
+// The text of a named world's file. False with `error` set when the name is
+// not a world name or there is no such file.
+bool readNamedWorldText(const std::string& name, std::string& text, std::string& error);
+
 bool buildWorldFromJson(const std::string& name, const std::string& json_text, uint64_t seed,
                         World& out, std::string& error);
 

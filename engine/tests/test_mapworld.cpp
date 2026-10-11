@@ -21,6 +21,7 @@
 
 #include "sim/dispatch.h"
 #include "sim/inspect.h"
+#include "sim/layout.h"
 #include "sim/routes.h"
 #include "sim/sim.h"
 #include "sim/window.h"
@@ -34,6 +35,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <array>
 #include <map>
 #include <memory>
@@ -1993,4 +1995,226 @@ TEST_CASE("M24: sourcing tells the site's state from the plant's, and a short se
     }
   }
   CHECK(short_rows > 0);
+}
+
+namespace {
+
+// The layout the default world was drawn as (design/worlds, next to the data).
+json defaultLayout() {
+  std::ifstream in(std::string(CRX_WORLDS_DIR) + "/../../../design/worlds/erwin-world-v1.json");
+  REQUIRE_MESSAGE(static_cast<bool>(in), "cannot open the default layout");
+  std::ostringstream buf;
+  buf << in.rdbuf();
+  return json::parse(buf.str());
+}
+
+std::vector<std::string> layoutErrors(const json& layout) {
+  World w;
+  LayoutReport report;
+  CHECK(!buildWorldWithLayout("erwin-world-v1", layout.dump(), 42, w, report));
+  std::vector<std::string> out;
+  for (const LayoutIssue& e : report.errors) out.push_back(e.text);
+  return out;
+}
+
+bool has(const std::vector<std::string>& list, const std::string& text) {
+  return std::find(list.begin(), list.end(), text) != list.end();
+}
+
+}  // namespace
+
+TEST_CASE("M25: a layout laid over the world: the default one changes nothing, a redrawn one runs") {
+  const json layout = defaultLayout();
+  // Layout ids are the world file's sites in order: same presets, same places.
+  const json file = json::parse(readWorldFile());
+  REQUIRE(layout.at("sites").size() == file.at("sites").size());
+  for (size_t i = 0; i < file.at("sites").size(); ++i) {
+    CHECK(layout.at("sites")[i].at("id") == i + 1);
+    CHECK(layout.at("sites")[i].at("preset") == file.at("sites")[i].at("preset"));
+  }
+
+  // The default layout through the override is the default world: same hash at day 60.
+  std::string error;
+  auto plain = makeMapSim();
+  auto laid = Sim::createFromConfig(
+      json{{"seed", 42}, {"world", "erwin-world-v1"}, {"layout", layout}}.dump().c_str(), error);
+  REQUIRE_MESSAGE(laid != nullptr, error);
+  CHECK(laid->world().fleet.size() == plain->world().fleet.size());
+  CHECK(laid->world().polyline_xy == plain->world().polyline_xy);
+  plain->step(60 * 96);
+  laid->step(60 * 96);
+  CHECK(laid->stateHash() == plain->stateHash());
+
+  // Move Packaging 50 km north-west, rename it, and draw it a road back to
+  // where it was; reroute nothing else.
+  json moved = layout;
+  for (json& s : moved["sites"])
+    if (s.at("id") == 16) {
+      const double x = s.at("x"), y = s.at("y");
+      s["x"] = x - 35.0;
+      s["y"] = y - 35.0;
+      s["name"] = "Packaging North";
+      moved["network"].push_back({{"mode", "road"}, {"points", json::array({json::array({x - 35.0, y - 35.0}), json::array({x, y})})}});
+    }
+  World w;
+  LayoutReport report;
+  REQUIRE(buildWorldWithLayout("erwin-world-v1", moved.dump(), 42, w, report));
+  CHECK(report.errors.empty());
+  CHECK(w.sites[15].name == "Packaging North");
+  CHECK(w.sites[15].x_km == doctest::Approx(plain->world().sites[15].x_km - 35.0));
+  CHECK(report.road_km > 2375.0 + 40.0);
+  CHECK(report.vehicles >= plain->world().fleet.size());  // longer road trips never mean fewer trucks
+  CHECK(w.tanks.size() == plain->world().tanks.size());   // plants and tanks are the world's
+  CHECK(w.processes.size() == plain->world().processes.size());
+  auto run = Sim::createFromConfig(
+      json{{"seed", 42}, {"world", "erwin-world-v1"}, {"layout", moved}}.dump().c_str(), error);
+  REQUIRE_MESSAGE(run != nullptr, error);
+  run->step(30 * 96);
+  std::vector<double> kpis;
+  run->computeKpis(kpis);
+  CHECK(kpis[0] > 0.95);
+  // The check the map builder calls: builds, and a 30-day trial passes.
+  const json check = json::parse(checkLayoutJson("erwin-world-v1", moved.dump()));
+  CHECK(check.at("ok") == true);
+  CHECK(check.at("errors").empty());
+  CHECK(check.at("trial").at("days") == 30);
+  CHECK(check.at("trial").at("pass") == true);
+  CHECK(check.at("trial").at("service").get<double>() > 0.95);
+  CHECK(check.at("summary").at("vehicles").get<size_t>() == report.vehicles);
+
+  // A much longer world: every strip stretched away from the map centre is
+  // not needed; simply halving and doubling the road network's reach shows
+  // the fleet following distance. (Same map, sites twice as far apart.)
+  json wide = layout;
+  wide["wKm"] = 1200;
+  wide["hKm"] = 800;
+  wide["cellKm"] = 20;
+  const auto twice = [](json& points) {
+    for (json& p : points) p = json::array({p[0].get<double>() * 2, p[1].get<double>() * 2});
+  };
+  for (json& s : wide["sites"]) {
+    s["x"] = s.at("x").get<double>() * 2;
+    s["y"] = s.at("y").get<double>() * 2;
+  }
+  for (json& n : wide["network"]) twice(n["points"]);
+  for (json& c : wide["connections"]) twice(c["points"]);
+  World big;
+  LayoutReport big_report;
+  // Twice the distances puts strips' corners more than 12 km from some
+  // sites only if they were not snapped to them; the default map's are.
+  if (buildWorldWithLayout("erwin-world-v1", wide.dump(), 42, big, big_report)) {
+    size_t trucks_before = 0, trucks_after = 0;
+    for (const auto& f : plain->world().fleet)
+      trucks_before += plain->world().catalog.vehicle_classes[f.cls].mode == crx::Mode::Road ? 1 : 0;
+    for (const auto& f : big.fleet)
+      trucks_after += big.catalog.vehicle_classes[f.cls].mode == crx::Mode::Road ? 1 : 0;
+    CHECK(trucks_after > 1.7 * trucks_before);  // about twice the trucks for twice the road
+    CHECK(trucks_after < 2.3 * trucks_before);
+    bool warned = false;
+    for (const LayoutIssue& i : big_report.warnings)
+      warned = warned || i.text.find("Road trips are about 2.0 times longer") != std::string::npos;
+    CHECK(warned);
+  } else {
+    for (const LayoutIssue& e : big_report.errors) MESSAGE(e.text);
+    CHECK_MESSAGE(false, "the doubled map should build");
+  }
+}
+
+TEST_CASE("M26: a layout that cannot work says why, in plain words") {
+  const json layout = defaultLayout();
+  const auto with = [&](const std::function<void(json&)>& change) {
+    json copy = layout;
+    change(copy);
+    return layoutErrors(copy);
+  };
+  // Sites.
+  CHECK(has(with([](json& l) { l["sites"].erase(21); }),
+            "Port terminal B (site 22) is missing from the layout"));
+  CHECK(has(with([](json& l) { l["sites"].push_back(l["sites"][5]); }),
+            "Refinery (site 6) is in the layout twice"));
+  CHECK(has(with([](json& l) { l["sites"][5]["id"] = 99; }),
+            "The layout has a site with id 99, which this world does not have (ids run from 1 to 22)"));
+  CHECK(has(with([](json& l) { l["sites"][5]["preset"] = "GAS_PLANT"; }),
+            "Site 6 is the world's Refinery and cannot be changed into another kind of site"));
+  CHECK(has(with([](json& l) { l["sites"][5]["x"] = 900; }), "Refinery is off the map"));
+  CHECK(has(with([](json& l) { l["sites"][5].erase("x"); }), "Refinery has no position"));
+  CHECK(has(with([](json& l) {
+              l["water"].push_back({17, 8});  // the cell the refinery stands in
+            }),
+            "Refinery is on water; move it onto land"));
+  // Lanes a site needs.
+  CHECK(has(with([](json& l) {
+              json kept = json::array();
+              for (const json& n : l["network"])
+                if (n.at("mode") != "river") kept.push_back(n);
+              l["network"] = kept;
+            }),
+            "Refinery needs a river lane within 12 km"));
+  CHECK(has(with([](json& l) {
+              json kept = json::array();
+              for (const json& n : l["network"])
+                if (n.at("mode") != "sea") kept.push_back(n);
+              l["network"] = kept;
+            }),
+            "Fuel depot needs a sea lane within 12 km"));
+  CHECK(has(with([](json& l) {
+              l["sites"][15]["x"] = l["sites"][15]["x"].get<double>() - 50;  // Packaging, off its road
+            }),
+            "Packaging needs a road within 12 km"));
+  // A site on a road that leads nowhere: cut off, and it says from whom.
+  const std::vector<std::string> cut = with([](json& l) {
+    json& s = l["sites"][15];
+    const double x = s["x"].get<double>() - 50, y = s["y"];
+    s["x"] = x;
+    l["network"].push_back({{"mode", "road"}, {"points", json::array({json::array({x, y}), json::array({x, y - 5})})}});
+  });
+  CHECK(has(cut, "Packaging cannot be reached by road from Polyethylene"));
+  // Strips.
+  CHECK(has(with([](json& l) { l["network"][0]["points"] = json::array({json::array({10, 10})}); }),
+            "A road has fewer than 2 points; draw it again or delete it"));
+  CHECK(has(with([](json& l) { l["network"][0]["points"][0] = json::array({5000, 10}); }),
+            "A road runs far off the map"));
+  CHECK(has(with([](json& l) { l["network"][0]["mode"] = "canal"; }),
+            "A strip in the layout is neither a road, a river lane, a sea lane nor a railway"));
+  bool too_many = false;
+  for (const std::string& e : with([](json& l) {
+         json many = json::array();
+         for (int i = 0; i < 21000; ++i) many.push_back({100.0 + (i % 50), 100.0});
+         l["network"].push_back({{"mode", "rail"}, {"points", many}});
+       }))
+    too_many = too_many || (e.rfind("The layout has 21", 0) == 0 &&
+                            e.find(" points; the limit is 20000") != std::string::npos);
+  CHECK(too_many);
+  // Pipelines.
+  CHECK(has(with([](json& l) { l["connections"].erase(0); }),
+            "The crude oil pipeline from Oil field to Refinery is missing; draw it again"));
+  CHECK(has(with([](json& l) { l["connections"][0]["points"] = json::array({json::array({300, 300}), json::array({310, 310})}); }),
+            "The crude oil pipeline from Oil field to Refinery must start at Oil field and end at Refinery"));
+  CHECK(has(with([](json& l) { l["connections"].push_back(l["connections"][0]); }),
+            "The layout has a pipeline this world does not have; delete it"));
+  // The whole thing.
+  World w;
+  LayoutReport report;
+  CHECK(!buildWorldWithLayout("erwin-world-v1", "not json", 42, w, report));
+  CHECK(report.errors.at(0).text == "The layout is not valid JSON");
+  CHECK(!buildWorldWithLayout("erwin-world-v1", "[1,2]", 42, w, report));
+  CHECK(!buildWorldWithLayout("erwin-world-v1", std::string(kMaxLayoutBytes + 10, ' '), 42, w, report));
+  CHECK(report.errors.at(0).text == "The layout is too large (over 1 MB)");
+  CHECK(!buildWorldWithLayout("sixsite", layout.dump(), 42, w, report));
+  CHECK(!buildWorldWithLayout("no-such-world", layout.dump(), 42, w, report));
+  // And a warning that is not an error: lanes with no water under them.
+  json dry = layout;
+  dry["water"] = json::array();
+  REQUIRE(buildWorldWithLayout("erwin-world-v1", dry.dump(), 42, w, report));
+  bool warned = false;
+  for (const LayoutIssue& i : report.warnings)
+    warned = warned || i.text == "River lanes run over land for more than half their length; paint water under them";
+  CHECK(warned);
+  // A session cannot be made from a broken layout, and says the first reason.
+  std::string error;
+  json broken = layout;
+  broken["sites"].erase(21);
+  CHECK(Sim::createFromConfig(json{{"seed", 42}, {"world", "erwin-world-v1"}, {"layout", broken}}.dump().c_str(),
+                              error) == nullptr);
+  CHECK(error == "Port terminal B (site 22) is missing from the layout");
 }
