@@ -4,6 +4,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
@@ -99,7 +100,7 @@ uint64_t parseU64(const std::string& text, bool* ok) {
 Session::~Session() { crx_destroy(sim); }
 
 SessionRegistry::SessionRegistry(size_t capacity, std::chrono::steady_clock::duration ttl)
-    : capacity_(capacity), ttl_(ttl), idEntropy_(std::random_device{}()) {}
+    : capacity_(std::max<size_t>(capacity, 1)), ttl_(ttl), idEntropy_(std::random_device{}()) {}
 
 size_t SessionRegistry::size() const {
   std::lock_guard<std::mutex> lock(globalMutex_);
@@ -115,14 +116,27 @@ std::string SessionRegistry::nextIdLocked() {
 }
 
 SessionRegistry::CreateResult SessionRegistry::insertNew(crx_sim* sim) {
-  std::lock_guard<std::mutex> lock(globalMutex_);
-  if (sessions_.size() >= capacity_) {
-    crx_destroy(sim);
-    return {CreateStatus::kAtCapacity, {}};
+  std::shared_ptr<Session> victim;
+  std::string id;
+  {
+    std::lock_guard<std::mutex> lock(globalMutex_);
+    if (sessions_.size() >= capacity_) {
+      // The table is full: make room by dropping the least-recently-used
+      // session. A new visitor is never refused — the 503 path is gone.
+      const auto lru = std::min_element(
+          sessions_.begin(), sessions_.end(), [](const auto& a, const auto& b) {
+            return a.second->lastUsed.load() < b.second->lastUsed.load();
+          });
+      victim = std::move(lru->second);
+      sessions_.erase(lru);
+    }
+    id = nextIdLocked();
+    sessions_.emplace(id, std::make_shared<Session>(sim, nowFn_()));
   }
-  Session* session = new Session(sim);
-  const std::string id = nextIdLocked();
-  sessions_.emplace(id, std::unique_ptr<Session>(session));
+  // Eviction takes the registry's reference away with no lock held: the
+  // engine handle is freed at once unless a request still holds a reference,
+  // in which case the session dies when that request finishes.
+  victim.reset();
   return {CreateStatus::kCreated, id};
 }
 
@@ -135,25 +149,45 @@ SessionRegistry::CreateResult SessionRegistry::create(const std::string& configJ
 
 SessionRegistry::CreateResult SessionRegistry::forkFrom(const std::string& parentId) {
   reapExpired();
-  crx_sim* child = nullptr;
+  std::shared_ptr<Session> parent;
   {
     std::lock_guard<std::mutex> lock(globalMutex_);
     const auto it = sessions_.find(parentId);
     if (it == sessions_.end()) return {CreateStatus::kNotFound, {}};
-    std::lock_guard<std::mutex> sessionLock(it->second->mutex);
-    child = crx_fork(it->second->sim);
+    parent = it->second;  // keep the parent alive even if evicted next
+  }
+  crx_sim* child = nullptr;
+  {
+    std::lock_guard<std::mutex> sessionLock(parent->mutex);
+    child = crx_fork(parent->sim);
   }
   if (child == nullptr) return {CreateStatus::kBadConfig, {}};
   return insertNew(child);
 }
 
-void SessionRegistry::reapExpired() {
-  std::vector<std::unique_ptr<Session>> expired;
+bool SessionRegistry::release(const std::string& id) {
+  std::shared_ptr<Session> doomed;
   {
     std::lock_guard<std::mutex> lock(globalMutex_);
-    const auto now = Clock::now();
+    const auto it = sessions_.find(id);
+    if (it == sessions_.end()) return false;
+    doomed = std::move(it->second);
+    sessions_.erase(it);
+  }
+  // Dropping the last reference frees the engine handle outside every lock;
+  // a request that already copied the reference keeps the session alive
+  // until its engine call finishes.
+  doomed.reset();
+  return true;
+}
+
+void SessionRegistry::reapExpired() {
+  std::vector<std::shared_ptr<Session>> expired;
+  {
+    std::lock_guard<std::mutex> lock(globalMutex_);
+    const auto now = nowFn_().time_since_epoch().count();
     for (auto it = sessions_.begin(); it != sessions_.end();) {
-      if (now - it->second->lastUsed > ttl_) {
+      if (now - it->second->lastUsed.load() > ttl_.count()) {
         expired.push_back(std::move(it->second));
         it = sessions_.erase(it);
       } else {
@@ -161,11 +195,9 @@ void SessionRegistry::reapExpired() {
       }
     }
   }
-  // Destroy only after waiting out any in-flight engine call on the session.
-  for (auto& session : expired) {
-    std::lock_guard<std::mutex> sessionLock(session->mutex);
-    session.reset();
-  }
+  // Free outside the registry lock; requests holding references keep their
+  // session alive until they finish with it.
+  for (auto& session : expired) session.reset();
 }
 
 void registerRoutes(httplib::Server& svr, SessionRegistry& sessions, const std::string& webDir) {
@@ -181,13 +213,20 @@ void registerRoutes(httplib::Server& svr, SessionRegistry& sessions, const std::
       case SessionRegistry::CreateStatus::kBadConfig:
         sendJson(res, 400, jsonError("engine rejected the config JSON"));
         break;
-      case SessionRegistry::CreateStatus::kAtCapacity:
-        sendJson(res, 503, jsonError("session limit reached; retry after sessions expire"));
-        break;
       default:
         sendJson(res, 500, jsonError("unexpected create status"));
         break;
     }
+  });
+
+  // The client releases a session whenever it replaces one (retry, settings
+  // change) and on page unload (fetch keepalive — sendBeacon cannot DELETE).
+  svr.Delete("/api/sim/" + id, [&sessions](const httplib::Request& req, httplib::Response& res) {
+    if (!sessions.release(req.matches[1].str())) {
+      sendJson(res, 404, jsonError("unknown session"));
+      return;
+    }
+    sendJson(res, 200, json::json{{"released", true}}.dump());
   });
 
   const auto stepHandler = [&sessions](const httplib::Request& req, httplib::Response& res) {
@@ -242,9 +281,6 @@ void registerRoutes(httplib::Server& svr, SessionRegistry& sessions, const std::
                  break;
                case SessionRegistry::CreateStatus::kNotFound:
                  sendJson(res, 404, jsonError("unknown session"));
-                 break;
-               case SessionRegistry::CreateStatus::kAtCapacity:
-                 sendJson(res, 503, jsonError("session limit reached; retry after sessions expire"));
                  break;
                default:
                  sendJson(res, 500, jsonError("fork failed"));

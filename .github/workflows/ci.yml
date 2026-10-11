@@ -18,6 +18,24 @@ jobs:
           cmake --build --preset native-release
           ctest --preset native-release
 
+  # Session lifetimes are refcounted and lock-free at the registry boundary;
+  # only ThreadSanitizer can see the races this code class can hide. Scoped to
+  # the server suite so CI stays fast.
+  server-tsan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Build the server suite with ThreadSanitizer
+        run: |
+          cmake --preset native-tsan
+          cmake --build --preset native-tsan --target crx_server_tests
+      - name: Run the server suite under ThreadSanitizer
+        run: ctest --preset native-tsan -R '^server$'
+        env:
+          TSAN_OPTIONS: halt_on_error=1
+
   web:
     runs-on: ubuntu-latest
     steps:

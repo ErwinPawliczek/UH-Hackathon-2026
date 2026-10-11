@@ -8,6 +8,18 @@ import type { SimBackend, SimConfig, SimEvent } from './api';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 
+/** Non-2xx reply. Status is typed so callers can branch — e.g. a 404/410 means
+ * the session id is gone server-side (idle expiry or LRU eviction) and the
+ * client recreates instead of erroring. */
+export class HttpError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export class HttpBackend implements SimBackend {
   readonly kind = 'http' as const;
 
@@ -28,7 +40,10 @@ export class HttpBackend implements SimBackend {
     }
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
-      throw new Error(`${init?.method ?? 'GET'} ${path} -> ${res.status}${detail ? `: ${detail}` : ''}`);
+      throw new HttpError(
+        res.status,
+        `${init?.method ?? 'GET'} ${path} -> ${res.status}${detail ? `: ${detail}` : ''}`,
+      );
     }
     return res;
   }
@@ -90,5 +105,24 @@ export class HttpBackend implements SimBackend {
 
   async series(id: string, kind: number, refId: number): Promise<number[]> {
     return this.json(`/api/sim/${encodeURIComponent(id)}/series?kind=${kind}&id=${refId}`);
+  }
+
+  /**
+   * DELETE /api/sim/{id} — release the session server-side now. Best-effort
+   * by design: it fires on replacement and at page unload, where the session
+   * is being abandoned either way. keepalive:true lets the DELETE survive
+   * page teardown (sendBeacon cannot send DELETE); a 404 just means the
+   * session was already released, expired or evicted — nothing to surface.
+   */
+  async release(id: string): Promise<void> {
+    try {
+      await this.send(`/api/sim/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        keepalive: true,
+      });
+    } catch {
+      // Already gone, or the page is going away and the network failed —
+      // the server's idle expiry and LRU eviction bound the leak either way.
+    }
   }
 }

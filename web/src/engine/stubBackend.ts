@@ -159,4 +159,9 @@ export class StubBackend implements SimBackend {
     void refId;
     return [];
   }
+
+  /** Stub sessions live in-page; releasing just drops the deterministic state. */
+  async release(id: string): Promise<void> {
+    this.sessions.delete(id);
+  }
 }

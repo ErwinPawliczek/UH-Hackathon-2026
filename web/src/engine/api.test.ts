@@ -118,6 +118,34 @@ describe('HttpBackend request mapping', () => {
     const b = new HttpBackend('http://x', impl);
     await expect(b.create({ seed: 1, scenario: 'none' })).rejects.toThrow(/410/);
   });
+
+  it('releases a session with a keepalive DELETE', async () => {
+    const calls: { url: string; method: string; init: RequestInit | undefined }[] = [];
+    const impl: typeof fetch = async (input, init) => {
+      calls.push({ url: String(input), method: init?.method ?? 'GET', init });
+      return new Response(JSON.stringify({ released: true }), { status: 200 });
+    };
+    const b = new HttpBackend('http://x', impl);
+    await b.release('sim-7');
+    expect(calls[0].url).toBe('http://x/api/sim/sim-7');
+    expect(calls[0].method).toBe('DELETE');
+    // sendBeacon cannot send DELETE; keepalive lets the fetch survive page teardown.
+    expect(calls[0].init?.keepalive).toBe(true);
+  });
+
+  it('release swallows a 404 (already released, expired or evicted)', async () => {
+    const impl: typeof fetch = async () => new Response('unknown session', { status: 404 });
+    const b = new HttpBackend('http://x', impl);
+    await expect(b.release('sim-7')).resolves.toBeUndefined();
+  });
+
+  it('release swallows network failures (page is going away)', async () => {
+    const impl: typeof fetch = async () => {
+      throw new TypeError('Failed to fetch');
+    };
+    const b = new HttpBackend('http://x', impl);
+    await expect(b.release('sim-7')).resolves.toBeUndefined();
+  });
 });
 
 describe('StubBackend', () => {
