@@ -1,12 +1,16 @@
 // Chain Reaction — read-only views of live state: implementation.
 #include "sim/inspect.h"
 
+#include "sim/procurement.h"
 #include "sim/routes.h"
+#include "sim/signals.h"
+#include "sim/sim.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -150,6 +154,134 @@ std::string vehicleJson(const World& world, const State& state, uint32_t index) 
 
 namespace {
 
+const char* modeLabel(crx::Mode mode) {
+  return mode == crx::Mode::Road ? "road" : mode == crx::Mode::River ? "river" : "sea";
+}
+
+const char* blockName(Quote::Block b) {
+  switch (b) {
+    case Quote::Block::NoVehicles: return "no_vehicles";
+    case Quote::Block::SellerShort: return "seller_short";
+    case Quote::Block::ExportFill: return "export_fill";
+    case Quote::Block::Unreachable: return "unreachable";
+    case Quote::Block::None: break;
+  }
+  return nullptr;
+}
+
+bool buysByVehicle(const Tank& tk) {
+  return !tk.piped_in && tk.design_out_t_h > 0.0 &&
+         (tk.role == TankRole::Feed || tk.role == TankRole::Both);
+}
+
+bool sells(const Tank& tk) { return tk.role == TankRole::Product || tk.role == TankRole::Both; }
+
+// Hours a vehicle of this class takes between two nodes: the routed path at
+// the slower of each edge's speed and the class's own (how transport moves
+// it). Infinity when there is no way.
+double classTravelHours(const World& world, const State& state, const PathCache& paths,
+                        const VehicleClass& vc, uint32_t from, uint32_t to) {
+  if (from == to) return 0.0;
+  const std::vector<uint32_t> path = buildPath(world, paths, vc.mode, from, to);
+  if (path.empty()) return std::numeric_limits<double>::infinity();
+  double hours = 0;
+  for (size_t i = 0; i + 1 < path.size(); ++i) {
+    const uint32_t e = planEdge(world, state, vc.mode, path[i], path[i + 1]);
+    if (e == kNoEdge) return std::numeric_limits<double>::infinity();
+    const double speed = std::min(world.edges[e].speed_kmh, vc.speed_kmh);
+    if (speed <= 0) return std::numeric_limits<double>::infinity();
+    hours += world.edges[e].length_km / speed;
+  }
+  return hours;
+}
+
+// What the plant behind a selling tank is doing: the best state among the
+// processes on its site that fill it.
+const char* sellerState(const World& world, const State& state, uint32_t tank) {
+  const Tank& tk = world.tanks[tank];
+  int best = -1;  // 3 running, 2 held, 1 restarting, 0 shut down
+  const Range<ProcessId> procs = world.sites[tk.site.v].processes;
+  for (uint32_t p = procs.begin; p < rangeEnd(procs); ++p) {
+    const Process& proc = world.processes[p];
+    const ProcessType& type = world.catalog.process_types[proc.type];
+    bool fills = false;
+    for (size_t m = 0; m < type.net.size() && m < proc.mode_share.size() && !fills; ++m) {
+      if (proc.mode_share[m] <= 0) continue;
+      for (const Stream& s : type.net[m])
+        if (s.slot < kInternalStreamBase && s.t_per_t > 0 && s.slot < proc.tank_of.size() &&
+            proc.tank_of[s.slot].valid() && proc.tank_of[s.slot].v == tank)
+          fills = true;
+    }
+    if (!fills) continue;
+    const ProcStatus st = state.proc[p].status;
+    const int rank = st == ProcStatus::Running ? 3 : st == ProcStatus::HoldMin ? 2
+                     : st == ProcStatus::Restarting ? 1 : 0;
+    best = std::max(best, rank);
+  }
+  return best == 3 ? "running" : best == 2 ? "held" : best == 1 ? "restarting"
+         : best == 0 ? "shut_down" : "no_producer";
+}
+
+struct Usual {
+  int seller_tank = -1;
+  double delivered_t = 0;
+};
+
+// The seller that has delivered the most tonnes to this tank so far.
+Usual usualSeller(const World& world, const State& state, uint32_t tank) {
+  std::vector<double> by_seller(world.tanks.size(), 0.0);
+  for (const Order& o : state.order)
+    if (o.to == tank && o.status == OrdStatus::Delivered) by_seller[o.from] += o.qty_t;
+  Usual u;
+  for (size_t s = 0; s < by_seller.size(); ++s)
+    if (by_seller[s] > u.delivered_t) u = {static_cast<int>(s), by_seller[s]};
+  return u;
+}
+
+// The paths as they are for the current open edges (a fresh run has not
+// built them yet).
+PathCache currentPaths(const Sim& sim) {
+  PathCache cache = sim.paths();
+  refreshPaths(sim.world(), sim.state(), cache);
+  return cache;
+}
+
+int resolveSiteArg(const World& world, const std::string& site) {
+  if (!site.empty() && site.find_first_not_of("0123456789") == std::string::npos) {
+    const unsigned long idx = std::stoul(site.substr(0, 9));
+    return idx < world.sites.size() ? static_cast<int>(idx) : -1;
+  }
+  return world.findSite(site);
+}
+
+// Every possible way of supplying `tank`, fully priced.
+struct Option {
+  uint32_t seller_tank = 0;
+  size_t cls = 0;
+  Quote q;
+};
+
+std::vector<Option> optionsFor(const World& world, const State& state, const PathCache& paths,
+                               const MarketParams& params,
+                               const std::vector<std::vector<uint32_t>>& class_nodes,
+                               uint32_t tank, double want, double urgency) {
+  int contract_seller = -1;
+  for (const World::Contract& c : world.contracts)
+    if (c.buyer.v == tank) contract_seller = c.seller.v;
+  std::vector<Option> out;
+  const Tank& buyer = world.tanks[tank];
+  for (uint32_t s = 0; s < world.tanks.size(); ++s) {
+    const Tank& seller = world.tanks[s];
+    if (seller.site == buyer.site || seller.material != buyer.material || !sells(seller)) continue;
+    for (size_t cls = 0; cls < world.catalog.vehicle_classes.size(); ++cls) {
+      const Quote q = quoteLot(world, state, paths, params, class_nodes, tank, s, cls, want,
+                               urgency, contract_seller, true);
+      if (q.possible) out.push_back({s, cls, q});
+    }
+  }
+  return out;
+}
+
 // Short numbers keep the document small: tonnes and dollars to the cent,
 // ratios to four places.
 double round2(double v) { return std::round(v * 100.0) / 100.0; }
@@ -162,6 +294,204 @@ json rounded(const std::vector<double>& values, double (*fn)(double)) {
 }
 
 }  // namespace
+
+std::string buyTanksJson(const Sim& sim) {
+  const World& world = sim.world();
+  const State& state = sim.state();
+  const PathCache paths = currentPaths(sim);
+  const std::vector<std::vector<uint32_t>> class_nodes = classNodes(world, state);
+  json tanks = json::array();
+  for (uint32_t t = 0; t < world.tanks.size(); ++t) {
+    const Tank& tk = world.tanks[t];
+    if (!buysByVehicle(tk)) continue;
+    const size_t ways = optionsFor(world, state, paths, sim.marketParams(), class_nodes, t,
+                                   tk.target_frac * tk.capacity_t, 0.0)
+                            .size();
+    if (ways == 0) continue;  // site-internal intermediates: nobody sells them
+    const TankState& ts = state.tank[t];
+    const Site& site = world.sites[tk.site.v];
+    const Usual usual = usualSeller(world, state, t);
+    json row = {{"site", site.key},
+                {"site_index", tk.site.v},
+                {"name", site.name},
+                {"material", world.catalog.materials[tk.material].key},
+                {"material_name", world.catalog.materials[tk.material].name},
+                {"fill", round4(tk.capacity_t > 0 ? ts.level_t / tk.capacity_t : 0.0)},
+                {"cover_h", round2(ts.level_t / tk.design_out_t_h)},
+                {"draw_t_h", tk.design_out_t_h},
+                {"inbound_t", round2(ts.inbound_t)},
+                {"options", ways},
+                {"usual", nullptr},
+                {"usual_state", nullptr}};
+    if (usual.seller_tank >= 0) {
+      row["usual"] = world.sites[world.tanks[static_cast<size_t>(usual.seller_tank)].site.v].key;
+      row["usual_state"] = sellerState(world, state, static_cast<uint32_t>(usual.seller_tank));
+    }
+    tanks.push_back(std::move(row));
+  }
+  return json{{"tick", state.tick}, {"tanks", tanks}}.dump();
+}
+
+std::string sourcingJson(const Sim& sim, const std::string& site_arg,
+                         const std::string& material_arg) {
+  const World& world = sim.world();
+  const State& state = sim.state();
+  const Catalog& catalog = world.catalog;
+  const auto fail = [](const std::string& why) { return json{{"error", why}}.dump(); };
+
+  const int site_idx = resolveSiteArg(world, site_arg);
+  if (site_idx < 0) return fail("unknown site \"" + site_arg + "\"");
+  const int mat_idx = catalog.findMaterial(material_arg);
+  if (mat_idx < 0) return fail("unknown material \"" + material_arg + "\"");
+  int tank_idx = -1;
+  for (uint32_t t = 0; t < world.tanks.size(); ++t)
+    if (world.tanks[t].site.v == static_cast<uint32_t>(site_idx) &&
+        world.tanks[t].material == static_cast<uint16_t>(mat_idx))
+      tank_idx = static_cast<int>(t);
+  const Site& site = world.sites[static_cast<size_t>(site_idx)];
+  if (tank_idx < 0) return fail(site.name + " has no " + material_arg + " tank");
+  const uint32_t tank = static_cast<uint32_t>(tank_idx);
+  const Tank& tk = world.tanks[tank];
+  const TankState& ts = state.tank[tank];
+  const Material& mat = catalog.materials[tk.material];
+
+  // The tank as procurement sees it now.
+  std::vector<TankSignals> signals;
+  computeSignals(world, state, signals);
+  const bool buys = buysByVehicle(tk);
+  const double urgency = buys ? (tk.export_buy ? sim.marketParams().export_urgency : signals[tank].u) : 0.0;
+  const double target = tk.target_frac * tk.capacity_t;
+  const double want = target - (ts.level_t + ts.inbound_t);
+  const double cover_h = tk.design_out_t_h > 0 ? ts.level_t / tk.design_out_t_h : 0.0;
+  // With nothing wanted this hour the quotes are for a refill to target.
+  const double quoted_for = want > 1e-6 ? want : target;
+
+  json tank_doc = {{"site", site.key},
+                   {"site_index", site_idx},
+                   {"name", site.name},
+                   {"material", mat.key},
+                   {"material_name", mat.name},
+                   {"buys", buys},
+                   {"piped_in", tk.piped_in},
+                   {"level_t", round2(ts.level_t)},
+                   {"capacity_t", round2(tk.capacity_t)},
+                   {"fill", round4(tk.capacity_t > 0 ? ts.level_t / tk.capacity_t : 0.0)},
+                   {"target_t", round2(target)},
+                   {"draw_t_h", tk.design_out_t_h},
+                   {"cover_h", round2(cover_h)},
+                   {"inbound_t", round2(ts.inbound_t)},
+                   {"lead_time_h", round2(ts.lead_time_h)},
+                   {"urgency", round4(urgency)},
+                   {"want_t", round2(std::max(0.0, want))},
+                   {"quoted_for_t", round2(quoted_for)}};
+
+  json options = json::array();
+  json next_pass = nullptr;
+  json usual_doc = nullptr;
+  if (buys) {
+    const PathCache paths = currentPaths(sim);
+    const MarketParams& params = sim.marketParams();
+    const std::vector<std::vector<uint32_t>> class_nodes = classNodes(world, state);
+    std::vector<Option> opts =
+        optionsFor(world, state, paths, params, class_nodes, tank, quoted_for, urgency);
+
+    // What the next hourly pass books for this tank: a dry run on a copy.
+    Sim probe(sim);
+    const size_t orders_before = state.order.size();
+    probe.step(static_cast<uint32_t>(4 - state.tick % 4));
+    json lots = json::array();
+    double booked_t = 0;
+    std::vector<std::pair<uint32_t, uint16_t>> booked;
+    for (size_t i = orders_before; i < probe.state().order.size(); ++i) {
+      const Order& o = probe.state().order[i];
+      if (o.to != tank) continue;
+      booked.emplace_back(o.from, o.cls);
+      booked_t += o.qty_t;
+      lots.push_back({{"seller", world.sites[world.tanks[o.from].site.v].key},
+                      {"cls", catalog.vehicle_classes[o.cls].key},
+                      {"tonnes", round2(o.qty_t)}});
+    }
+    next_pass = {{"tick", probe.state().tick}, {"lots", lots}, {"tonnes", round2(booked_t)}};
+
+    const Usual usual = usualSeller(world, state, tank);
+    if (usual.seller_tank >= 0) {
+      const uint32_t us = static_cast<uint32_t>(usual.seller_tank);
+      const Site& usite = world.sites[world.tanks[us].site.v];
+      usual_doc = {{"site", usite.key},
+                   {"site_index", world.tanks[us].site.v},
+                   {"name", usite.name},
+                   {"delivered_t", round2(usual.delivered_t)},
+                   {"state", sellerState(world, state, us)}};
+    }
+
+    // Vehicles per class: how many exist and how many are idle right now.
+    std::vector<int> fleet(catalog.vehicle_classes.size(), 0), idle(catalog.vehicle_classes.size(), 0);
+    for (size_t v = 0; v < world.fleet.size() && v < state.vehicle.size(); ++v) {
+      fleet[world.fleet[v].cls] += 1;
+      if (state.vehicle[v].status == VehStatus::Idle) idle[world.fleet[v].cls] += 1;
+    }
+
+    std::stable_sort(opts.begin(), opts.end(),
+                     [](const Option& a, const Option& b) { return a.q.cost < b.q.cost; });
+    for (const Option& o : opts) {
+      const Tank& seller = world.tanks[o.seller_tank];
+      const TankState& sts = state.tank[o.seller_tank];
+      const Site& ssite = world.sites[seller.site.v];
+      const VehicleClass& vc = catalog.vehicle_classes[o.cls];
+      const uint32_t from = ssite.node[modeIndex(vc.mode)], to = site.node[modeIndex(vc.mode)];
+      const double travel_h = classTravelHours(world, state, paths, vc, from, to);
+      const double handling_h = vc.load_t_h > 0 ? 2.0 * o.q.lot_t / vc.load_t_h : 0.0;
+      // The nearest idle vehicle of the class, as dispatch would pick it.
+      double pickup_h = std::numeric_limits<double>::infinity();
+      for (size_t v = 0; v < world.fleet.size() && v < state.vehicle.size(); ++v) {
+        if (world.fleet[v].cls != o.cls || state.vehicle[v].status != VehStatus::Idle) continue;
+        pickup_h = std::min(
+            pickup_h, classTravelHours(world, state, paths, vc, state.vehicle[v].at_node, from));
+      }
+      const bool is_chosen =
+          std::find(booked.begin(), booked.end(),
+                    std::make_pair(o.seller_tank, static_cast<uint16_t>(o.cls))) != booked.end();
+      const char* blocked = blockName(o.q.blocked);
+      json row = {{"seller", ssite.key},
+                  {"seller_index", seller.site.v},
+                  {"seller_name", ssite.name},
+                  {"seller_state", sellerState(world, state, o.seller_tank)},
+                  {"stock_t", round2(sts.level_t)},
+                  {"free_t", round2(sts.level_t - sts.reserved_out_t)},
+                  {"seller_fill", round4(o.q.seller_fill)},
+                  {"cls", vc.key},
+                  {"mode", modeLabel(vc.mode)},
+                  {"vehicles", fleet[o.cls]},
+                  {"idle_now", idle[o.cls]},
+                  {"km", round2(o.q.km)},
+                  {"travel_h", round2(travel_h)},
+                  {"handling_h", round2(handling_h)},
+                  {"pickup_h", std::isfinite(pickup_h) ? json(round2(pickup_h)) : json(nullptr)},
+                  {"door_to_door_h",
+                   round2((std::isfinite(pickup_h) ? pickup_h : 0.0) + handling_h + travel_h)},
+                  {"lot_t", round2(o.q.lot_t)},
+                  {"ask_usd_t", round2(o.q.ask)},
+                  {"freight_usd_t", round2(vc.freight * o.q.km)},
+                  {"time_usd_t", round2(urgency * params.value_of_time_usd_t_h * o.q.eta_h)},
+                  {"switch_usd_t", round2(o.q.switch_cost)},
+                  {"landed_usd_t", round2(o.q.cost)},
+                  {"price_usd_t", round2((o.q.ask + o.q.bid) / 2.0)},
+                  {"feasible_now", o.q.bookable()},
+                  {"blocked", blocked != nullptr ? json(blocked) : json(nullptr)},
+                  {"arrives_before_dry", travel_h + handling_h < cover_h},
+                  {"chosen", is_chosen},
+                  {"usual", usual.seller_tank == static_cast<int>(o.seller_tank)}};
+      options.push_back(std::move(row));
+    }
+  }
+
+  return json{{"tick", state.tick},
+              {"tank", tank_doc},
+              {"next_pass", next_pass},
+              {"usual", usual_doc},
+              {"options", options}}
+      .dump();
+}
 
 std::string economyJson(const World& world, const State& state, const Recorder& rec,
                         uint32_t bucket_h) {

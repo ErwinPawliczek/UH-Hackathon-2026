@@ -377,6 +377,46 @@ TEST_CASE("economy: the run so far in time buckets, cut back by a rewind") {
   CHECK(unknown->status == 404);
 }
 
+TEST_CASE("sourcing: the buying tanks, one tank's options, and refusals") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  REQUIRE(cli.Post("/api/sim/" + id + "/step", R"({"ticks":480})", "application/json"));
+  const auto get = [&](const std::string& query) {
+    auto res = cli.Get("/api/sim/" + id + "/sourcing" + query);
+    REQUIRE(res);
+    return *res;
+  };
+  const std::string before =
+      cli.Post("/api/sim/" + id + "/step", R"({"ticks":0})", "application/json")->body;
+
+  const auto list = get("");
+  CHECK(list.status == 200);
+  CHECK(json::parse(list.body).at("tanks").size() == 20);
+
+  const auto one = get("?site=VINYLS&material=CHLORINE");
+  CHECK(one.status == 200);
+  const json doc = json::parse(one.body);
+  CHECK(doc.at("tick") == 480);
+  CHECK(doc.at("tank").at("name") == "Vinyls (VCM + PVC)");
+  REQUIRE(doc.at("options").size() == 1);  // chlorine has one maker and goes by pressurised truck
+  CHECK(doc.at("options")[0].at("seller") == "CHLOR_ALKALI");
+  CHECK(doc.at("options")[0].at("cls") == "TRUCK_PRESS");
+  CHECK(doc.at("options")[0].at("usual") == true);
+  CHECK(get("?site=11&material=CHLORINE").body == one.body);  // site by index
+
+  CHECK(get("?site=NOPE&material=PE").status == 400);
+  CHECK(get("?site=VINYLS&material=NOPE").status == 400);
+  CHECK(get("?site=VINYLS").status == 400);
+  CHECK(get("?material=PE").status == 400);
+  auto unknown = cli.Get("/api/sim/nope/sourcing");
+  REQUIRE(unknown);
+  CHECK(unknown->status == 404);
+
+  // Asking never moves the run.
+  CHECK(cli.Post("/api/sim/" + id + "/step", R"({"ticks":0})", "application/json")->body == before);
+}
+
 TEST_CASE("world json: fleet manifest without a fabricated shuttle schedule") {
   TestServer srv;
   auto cli = client(srv.port);

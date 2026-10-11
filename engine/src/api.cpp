@@ -835,6 +835,20 @@ const char* crx_economy(const crx_sim* sim, uint32_t bucket_h) {
   return api->reply.c_str();
 }
 
+const char* crx_sourcing(const crx_sim* sim, const char* site, const char* material) {
+  const ApiSim* api = asApi(sim);
+  if (api == nullptr) return "{\"error\":\"null\"}";
+  const bool no_site = site == nullptr || site[0] == '\0';
+  const bool no_material = material == nullptr || material[0] == '\0';
+  if (no_site && no_material)
+    api->reply = crx::sim::buyTanksJson(*api->sim);
+  else if (no_site || no_material)
+    api->reply = R"({"error":"give both site and material, or neither"})";
+  else
+    api->reply = crx::sim::sourcingJson(*api->sim, site, material);
+  return api->reply.c_str();
+}
+
 uint64_t crx_tick(const crx_sim* sim) { return asApi(sim)->sim->state().tick; }
 
 uint64_t crx_state_hash(const crx_sim* sim) { return asApi(sim)->sim->stateHash(); }
