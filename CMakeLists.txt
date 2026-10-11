@@ -40,6 +40,10 @@ target_compile_options(crx_engine PRIVATE
 add_executable(crx-cli engine/apps/cli/main.cpp)
 target_link_libraries(crx-cli PRIVATE crx_engine)
 
+# Diagnostic runner: N-day run with per-tick sampling and a PASS/FAIL verdict.
+add_executable(crx-report engine/apps/cli/report.cpp)
+target_link_libraries(crx-report PRIVATE crx_engine)
+
 enable_testing()
 add_executable(crx_tests engine/tests/test_core.cpp)
 target_link_libraries(crx_tests PRIVATE crx_engine doctest::doctest)
