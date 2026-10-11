@@ -3,11 +3,16 @@
 // where they sit lives in the windows store, so any panel (the event log,
 // analytics) is one <DraggableWindow id="…"> around its content plus a
 // toggle button that calls useWindows.toggle.
+//
+// A window can also follow something else: pass `open` and `onClose` and it
+// shows while `open` is true (a selected vehicle, a selected site) and tells
+// its owner when the close button is pressed. Its place is still remembered.
 
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { clampToViewport, useWindows } from './windows';
 
 const BASE_Z = 20; // above the top bar, inspector and timeline (z-10)
+const DEFAULT_AT = { x: 96, y: 72 };
 
 export function DraggableWindow({
   id,
@@ -15,6 +20,9 @@ export function DraggableWindow({
   width = 440,
   maxHeight = '60vh',
   actions,
+  open: openProp,
+  onClose,
+  at = DEFAULT_AT,
   children,
 }: {
   /** stable id — the key its place is remembered under */
@@ -26,28 +34,41 @@ export function DraggableWindow({
   maxHeight?: string;
   /** extra controls for the title bar, left of the close button */
   actions?: ReactNode;
+  /** controlled mode: show while true, whatever the windows store says */
+  open?: boolean;
+  /** controlled mode: the close button was pressed */
+  onClose?: () => void;
+  /** where the window appears before it has ever been placed or dragged */
+  at?: { x: number; y: number };
   children: ReactNode;
 }) {
-  const place = useWindows((s) => s.windows[id]);
+  const saved = useWindows((s) => s.windows[id]);
   const stack = useWindows((s) => s.order.indexOf(id));
   const drag = useRef<{ dx: number; dy: number } | null>(null);
-  const open = place?.open === true;
+  const open = openProp ?? saved?.open === true;
+  const place = saved ?? { open, x: at.x, y: at.y };
+
+  // a window that follows a selection comes to the front when it appears
+  useEffect(() => {
+    if (openProp === true) useWindows.getState().focus(id);
+  }, [id, openProp]);
 
   // A shrinking browser window must not strand the title bar off screen.
   useEffect(() => {
     if (!open) return;
     const onResize = () => {
-      const cur = useWindows.getState().windows[id];
-      if (cur === undefined) return;
+      const cur = useWindows.getState().windows[id] ?? { x: at.x, y: at.y };
       const next = clampToViewport(cur.x, cur.y, width, { width: window.innerWidth, height: window.innerHeight });
       if (next.x !== cur.x || next.y !== cur.y) useWindows.getState().move(id, next.x, next.y);
     };
     onResize();
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
+    // `at` is read once per open: a caller's fresh object must not re-run this
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, open, width]);
 
-  if (!open || place === undefined) return null;
+  if (!open) return null;
 
   const onPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
     if (e.button !== 0) return;
@@ -93,7 +114,7 @@ export function DraggableWindow({
         {actions}
         <button
           className="btn btn-glyph"
-          onClick={() => useWindows.getState().close(id)}
+          onClick={() => (onClose !== undefined ? onClose() : useWindows.getState().close(id))}
           aria-label={`Close ${title}`}
           data-testid={`window-${id}-close`}
         >

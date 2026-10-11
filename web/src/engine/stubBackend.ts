@@ -4,10 +4,10 @@
 // the way crx_step would.
 
 import { decode, type Snapshot } from './snapshot';
-import { encodeStub, type StubOutage } from './stub';
+import { encodeStub, stubVehicleState, type StubOutage } from './stub';
 import { stubEvents } from './events';
-import { stubWorld, type WorldSpec } from './world';
-import type { SimBackend, SimConfig, SimEvent } from './api';
+import { VEHICLE_CLASSES, routeLength, stubWorld, type WorldSpec } from './world';
+import type { SimBackend, SimConfig, SimEvent, SiteRef, VehicleDetail } from './api';
 
 /** Ticks per hour: 96 ticks/day (§9) — outage durations arrive in hours. */
 const TICKS_PER_HOUR = 4;
@@ -158,6 +158,52 @@ export class StubBackend implements SimBackend {
     void kind;
     void refId;
     return [];
+  }
+
+  /**
+   * The stub's vehicles shuttle one route each: the trip is that route, the
+   * cargo is the vehicle's declared one on the outbound leg.
+   */
+  async vehicle(id: string, index: number): Promise<VehicleDetail> {
+    const s = this.session(id);
+    const world = stubWorld(s.seed);
+    const spec = world.vehicles[index];
+    if (spec === undefined || spec.route === undefined) throw new Error(`no such stub vehicle: ${index}`);
+    const st = stubVehicleState(world, s.tick, index);
+    const route = world.routes[spec.route];
+    const capacityT = VEHICLE_CLASSES[spec.cls].capacityT;
+    const tripKm = routeLength(route.points);
+    const end = (k: 0 | 1): SiteRef => {
+      const site = route.sites[k];
+      return { site: site ?? -1, key: route.ends[k].toUpperCase().replace(/\W+/g, '_'), name: route.ends[k] };
+    };
+    const from = end(st.outbound ? 0 : 1);
+    const to = end(st.outbound ? 1 : 0);
+    const status = ['idle', 'to_pickup', 'queue_load', 'loading', 'to_dropoff', 'queue_unload', 'unloading'][st.status] ?? 'idle';
+    const points = st.outbound ? route.points : [...route.points].reverse();
+    return {
+      index,
+      cls: spec.cls,
+      capacityT,
+      status,
+      cargo: st.outbound ? { material: spec.cargo, tonnes: st.fill * capacityT } : null,
+      order: {
+        id: st.orderId,
+        material: spec.cargo,
+        tonnes: capacityT,
+        from: st.outbound ? from : to,
+        to: st.outbound ? to : from,
+        createdTick: Math.max(0, s.tick - 8),
+        etaTick: st.etaTick,
+        priceUsdT: 0,
+        freightUsd: 0,
+      },
+      at: { site: null },
+      legDestination: to,
+      path: [[st.x, st.y], ...points.slice(1)],
+      remainingKm: (1 - st.legProgress) * tripKm,
+      tripKm,
+    };
   }
 
   /**

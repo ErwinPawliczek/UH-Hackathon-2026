@@ -31,6 +31,44 @@ export interface SimEvent {
   text: string;
 }
 
+/** One end of an order, or where a vehicle is heading: a site by index, key and name. */
+export interface SiteRef {
+  site: number;
+  key: string;
+  name: string;
+}
+
+/** GET /api/sim/{id}/vehicle?index=N — what one vehicle is doing right now. */
+export interface VehicleDetail {
+  index: number;
+  cls: string;
+  capacityT: number;
+  /** idle | to_pickup | queue_load | loading | to_dropoff | queue_unload | unloading */
+  status: string;
+  /** what is on board, null when empty */
+  cargo: { material: string; tonnes: number } | null;
+  /** the order it is working on, null when idle */
+  order: {
+    id: number;
+    material: string;
+    tonnes: number;
+    from: SiteRef;
+    to: SiteRef;
+    createdTick: number;
+    etaTick: number;
+    priceUsdT: number;
+    freightUsd: number;
+  } | null;
+  /** the site it is standing at, when it is at one */
+  at: { site: number | null };
+  /** where the leg it is driving now ends */
+  legDestination: SiteRef | null;
+  /** the rest of its planned route, km points in map coordinates, from where it is */
+  path: [number, number][];
+  remainingKm: number;
+  tripKm: number;
+}
+
 export interface SimBackend {
   readonly kind: BackendKind;
   /** POST /api/sim — create a session from config; reply { id }. */
@@ -49,6 +87,8 @@ export interface SimBackend {
   kpis(id: string): Promise<number[]>;
   /** GET /api/sim/{id}/series?kind=&id= — hourly history. */
   series(id: string, kind: number, refId: number): Promise<number[]>;
+  /** GET /api/sim/{id}/vehicle?index= — one vehicle's cargo, order and route. */
+  vehicle(id: string, index: number): Promise<VehicleDetail>;
   /**
    * POST /api/sim/{id}/rewind — make the session exactly what it was at
    * `tick` (commands issued at that tick or later are forgotten). Afterwards

@@ -56,3 +56,15 @@ export function worldFromParams(params: URLSearchParams): string {
   const value = params.get('world');
   return value !== null && /^[a-z0-9-]+$/.test(value) ? value : DEFAULT_WORLD;
 }
+
+/** The seed every run uses unless the URL says otherwise. */
+export const DEFAULT_SEED = 42;
+
+/**
+ * Seed picked by the `?seed=N` URL parameter — a testing aid; there is no UI
+ * for it — or the default when absent or not a non-negative whole number.
+ */
+export function seedFromParams(params: URLSearchParams): number {
+  const value = params.get('seed');
+  return value !== null && /^\d{1,9}$/.test(value) ? Number(value) : DEFAULT_SEED;
+}
