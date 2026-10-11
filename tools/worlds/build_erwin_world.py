@@ -40,7 +40,10 @@ TRUCK_LEAD = 64.0       # starting lead time (h) for truck-fed tanks; they hold 
 # until it can fill most of a vehicle, places at most a few lots per hour, and
 # waiting orders are served first come first served (urgency buys a 48 h head start).
 MARKET = {"min_lot_cap_frac": 0.8, "min_lot_target_frac": 0.4, "max_lots_per_tank": 3,
-          "dispatch_urgency_boost_h": 48}
+          "dispatch_urgency_boost_h": 48,
+          # No supplier contracts in this world, so a charge for "switching supplier" would
+          # sit on every option equally and only confuse the Supply options view.
+          "switch_cost_frac": 0.0}
 
 MERGE_KM = 4.0
 ATTACH_KM = 12.0
