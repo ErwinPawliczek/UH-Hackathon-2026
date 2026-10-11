@@ -33,6 +33,41 @@ std::vector<std::vector<uint32_t>> classNodes(const World& world, const State& s
   return class_nodes;
 }
 
+double sellerAsk(const World& world, const State& state, const MarketParams& params,
+                 uint32_t seller_tank, double seller_fill) {
+  const Tank& seller = world.tanks[seller_tank];
+  const double base = world.catalog.materials[seller.material].base_price;
+  double ask = base * (1.0 + params.beta * (1.0 - 2.0 * seller_fill));
+  // Cost pass-through (margin control): dearer feed raises the ask by the
+  // same amount, and nobody sells under what the product cost to make.
+  if (state.margin_control)
+    ask = std::max(ask + base * state.cost_delta[seller_tank],
+                   state.ask_floor[seller_tank] * (1.0 - seller_fill));
+  // The seller's own markup (set_price) on top of the rule.
+  const double markup = state.site_markup[seller.site.v];
+  if (markup != 0.0) ask *= 1.0 + markup;
+  return ask;
+}
+
+BuyRule buyRule(const MarketParams& params, double target_frac, double ratio) {
+  BuyRule rule{kUrgencyHi, target_frac};
+  if (!params.price_aware_buying) return rule;
+  const auto smooth = [](double x) {
+    x = std::clamp(x, 0.0, 1.0);
+    return x * x * (3.0 - 2.0 * x);
+  };
+  const double cheap = ratio <= 1.0
+                           ? smooth((1.0 - ratio) / std::max(1e-6, 1.0 - params.price_cheap_ratio))
+                           : -smooth((ratio - 1.0) / std::max(1e-6, params.price_dear_ratio - 1.0));
+  const double mix = std::abs(cheap);
+  rule.cover_limit =
+      2.5 + mix * ((cheap > 0 ? params.price_cheap_cover : params.price_dear_cover) - 2.5);
+  rule.fill = target_frac + mix * ((cheap > 0 ? std::max(target_frac, params.price_cheap_fill)
+                                              : std::min(target_frac, params.price_dear_fill)) -
+                                   target_frac);
+  return rule;
+}
+
 Quote quoteLot(const World& world, const State& state, const PathCache& paths,
                const MarketParams& params, const std::vector<std::vector<uint32_t>>& class_nodes,
                uint32_t buyer_tank, uint32_t seller_tank, size_t cls, double want,
@@ -89,15 +124,7 @@ Quote quoteLot(const World& world, const State& state, const PathCache& paths,
 
   // §5.6 price formation and cost, all per tonne.
   const double base = mat.base_price;
-  q.ask = base * (1.0 + params.beta * (1.0 - 2.0 * q.seller_fill));
-  // Cost pass-through (margin control): dearer feed raises the ask by the
-  // same amount, and nobody sells under what the product cost to make.
-  if (state.margin_control)
-    q.ask = std::max(q.ask + base * state.cost_delta[seller_tank],
-                     state.ask_floor[seller_tank] * (1.0 - q.seller_fill));
-  // The seller's own markup (set_price) on top of the rule.
-  const double markup = state.site_markup[seller.site.v];
-  if (markup != 0.0) q.ask *= 1.0 + markup;
+  q.ask = sellerAsk(world, state, params, seller_tank, q.seller_fill);
   q.bid = base * (1.0 + params.beta * urgency);
   q.switch_cost =
       (static_cast<int>(seller_tank) == contract_seller) ? 0.0 : params.switch_cost_frac * base;
@@ -268,26 +295,12 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
         const TankState& bs = state.tank[req.tank];
         const double base = catalog.materials[buyer.material].base_price;
         const double ratio = base > 0.0 ? best.ask / base : 1.0;
-        const auto smooth = [](double x) {
-          x = std::clamp(x, 0.0, 1.0);
-          return x * x * (3.0 - 2.0 * x);
-        };
-        const double cheap = ratio <= 1.0
-                                 ? smooth((1.0 - ratio) / std::max(1e-6, 1.0 - params.price_cheap_ratio))
-                                 : -smooth((ratio - 1.0) / std::max(1e-6, params.price_dear_ratio - 1.0));
+        const BuyRule rule = buyRule(params, buyer.target_frac, ratio);
         const double cover = std::max(0.0, bs.level_t + bs.inbound_t) / buyer.design_out_t_h /
                              (bs.lead_time_h * bs.caution);  // in lead times
         if (cover >= 1.0) {  // under one lead time: buy at any price, as ever
-          const double mix = std::abs(cheap);
-          const double limit =
-              2.5 + mix * ((cheap > 0 ? params.price_cheap_cover : params.price_dear_cover) - 2.5);
-          if (cover >= limit) break;  // comfortable at this price: wait
-          const double fill =
-              buyer.target_frac +
-              mix * ((cheap > 0 ? std::max(buyer.target_frac, params.price_cheap_fill)
-                                : std::min(buyer.target_frac, params.price_dear_fill)) -
-                     buyer.target_frac);
-          want = fill * buyer.capacity_t - (bs.level_t + bs.inbound_t);
+          if (cover >= rule.cover_limit) break;  // comfortable at this price: wait
+          want = rule.fill * buyer.capacity_t - (bs.level_t + bs.inbound_t);
         } else {
           want = buyer.target_frac * buyer.capacity_t - (bs.level_t + bs.inbound_t);
         }

@@ -663,6 +663,31 @@ void registerRoutes(httplib::Server& svr, SessionRegistry& sessions, const std::
             sendJson(res, 200, std::move(doc));
           });
 
+  // One site against the model's curves: ?site=N.
+  svr.Get("/api/sim/" + id + "/site-econ",
+          [&sessions](const httplib::Request& req, httplib::Response& res) {
+            bool ok = false;
+            const uint32_t site = parseU32(req.get_param_value("site"), &ok);
+            if (!ok) {
+              sendJson(res, 400, jsonError("query must be ?site=N"));
+              return;
+            }
+            std::string doc;
+            const bool found = sessions.withSession(req.matches[1].str(), [&](Session& s) {
+              const char* text = crx_site_econ(s.sim, site);
+              if (text != nullptr) doc = text;
+            });
+            if (!found) {
+              sendJson(res, 404, jsonError("unknown session"));
+              return;
+            }
+            if (doc.empty()) {
+              sendJson(res, 400, jsonError("no site with that index"));
+              return;
+            }
+            sendJson(res, 200, std::move(doc));
+          });
+
   // The run so far in time buckets: ?bucket_h=1..168 (default 24).
   svr.Get("/api/sim/" + id + "/economy",
           [&sessions](const httplib::Request& req, httplib::Response& res) {

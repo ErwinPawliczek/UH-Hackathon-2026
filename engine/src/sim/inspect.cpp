@@ -1,6 +1,8 @@
 // Chain Reaction — read-only views of live state: implementation.
 #include "sim/inspect.h"
 
+#include "sim/control.h"
+#include "sim/market.h"
 #include "sim/procurement.h"
 #include "sim/routes.h"
 #include "sim/signals.h"
@@ -989,6 +991,174 @@ std::string marketJson(const Sim& sim) {
               {"materials", materials},
               {"customers", customers},
               {"plants", plants}}
+      .dump();
+}
+
+std::string siteEconJson(const Sim& sim, uint32_t site) {
+  const World& world = sim.world();
+  const State& state = sim.state();
+  const MarketParams& params = sim.marketParams();
+  const Catalog& catalog = world.catalog;
+  if (site >= world.sites.size()) return std::string();
+  std::vector<TankSignals> signals;
+  computeSignals(world, state, signals);
+  const std::vector<std::vector<uint32_t>> class_nodes = classNodes(world, state);
+  const json none = nullptr;
+
+  json tanks = json::array();
+  for (uint32_t t = 0; t < world.tanks.size(); ++t) {
+    const Tank& tk = world.tanks[t];
+    if (tk.site.v != site) continue;
+    const TankState& ts = state.tank[t];
+    const double base = catalog.materials[tk.material].base_price;
+    const bool draws = tk.design_out_t_h > 0.0, fills = tk.design_in_t_h > 0.0;
+    // A tank a unit draws on sits on the feed curve; one a unit only fills
+    // sits on the room curve.
+    const bool as_feed = draws;
+    const double hours = as_feed ? std::max(0.0, ts.level_t) / tk.design_out_t_h
+                         : fills ? std::max(0.0, tk.capacity_t - ts.level_t) / tk.design_in_t_h
+                                 : 0.0;
+    json row = {{"tank", t},
+                {"material", catalog.materials[tk.material].key},
+                {"materialName", catalog.materials[tk.material].name},
+                {"role", as_feed ? (fills ? "both" : "feed") : "product"},
+                {"fill", tk.capacity_t > 0.0 ? ts.level_t / tk.capacity_t : 0.0},
+                {"hours", hours},
+                {"x", hours / ts.pickup_gap_h},
+                {"signal", as_feed ? signals[t].f : signals[t].h},
+                {"cover", none}, {"urgency", none}, {"leadTimeH", none},
+                {"bestOfferRatio", none}, {"orderBelowCover", none}, {"fillTarget", none},
+                {"askRatio", none}, {"costDelta", none}, {"markup", none},
+                {"demandFactor", none}, {"pricePaidRatio", none}};
+    if (as_feed && fills) {  // an intermediate: its room matters to the unit that fills it
+      const double room_h = std::max(0.0, tk.capacity_t - ts.level_t) / tk.design_in_t_h;
+      row["roomX"] = room_h / ts.pickup_gap_h;
+      row["roomSignal"] = signals[t].h;
+    }
+
+    // Buys by vehicle: the same test procurement applies.
+    const bool buys = !tk.piped_in && draws && !fills &&
+                      (tk.role == TankRole::Feed || tk.role == TankRole::Both);
+    if (buys) {
+      const double lead = ts.lead_time_h * ts.caution;
+      const double cover = std::max(0.0, ts.level_t + ts.inbound_t) / tk.design_out_t_h / lead;
+      // The cheapest bookable offer for one lot, as procurement would pick it.
+      const double want = std::max(1.0, tk.target_frac * tk.capacity_t - (ts.level_t + ts.inbound_t));
+      const double urgency = tk.export_buy ? params.export_urgency : signals[t].u;
+      bool found = false;
+      double best_cost = 0, best_ask = 0;
+      for (uint32_t s = 0; s < world.tanks.size(); ++s) {
+        const Tank& seller = world.tanks[s];
+        if (seller.site == tk.site || seller.material != tk.material) continue;
+        if (seller.role != TankRole::Product && seller.role != TankRole::Both) continue;
+        for (size_t cls = 0; cls < catalog.vehicle_classes.size(); ++cls) {
+          const Quote q = quoteLot(world, state, sim.paths(), params, class_nodes, t, s, cls, want,
+                                   urgency, -1, false);
+          if (!q.bookable()) continue;
+          if (!found || q.cost < best_cost) {
+            found = true;
+            best_cost = q.cost;
+            best_ask = q.ask;
+          }
+        }
+      }
+      const double ratio = found && base > 0.0 ? best_ask / base : 1.0;
+      const BuyRule rule = buyRule(params, tk.target_frac, ratio);
+      row["cover"] = cover;
+      row["urgency"] = signals[t].u;
+      row["leadTimeH"] = lead;
+      row["bestOfferRatio"] = found ? json(ratio) : none;
+      // Under one lead time of cover the tank buys to its own target at any price.
+      row["orderBelowCover"] = rule.cover_limit;
+      row["fillTarget"] = cover < 1.0 ? tk.target_frac : rule.fill;
+      row["pricePaidRatio"] = ts.paid_avg > 0.0 && base > 0.0 ? json(ts.paid_avg / base) : none;
+    }
+    // Sells: a product tank others can buy from.
+    if (tk.role == TankRole::Product || tk.role == TankRole::Both) {
+      const double fill = tk.capacity_t > 0.0 ? ts.level_t / tk.capacity_t : 0.0;
+      if (base > 0.0) row["askRatio"] = sellerAsk(world, state, params, t, fill) / base;
+      row["costDelta"] = state.cost_delta[t];
+      row["markup"] = state.site_markup[site];
+    }
+    // A customer line draws on this tank.
+    for (size_t p = 0; p < world.processes.size(); ++p) {
+      const ProcessType& type = catalog.process_types[world.processes[p].type];
+      if (world.processes[p].site.v != site || type.boundary != Boundary::Sink) continue;
+      if (type.basis.v != tk.material) continue;
+      row["demandFactor"] = state.demand_factor[p];
+    }
+    tanks.push_back(std::move(row));
+  }
+
+  // The plant: its most held-back unit.
+  json plant = none;
+  double rate = 0, design = 0;
+  GovernorInfo worst;
+  int worst_proc = -1;
+  for (size_t p = 0; p < world.processes.size(); ++p) {
+    if (world.processes[p].site.v != site) continue;
+    rate += state.proc[p].rate_t_h;
+    design += world.processes[p].design_rate_t_h;
+    const GovernorInfo g = governorOf(world, state, signals, p);
+    if (worst_proc < 0 || g.governor < worst.governor) {
+      worst = g;
+      worst_proc = static_cast<int>(p);
+    }
+  }
+  if (worst_proc >= 0 && design > 0.0) {
+    static const char* kinds[] = {"none", "feed", "room", "margin"};
+    double signal = 1.0, margin = 0.0, margin_base = 0.0;
+    bool first = true;
+    for (size_t p = 0; p < world.processes.size(); ++p) {
+      if (world.processes[p].site.v != site) continue;
+      if (catalog.process_types[world.processes[p].type].boundary != Boundary::None) continue;
+      signal = std::min(signal, state.margin_signal[p]);
+      if (first || state.proc_margin[p] < margin) {
+        margin = state.proc_margin[p];
+        margin_base = state.proc_margin_base[p];
+      }
+      first = false;
+    }
+    const bool on = state.margin_control && !first && state.tick > 0;
+    plant = {{"rate", std::clamp(rate / design, 0.0, 1.0)},
+             {"governor", worst.governor},
+             {"limitedBy", {{"kind", kinds[worst.kind]}, {"tank", worst.tank >= 0 ? json(worst.tank) : none}}},
+             {"marginSignal", signal},
+             {"margin", on ? json(margin) : none},
+             {"marginBase", on ? json(margin_base) : none}};
+  }
+
+  const BuyRule normal = buyRule(params, 0.7, 1.0);
+  const bool aware = params.price_aware_buying;
+  return json{{"site", site},
+              {"name", world.sites[site].name},
+              {"tick", state.tick},
+              {"rules",
+               {{"priceAwareBuying", params.price_aware_buying},
+                {"demandElasticity", params.demand_elasticity},
+                {"marginControl", params.margin_control}}},
+              {"curves",
+               {{"feed", {{"lo", kFeedLo}, {"hi", kFeedHi}}},
+                {"room", {{"lo", kRoomLo}, {"hi", kRoomHi}}},
+                {"urgency", {{"lo", kUrgencyLo}, {"hi", kUrgencyHi}}},
+                {"ask", {{"swing", params.beta}}},
+                {"bid", {{"swing", params.beta}}},
+                {"buy",
+                 {{"cheapRatio", params.price_cheap_ratio},
+                  {"dearRatio", params.price_dear_ratio},
+                  {"cheapFill", aware ? json(params.price_cheap_fill) : json(nullptr)},
+                  {"normalFill", json(nullptr)},  // each tank's own target: see tanks[].fillTarget
+                  {"dearFill", aware ? json(params.price_dear_fill) : json(nullptr)},
+                  {"cheapCover", aware ? params.price_cheap_cover : normal.cover_limit},
+                  {"normalCover", normal.cover_limit},
+                  {"dearCover", aware ? params.price_dear_cover : normal.cover_limit}}},
+                {"demand",
+                 {{"elasticity", params.demand_elasticity},
+                  {"minFrac", params.demand_min_frac},
+                  {"maxFrac", params.demand_max_frac}}},
+                {"margin", {{"fullAtShareOfBase", kMarginFullShare}}}}},
+              {"tanks", tanks},
+              {"plant", plant}}
       .dump();
 }
 
