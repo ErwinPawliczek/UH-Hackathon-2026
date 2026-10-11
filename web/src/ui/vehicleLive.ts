@@ -1,10 +1,11 @@
-// Live per-vehicle view model for the vehicle inspector. Works from snapshot
-// arrays for both backends; the stub additionally knows each vehicle's route
-// schedule, so heading is derived from the snapshot direction either way and
-// ETA is exact only when the stub maths is available.
+// Live per-vehicle view model for the vehicle inspector. Everything comes from
+// the snapshot: pose/status/order from arrays 6-8, movement (assigned route,
+// progress, activity ETA) from the v2 arrays 12-14. There is no stub-specific
+// path — both producers encode the same contract. On v1 payloads (no movement
+// arrays) the route and ETA fields degrade to unknown instead of being
+// fabricated.
 
-import { stubVehicleState } from '../engine/stub';
-import { routeLength } from '../engine/world';
+import { NO_ETA, NO_ROUTE } from '../engine/snapshot';
 import type { Snapshot } from '../engine/snapshot';
 import type { WorldSpec } from '../engine/world';
 
@@ -16,15 +17,14 @@ export interface VehicleLive {
   fill: number;
   status: number;
   orderId: number;
+  /** display names of the route ends the vehicle is travelling between */
   from: string;
   to: string;
-  /** absolute tick of leg end; null when not derivable */
+  /** absolute tick the current activity ends; null when not derivable */
   etaTick: number | null;
 }
 
-export function vehicleLive(world: WorldSpec, snap: Snapshot, v: number, backendKind: 'stub' | 'http'): VehicleLive {
-  const veh = world.vehicles[v];
-  const route = world.routes[veh.route];
+export function vehicleLive(world: WorldSpec, snap: Snapshot, v: number): VehicleLive {
   const x = snap.vehPos[5 * v];
   const y = snap.vehPos[5 * v + 1];
   const dirX = snap.vehPos[5 * v + 2];
@@ -33,19 +33,22 @@ export function vehicleLive(world: WorldSpec, snap: Snapshot, v: number, backend
   const status = snap.vehStatus[2 * v];
   const orderId = snap.vehOrder[v];
 
-  if (backendKind === 'stub') {
-    const st = stubVehicleState(world, Number(snap.tick), v);
-    return { x, y, dirX, dirY, fill, status, orderId, from: st.from, to: st.to, etaTick: st.etaTick };
-  }
+  const routeId = snap.vehRoute?.[v];
+  const eta = snap.vehEta?.[v];
+  const etaTick = eta !== undefined && eta !== NO_ETA ? eta : null;
 
-  // HTTP snapshot: derive heading by comparing the snapshot direction with the
-  // route direction at the nearest polyline point; ETA is not derivable yet.
+  // Assigned route from the snapshot; heading from the engine's direction
+  // vector against the polyline direction at the nearest segment.
+  if (routeId === undefined || routeId === NO_ROUTE || routeId >= world.routes.length) {
+    return { x, y, dirX, dirY, fill, status, orderId, from: '—', to: '—', etaTick };
+  }
+  const route = world.routes[routeId];
   const heading = headingToEnd(route.points, x, y, dirX, dirY);
   return {
     x, y, dirX, dirY, fill, status, orderId,
     from: route.ends[heading ? 0 : 1],
     to: route.ends[heading ? 1 : 0],
-    etaTick: null,
+    etaTick,
   };
 }
 
@@ -57,7 +60,8 @@ function headingToEnd(points: [number, number][], x: number, y: number, dirX: nu
   for (let i = 0; i < points.length - 1; i++) {
     const [ax, ay] = points[i];
     const [bx, by] = points[i + 1];
-    const t = clamp01(((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / (routeLength([[ax, ay], [bx, by]]) || 1e-9));
+    const segLen = Math.hypot(bx - ax, by - ay) || 1e-9;
+    const t = clamp01(((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / segLen);
     const px = ax + (bx - ax) * t;
     const py = ay + (by - ay) * t;
     const d = Math.hypot(x - px, y - py);
@@ -68,7 +72,7 @@ function headingToEnd(points: [number, number][], x: number, y: number, dirX: nu
   }
   const [ax, ay] = points[bestSeg];
   const [bx, by] = points[bestSeg + 1];
-  const len = routeLength([[ax, ay], [bx, by]]) || 1e-9;
+  const len = Math.hypot(bx - ax, by - ay) || 1e-9;
   const segDirX = (bx - ax) / len;
   const segDirY = (by - ay) / len;
   return dirX * segDirX + dirY * segDirY >= 0;

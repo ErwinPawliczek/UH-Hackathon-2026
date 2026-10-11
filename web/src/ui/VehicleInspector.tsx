@@ -11,12 +11,11 @@ import { vehicleLive } from './vehicleLive';
 export function VehicleInspector({ vehIdx }: { vehIdx: number }) {
   const world = useSim((s) => s.world);
   const snap = useSim((s) => s.snap);
-  const backendKind = useSim((s) => s.backendKind);
   if (world === null || snap === null) return null;
   const veh = world.vehicles[vehIdx];
   if (veh === undefined) return null;
 
-  const live = vehicleLive(world, snap, vehIdx, backendKind);
+  const live = vehicleLive(world, snap, vehIdx);
   const clsLabel = VEHICLE_CLASSES[veh.cls].label;
   const cargoColor = materialColor(veh.cargo).getHexString();
 

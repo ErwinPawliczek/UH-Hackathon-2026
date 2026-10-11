@@ -91,12 +91,15 @@ export interface VehicleSpec {
   cls: VehicleClassKey;
   /** cargo material key */
   cargo: string;
-  /** index into routes[] the vehicle shuttles along */
-  route: number;
-  /** ticks for one leg (one-way traversal) */
-  loopTicks: number;
-  /** 0..1 offset into the loop */
-  phase: number;
+  /** index into routes[] the vehicle shuttles along. Stub-producer-only: the
+   * engine's world JSON carries no schedule — live movement (route, progress,
+   * ETA) comes from snapshot arrays 12-14. The stub still needs these to
+   * animate its placeholder loop. */
+  route?: number;
+  /** ticks for one leg (one-way traversal) — stub-producer-only, see route */
+  loopTicks?: number;
+  /** 0..1 offset into the loop — stub-producer-only, see route */
+  phase?: number;
 }
 
 export interface PipelineSpec {

@@ -122,7 +122,7 @@ export class MapScene {
     const selectedSite = selection !== null && selection.kind === 'site' ? selection.index : null;
     updateInstances(this.siteLayer, cur, prev, f, selectedSite);
     const poses: { x: number; y: number; dirX: number; dirY: number }[] = [];
-    for (let v = 0; v < cur.nVeh; v++) poses.push(lerpPose(cur, prev, v, f));
+    for (let v = 0; v < cur.nVeh; v++) poses.push(lerpPose(this.world, cur, prev, v, f));
     updateVehicles(this.vehicleLayer, poses, (x, y) => terrainYAt(this.world, x, y));
     this.syncRing(selection, poses);
   }
