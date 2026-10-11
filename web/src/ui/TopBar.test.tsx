@@ -41,6 +41,11 @@ describe('TopBar markup', () => {
     expect(html).toContain('data-testid="scenario-select"');
   });
 
+  it('stacks above the floating windows, so its menus open over them', () => {
+    const z = Number(/data-testid="top-bar"/.test(html) ? (/z-\[(\d+)\]/.exec(html)?.[1] ?? 0) : 0);
+    expect(z).toBeGreaterThan(20 + 30); // windows start at 20 and take one step each
+  });
+
   it('has one speed control with an editable number and no preset speed buttons', () => {
     expect(html).toContain('data-testid="speed-control"');
     expect(html).toMatch(/Speed:<\/span><input[^>]*id="speed-input"[^>]*name="speed"/);
