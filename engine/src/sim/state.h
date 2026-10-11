@@ -202,6 +202,7 @@ struct State {
   std::vector<double> margin_signal, proc_margin; // per process
   // Per process, $ per tonne of basis at today's prices (market view; derived).
   std::vector<double> proc_revenue, proc_feed_cost, proc_energy;
+  std::vector<double> proc_margin_base;  // margin at base prices, share of base product value
   // trade_block: pairs that do not trade, as seller site << 32 | buyer site,
   // kept sorted. Empty unless a player set one; hashed only when not empty.
   std::vector<uint64_t> trade_blocks;

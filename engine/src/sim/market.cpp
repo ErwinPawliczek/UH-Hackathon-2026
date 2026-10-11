@@ -95,10 +95,11 @@ void stepMarket(const World& world, State& state) {
 
     const double margin = revenue - cost, margin_base = revenue_base - cost_base;
     state.proc_margin[p] = margin / revenue_base;
+    state.proc_margin_base[p] = margin_base / revenue_base;
     // Units whose margin is thin even at base prices are left alone: the
     // catalog's prices, not the market, would be holding them back.
     if (margin_base > 0.02 * revenue_base) {
-      const double x = std::clamp(margin / (0.5 * margin_base), 0.0, 1.0);
+      const double x = std::clamp(margin / (kMarginFullShare * margin_base), 0.0, 1.0);
       state.margin_signal[p] = x * x * (3.0 - 2.0 * x);
     }
   }

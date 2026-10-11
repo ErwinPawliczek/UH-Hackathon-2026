@@ -12,6 +12,12 @@
 namespace crx {
 namespace sim {
 
+// The S-curve ranges of the three tank signals (§5.2): x below `lo` gives 0,
+// above `hi` gives 1. Feed and room are in pickup gaps, urgency in lead times.
+constexpr double kFeedLo = 0.25, kFeedHi = 1.25;
+constexpr double kRoomLo = 0.10, kRoomHi = 1.00;
+constexpr double kUrgencyLo = 1.0, kUrgencyHi = 2.5;
+
 struct TankSignals {
   double f = 1, u = 0, h = 1;
 };

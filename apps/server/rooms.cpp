@@ -632,6 +632,19 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
   svr.Get("/api/room/" + code + "/market", [view](const Req& req, Res& res) {
     view(req, res, [](Room& r, Res& out) { sendJson(out, 200, crx_market(r.sim)); });
   });
+  svr.Get("/api/room/" + code + "/site-econ", [view](const Req& req, Res& res) {
+    uint32_t site = 0;
+    try {
+      site = static_cast<uint32_t>(std::stoul(req.get_param_value("site")));
+    } catch (...) {
+      return sendJson(res, 400, no("query must be ?site=N"));
+    }
+    view(req, res, [site](Room& r, Res& out) {
+      const char* text = crx_site_econ(r.sim, site);
+      if (text == nullptr) return sendJson(out, 400, no("There is no such site"));
+      sendJson(out, 200, text);
+    });
+  });
   svr.Get("/api/room/" + code + "/partners", [view](const Req& req, Res& res) {
     uint32_t site = 0;
     try {
