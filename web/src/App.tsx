@@ -10,6 +10,7 @@ import { EngineErrorOverlay } from './ui/EngineErrorOverlay';
 import { SiteInspector } from './ui/SiteInspector';
 import { VehicleInspector } from './ui/VehicleInspector';
 import { Timeline } from './ui/Timeline';
+import { EventLog } from './ui/EventLog';
 
 function InspectorPanel() {
   const selected = useSim((s) => s.selected);
@@ -25,6 +26,8 @@ export default function App() {
   const snap = useSim((s) => s.snap);
   const error = useSim((s) => s.error);
   const retry = useSim((s) => s.retry);
+  const started = useSim((s) => s.started);
+  const togglePlay = useSim((s) => s.togglePlay);
 
   // Escape clears the selection
   useEffect(() => {
@@ -41,6 +44,22 @@ export default function App() {
       <TopBar />
       <InspectorPanel />
       <Timeline />
+      <EventLog />
+
+      {/* A new run waits here, paused at day 0, until the visitor starts it. */}
+      {world !== null && snap !== null && !started && error === null && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-20 z-10 flex justify-center">
+          <button
+            className="btn btn-active pointer-events-auto"
+            // sized inline: the .btn component class pins control-size padding and type
+            style={{ padding: '12px 28px', fontSize: 16, fontWeight: 600 }}
+            onClick={togglePlay}
+            data-testid="start-simulation"
+          >
+            ▶ Start simulation
+          </button>
+        </div>
+      )}
 
       {world === null && error === null && (
         <div className="absolute inset-0 z-20 flex items-center justify-center text-sm text-muted" data-testid="loading">

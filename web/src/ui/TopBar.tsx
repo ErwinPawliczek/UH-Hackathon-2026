@@ -11,9 +11,12 @@ import { useSim, SPEEDS, TICKS_PER_DAY } from '../store/sim';
 import { SCENARIOS } from '../engine/events';
 import { scenariosFor } from '../engine/scenarios';
 import { fmtClock } from './format';
+import { LOG_WINDOW_AT, LOG_WINDOW_ID } from './EventLog';
+import { useWindows } from './windows';
 
 export function TopBar() {
   const playing = useSim((s) => s.playing);
+  const started = useSim((s) => s.started);
   const speed = useSim((s) => s.speed);
   const seed = useSim((s) => s.seed);
   const scenario = useSim((s) => s.scenario);
@@ -23,6 +26,7 @@ export function TopBar() {
   const world = useSim((s) => s.world);
   const triggered = useSim((s) => s.triggered);
   const live = useSim((s) => s.sendCommand !== null);
+  const logOpen = useWindows((s) => s.windows[LOG_WINDOW_ID]?.open === true);
 
   const { togglePlay, setSpeed, setSeed, setScenario, triggerScenario } = useSim.getState();
   const engineScenarios = backendKind === 'http' ? scenariosFor(world) : [];
@@ -40,8 +44,9 @@ export function TopBar() {
         {tick === undefined ? '—' : fmtClock(Number(tick))}
       </span>
 
-      <button className={`btn ${playing ? 'btn-active' : ''}`} onClick={togglePlay} data-testid="play-pause">
-        {playing ? '⏸ Pause' : '▶ Play'}
+      {/* Before the first start this is the primary call to action; afterwards Pause / Resume. */}
+      <button className={`btn ${playing || !started ? 'btn-active' : ''}`} onClick={togglePlay} data-testid="play-pause">
+        {!started ? '▶ Start simulation' : playing ? '⏸ Pause' : '▶ Resume'}
       </button>
 
       <div className="flex items-center gap-1" role="group" aria-label="Simulation speed">
@@ -103,7 +108,17 @@ export function TopBar() {
         </label>
       )}
 
-      <span className="data ml-auto text-muted">{Math.floor(Number(tick ?? 0) / TICKS_PER_DAY)}/60 d</span>
+      {/* floating windows: each toggle opens or closes one draggable panel */}
+      <button
+        className={`btn ml-auto ${logOpen ? 'btn-active' : ''}`}
+        onClick={() => useWindows.getState().toggle(LOG_WINDOW_ID, LOG_WINDOW_AT)}
+        aria-pressed={logOpen}
+        data-testid="log-toggle"
+      >
+        Log
+      </button>
+
+      <span className="data text-muted">{Math.floor(Number(tick ?? 0) / TICKS_PER_DAY)}/60 d</span>
 
       {error !== null && (
         <span

@@ -106,6 +106,18 @@ describe('store boot', () => {
     expect([...SPEEDS]).toEqual([1, 4, 16, 64]);
   });
 
+  it('opens paused and not started; the first play starts the run', async () => {
+    const { useSim } = await importStore();
+    expect(useSim.getState().started).toBe(false);
+    expect(useSim.getState().playing).toBe(false);
+    useSim.getState().togglePlay();
+    expect(useSim.getState().started).toBe(true);
+    expect(useSim.getState().playing).toBe(true);
+    useSim.getState().togglePlay(); // pause: still a started run
+    expect(useSim.getState().started).toBe(true);
+    expect(useSim.getState().playing).toBe(false);
+  });
+
   it('persists only the user-facing settings', async () => {
     const { useSim } = await importStore();
     useSim.getState().setSeed(9);
