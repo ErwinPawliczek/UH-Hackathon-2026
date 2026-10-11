@@ -26,6 +26,9 @@ namespace {
 constexpr double kJoinKm = 4.0;   // strips sharing an end point within 4 km join
 constexpr double kSnapKm = 12.0;  // site is on a network within 12 km
 constexpr double kSpare = 1.3;    // +30% sizing spare
+constexpr double kFleetSpare = 3.0;  // fleet multiplier over the cyclic minimum:
+                                     // bay queues, order races, and route
+                                     // variance eat the naive 30% spare
 constexpr double kUtilisation = 0.88;  // design rate is hit at 88% utilisation
 constexpr float kRoadKmh = 70.f, kRiverKmh = 18.f, kSeaKmh = 24.f;
 
@@ -774,6 +777,7 @@ bool loadHandDrawnWorld(const std::string& jsonPath, const CatalogView& catalog,
                   "polypropylene chain is unsuppliable as drawn — minimal fix: one drawn "
                   "pipeline from a steam cracker"});
 
+  std::map<std::pair<int, int>, int> vehBySiteMode;  // (site, mode) → vehicles
   // Validate every vehicle flow against the drawn topology BEFORE anything
   // is built: the gap list is the brief's primary output.
   for (const Flow& f : flows) {
@@ -968,6 +972,13 @@ bool loadHandDrawnWorld(const std::string& jsonPath, const CatalogView& catalog,
   for (const SiteRate& r : rates) applyRate(r);
   for (const SiteRate& r : portRates) applyRate(r);
 
+  // Port sink tanks hold 1.5 days of cover, not the preset 7: an export
+  // outlet is an optional sink, and a week-sized target orders tens of
+  // thousands of tonnes that wedge the whole fleet at the port berths.
+  for (WTank& t : out.tanks)
+    if (t.site.v == static_cast<uint32_t>(iPortA) || t.site.v == static_cast<uint32_t>(iPortB))
+      t.capacity_t = std::min(t.capacity_t, kSpare * 24.0 * std::max(t.design_in_t_h, t.design_out_t_h) * 1.5);
+
   // Pass 2: units and per-process tank flow sizing. Tank design flows come
   // from the process nets × the design rate (feed in, product out), so tank
   // capacities and cover hold for every stream the site touches.
@@ -1129,8 +1140,34 @@ bool loadHandDrawnWorld(const std::string& jsonPath, const CatalogView& catalog,
     // Round-trip time in hours; the fleet needed is tonnes/day times the
     // round-trip FRACTION OF A DAY over one vehicle's payload.
     const double rt = 2.0 * km / vc->speed_kmh + 2.0 * vc->capacity_t / vc->load_t_h;
-    const int count = std::max(1, static_cast<int>(std::ceil(kSpare * t_d * (rt / 24.0) /
+    const int count = std::max(1, static_cast<int>(std::ceil(kFleetSpare * t_d * (rt / 24.0) /
                                                              vc->capacity_t)));
+    // Berths are needed at BOTH ends: vehicles home at the seller still
+    // unload at the buyer, so bay floors must count both endpoints.
+    vehBySiteMode[{f.from, static_cast<int>(f.mode)}] += count;
+    vehBySiteMode[{f.to, static_cast<int>(f.mode)}] += count;
+    // Trucks are the universal overflow carrier (procurement re-picks the
+    // class per order): give every flow a road detachment homed at the
+    // seller so a busy primary fleet cannot starve the order book.
+    {
+      const char* truckCls = phaseOf(f.material) == Phase::LiquefiedGas ? "TRUCK_PRESS"
+                             : phaseOf(f.material) == Phase::Solid  ? "TRUCK_BULK"
+                                                                    : "TRUCK_TANK";
+      const VehicleClassInfo* tv = catalog.vehicle(truckCls);
+      if (tv != nullptr && tv->capacity_t > 0) {
+        const double trt = 2.0 * km / tv->speed_kmh + 2.0 * tv->capacity_t / tv->load_t_h;
+        const int tcount = std::max(1, static_cast<int>(std::ceil(
+                                          kFleetSpare * t_d * (trt / 24.0) / tv->capacity_t / 2.0)));
+        vehBySiteMode[{f.from, 0}] += tcount;
+        vehBySiteMode[{f.to, 0}] += tcount;
+        for (int v = 0; v < tcount; ++v) {
+          WVehicleSpec tvs;
+          tvs.cls = truckCls;
+          tvs.home = NodeId{static_cast<uint32_t>(f.from)};
+          out.fleet.push_back(tvs);
+        }
+      }
+    }
     for (int v = 0; v < count; ++v) {
       WVehicleSpec vs;
       vs.cls = cls;
@@ -1138,6 +1175,33 @@ bool loadHandDrawnWorld(const std::string& jsonPath, const CatalogView& catalog,
       // resolves the site's own node per mode.
       vs.home = NodeId{static_cast<uint32_t>(f.from)};
       out.fleet.push_back(vs);
+    }
+  }
+
+  // Port berths: export legs may be unresolved (isolated sea stub), so the
+  // traffic counter never counts the port; give both ports berth floors.
+  for (size_t s = 0; s < out.sites.size(); ++s) {
+    const auto& pname = d.sites[s].preset;
+    if (pname != "PORT_TERMINAL") continue;
+    out.sites[s].bays[0] = std::max<uint8_t>(out.sites[s].bays[0], 6);
+    out.sites[s].bays[2] = std::max<uint8_t>(out.sites[s].bays[2], 5);
+  }
+
+  // Bay floors scale with flow traffic (applied after the fleet loop so the
+  // vehicle counts exist): one berth per ~6 vehicles, both endpoints, so
+  // loading/unloading does not serialize behind the preset minimums.
+  // Berth demand does not follow the planned mode: procurement re-picks the
+  // class per order by cost/availability, so road berths must scale from ALL
+  // traffic at the site, and river/sea berths from their own.
+  for (size_t s = 0; s < out.sites.size(); ++s) {
+    int total = 0;
+    for (int m = 0; m < 3; ++m) total += vehBySiteMode[{static_cast<int>(s), m}];
+    for (int m = 0; m < 3; ++m) {
+      const int own = vehBySiteMode[{static_cast<int>(s), m}];
+      const int demand = m == 0 ? total : own;  // road: any class may queue
+      if (demand <= 0) continue;
+      const uint8_t need = static_cast<uint8_t>(std::min(64, 1 + demand / 6));
+      out.sites[s].bays[m] = std::max(out.sites[s].bays[m], need);
     }
   }
 
