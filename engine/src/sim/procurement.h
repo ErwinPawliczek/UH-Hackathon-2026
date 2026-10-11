@@ -16,6 +16,7 @@
 #include "sim/world.h"
 
 #include <cstdint>
+#include <vector>
 
 namespace crx {
 namespace sim {
@@ -42,6 +43,38 @@ struct MarketParams {
   // many hours (sort key = created − urgency x boost).
   double dispatch_urgency_boost_h = -1.0;
 };
+
+// One way of filling a lot: a seller tank and a vehicle class, priced as the
+// market prices it (§5.6). Procurement books the cheapest bookable quote; the
+// sourcing view (inspect.h) lists them all, including the ones that cannot
+// be booked right now and why.
+struct Quote {
+  enum class Block : uint8_t { None, NoVehicles, SellerShort, ExportFill, Unreachable };
+  // The material may travel in the class's mode, the class carries its
+  // phase, and both sites are on that network with a way between them.
+  bool possible = false;
+  Block blocked = Block::None;  // why it cannot be booked this hour
+  double lot_t = 0;             // one vehicle load, clamped to what is wanted
+  double seller_fill = 0;       // seller level / capacity
+  double eta_h = 0, km = 0;     // seller's node to buyer's node in the mode
+  double ask = 0, bid = 0;      // $/t
+  double switch_cost = 0;       // $/t, zero for the contract partner
+  double cost = 0;              // $/t landed: ask + freight + time + switch
+  bool bookable() const { return possible && blocked == Block::None; }
+};
+
+// Nodes where each vehicle class has a vehicle right now (one list per
+// catalog class): a class with no list has no vehicles in this world.
+std::vector<std::vector<uint32_t>> classNodes(const World& world, const State& state);
+
+// Prices one (seller tank, class) for a buyer tank wanting `want` tonnes at
+// `urgency`. With `explain` false it stops at the first reason the lot
+// cannot be booked (the hourly pass only needs bookable quotes); with it
+// true every possible quote is fully priced and carries its reason.
+Quote quoteLot(const World& world, const State& state, const PathCache& paths,
+               const MarketParams& params, const std::vector<std::vector<uint32_t>>& class_nodes,
+               uint32_t buyer_tank, uint32_t seller_tank, size_t cls, double want,
+               double urgency, int contract_seller, bool explain);
 
 struct ProcurementStats {
   uint32_t orders_created = 0;

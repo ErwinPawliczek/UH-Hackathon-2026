@@ -18,27 +18,90 @@ void refreshEtas(const World& world, State& state) {
   }
 }
 
-void stepProcurement(const World& world, State& state, const PathCache& paths,
-                     const std::vector<TankSignals>& signals, const MarketParams& params,
-                     ProcurementStats& out, Recorder& rec) {
-  const Catalog& catalog = world.catalog;
-
-  // Where each class's vehicles are right now. A class is a candidate for a
-  // seller only when one of its vehicles can reach that seller's node — no
-  // vehicles, or none on the same stretch of network, and the order would
-  // wait forever.
-  std::vector<std::vector<uint32_t>> class_nodes(catalog.vehicle_classes.size());
+// Where each class's vehicles are right now. A class is a candidate for a
+// seller only when one of its vehicles can reach that seller's node — no
+// vehicles, or none on the same stretch of network, and the order would
+// wait forever.
+std::vector<std::vector<uint32_t>> classNodes(const World& world, const State& state) {
+  std::vector<std::vector<uint32_t>> class_nodes(world.catalog.vehicle_classes.size());
   for (size_t v = 0; v < world.fleet.size() && v < state.vehicle.size(); ++v) {
     const uint32_t at = state.vehicle[v].at_node;
     if (at == kNoNode) continue;
     std::vector<uint32_t>& nodes = class_nodes[world.fleet[v].cls];
     if (std::find(nodes.begin(), nodes.end(), at) == nodes.end()) nodes.push_back(at);
   }
-  auto classReaches = [&](size_t cls, crx::Mode mode, uint32_t node) {
-    for (const uint32_t at : class_nodes[cls])
-      if (std::isfinite(travelHours(world, paths, mode, at, node))) return true;
-    return false;
-  };
+  return class_nodes;
+}
+
+Quote quoteLot(const World& world, const State& state, const PathCache& paths,
+               const MarketParams& params, const std::vector<std::vector<uint32_t>>& class_nodes,
+               uint32_t buyer_tank, uint32_t seller_tank, size_t cls, double want,
+               double urgency, int contract_seller, bool explain) {
+  Quote q;
+  const Catalog& catalog = world.catalog;
+  const Tank& buyer = world.tanks[buyer_tank];
+  const Tank& seller = world.tanks[seller_tank];
+  const Material& mat = catalog.materials[buyer.material];
+  const VehicleClass& vc = catalog.vehicle_classes[cls];
+  if (static_cast<int>(vc.mode) >= kModeCount) return q;  // pipeline: no vehicles
+  if (!(mat.modes & (1u << static_cast<uint8_t>(vc.mode)))) return q;
+  if (vc.carries != mat.phase) return q;
+  if (vc.capacity_t <= 0.0 || vc.speed_kmh <= 0.0) return q;
+  const bool no_vehicles = class_nodes[cls].empty();  // the world has no such vehicle
+  if (no_vehicles && !explain) return q;
+
+  // One lot = one vehicle load, clamped to what is wanted.
+  const TankState& seller_ts = state.tank[seller_tank];
+  q.lot_t = std::min(vc.capacity_t, want);
+  const bool seller_short = seller_ts.level_t - seller_ts.reserved_out_t < q.lot_t - 1e-9;
+  if (seller_short && !explain) return q;
+
+  // Port export rule (§5.6): patient buyers only tap sellers above the fill
+  // line, so exports never rob the domestic chain.
+  q.seller_fill = seller.capacity_t > 0 ? seller_ts.level_t / seller.capacity_t : 0.0;
+  const bool export_fill = buyer.export_buy && q.seller_fill < params.export_seller_fill;
+  if (export_fill && !explain) return q;
+
+  // Route in the class's mode between the two sites' mode nodes.
+  const Site& seller_site = world.sites[seller.site.v];
+  const Site& buyer_site = world.sites[buyer.site.v];
+  const uint32_t from = seller_site.node[modeIndex(vc.mode)];
+  const uint32_t to = buyer_site.node[modeIndex(vc.mode)];
+  if (from == kNoNode || to == kNoNode) return q;
+  q.eta_h = travelHours(world, paths, vc.mode, from, to);
+  q.km = travelKm(world, paths, vc.mode, from, to);
+  if (!std::isfinite(q.eta_h) || !std::isfinite(q.km)) return q;
+  q.possible = true;
+
+  bool unreachable = true;
+  for (const uint32_t at : class_nodes[cls])
+    if (std::isfinite(travelHours(world, paths, vc.mode, at, from))) {
+      unreachable = false;
+      break;
+    }
+  q.blocked = no_vehicles    ? Quote::Block::NoVehicles
+              : seller_short ? Quote::Block::SellerShort
+              : export_fill  ? Quote::Block::ExportFill
+              : unreachable  ? Quote::Block::Unreachable
+                             : Quote::Block::None;
+  if (q.blocked != Quote::Block::None && !explain) return q;
+
+  // §5.6 price formation and cost, all per tonne.
+  const double base = mat.base_price;
+  q.ask = base * (1.0 + params.beta * (1.0 - 2.0 * q.seller_fill));
+  q.bid = base * (1.0 + params.beta * urgency);
+  q.switch_cost =
+      (static_cast<int>(seller_tank) == contract_seller) ? 0.0 : params.switch_cost_frac * base;
+  q.cost = q.ask + vc.freight * q.km + urgency * params.value_of_time_usd_t_h * q.eta_h +
+           q.switch_cost;
+  return q;
+}
+
+void stepProcurement(const World& world, State& state, const PathCache& paths,
+                     const std::vector<TankSignals>& signals, const MarketParams& params,
+                     ProcurementStats& out, Recorder& rec) {
+  const Catalog& catalog = world.catalog;
+  const std::vector<std::vector<uint32_t>> class_nodes = classNodes(world, state);
 
   // Collect buy-side requests: externally fed tanks with a consumer draw and
   // positive urgency (§5.6). Export tanks (§5.6 port rule) order at a fixed
@@ -94,49 +157,15 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
         if (seller.material != buyer.material) continue;
         if (seller.role != TankRole::Product && seller.role != TankRole::Both) continue;
 
-        const TankState& seller_ts = state.tank[s];
-
         for (size_t cls = 0; cls < catalog.vehicle_classes.size(); ++cls) {
-          const VehicleClass& vc = catalog.vehicle_classes[cls];
-          if (static_cast<int>(vc.mode) >= kModeCount) continue;  // pipeline: no vehicles
-          if (!(mat.modes & (1u << static_cast<uint8_t>(vc.mode)))) continue;
-          if (vc.carries != mat.phase) continue;
-          if (vc.capacity_t <= 0.0 || vc.speed_kmh <= 0.0) continue;
-          if (class_nodes[cls].empty()) continue;  // the world has no such vehicle
-
-          // One lot = one vehicle load, clamped to what is wanted.
-          const double lot_t = std::min(vc.capacity_t, want);
-          if (seller_ts.level_t - seller_ts.reserved_out_t < lot_t - 1e-9) continue;
-
-          // Port export rule (§5.6): patient buyers only tap sellers above
-          // the fill line, so exports never rob the domestic chain.
-          const double seller_fill =
-              seller.capacity_t > 0 ? seller_ts.level_t / seller.capacity_t : 0.0;
-          if (buyer.export_buy && seller_fill < params.export_seller_fill) continue;
-
-          // Route in the class's mode between the two sites' mode nodes.
-          const Site& seller_site = world.sites[seller.site.v];
-          const Site& buyer_site = world.sites[buyer.site.v];
-          const uint32_t from = seller_site.node[modeIndex(vc.mode)];
-          const uint32_t to = buyer_site.node[modeIndex(vc.mode)];
-          if (from == kNoNode || to == kNoNode) continue;
-          const double eta_h = travelHours(world, paths, vc.mode, from, to);
-          const double km = travelKm(world, paths, vc.mode, from, to);
-          if (!std::isfinite(eta_h) || !std::isfinite(km)) continue;
-          if (!classReaches(cls, vc.mode, from)) continue;
-
-          // §5.6 price formation and cost, all per tonne.
-          const double base = mat.base_price;
-          const double ask = base * (1.0 + params.beta * (1.0 - 2.0 * seller_fill));
-          const double bid = base * (1.0 + params.beta * req.urgency);
-          const double switch_cost =
-              (static_cast<int>(s) == contract_seller) ? 0.0 : params.switch_cost_frac * base;
-          const double cost = ask + vc.freight * km +
-                              req.urgency * params.value_of_time_usd_t_h * eta_h + switch_cost;
-
-          if (!found || cost < best.cost) {
-            best = {static_cast<uint32_t>(s), static_cast<uint32_t>(cls), cost, (ask + bid) / 2.0,
-                    lot_t * vc.freight * km, eta_h};
+          const Quote q = quoteLot(world, state, paths, params, class_nodes, req.tank,
+                                   static_cast<uint32_t>(s), cls, want, req.urgency,
+                                   contract_seller, false);
+          if (!q.bookable()) continue;
+          if (!found || q.cost < best.cost) {
+            best = {static_cast<uint32_t>(s), static_cast<uint32_t>(cls), q.cost,
+                    (q.ask + q.bid) / 2.0,
+                    q.lot_t * catalog.vehicle_classes[cls].freight * q.km, q.eta_h};
             found = true;
           }
         }
