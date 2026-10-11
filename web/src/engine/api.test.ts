@@ -85,7 +85,23 @@ describe('HttpBackend request mapping', () => {
     const err = await b.create({ seed: 42, scenario: 'none', world: 'erwin-world-v1', layout }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(HttpError);
     expect((err as HttpError).reason).toBe('Refinery needs a river lane within 12 km');
-    expect(calls).toHaveLength(1); // no second create on the built-in world
+    expect(calls).toHaveLength(2); // the create, then the checker asked why: no second create on the built-in world
+    expect(calls.filter((c) => c.includes('"seed"'))).toHaveLength(1);
+  });
+
+  it("asks the checker why a layout was refused and carries its sentences as the reason", async () => {
+    const seen: string[] = [];
+    const impl: typeof fetch = async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      seen.push(`${init?.method} ${path}`);
+      if (path === '/api/worlds/check') {
+        return new Response(JSON.stringify({ ok: false, errors: [{ site: 6, mode: 'river', text: 'Refinery needs a river lane within 12 km' }, { site: null, mode: null, text: 'Two sites share a spot' }] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: 'engine rejected the config JSON' }), { status: 400 });
+    };
+    const err = await new HttpBackend('http://x', impl).create({ seed: 42, scenario: 'none', world: 'erwin-world-v1', layout: { version: 2 } }).catch((e: unknown) => e);
+    expect((err as HttpError).reason).toBe('Refinery needs a river lane within 12 km\nTwo sites share a spot');
+    expect(seen).toEqual(['POST /api/sim', 'POST /api/worlds/check']);
   });
 
   it('does not retry a named-world create on errors other than a 400', async () => {

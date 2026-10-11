@@ -19,7 +19,10 @@ export function EngineErrorOverlay({
         <div className="chamfer flex max-w-md flex-col items-start gap-2 p-6">
           <h1 className="wordmark text-lg text-alarm" role="alert">This map cannot be run yet</h1>
           <p className="text-sm text-ink">The server looked at the map you drew and answered:</p>
-          <p className="w-full break-words rounded-sm bg-panel-2 px-2 py-1 text-sm text-ink" data-testid="fatal-reason">{message}</p>
+          {/* one line per problem the checker found; a long list scrolls */}
+          <ul className="max-h-[40vh] w-full overflow-auto rounded-sm bg-panel-2 px-2 py-1 text-sm text-ink" data-testid="fatal-reason">
+            {message.split('\n').filter((line) => line !== '').map((line, i) => <li key={i} className="break-words py-0.5">{line}</li>)}
+          </ul>
           <div className="mt-1 flex gap-2">
             <a className="btn btn-primary" href={custom.editHref} data-testid="error-edit-map">Edit map</a>
             <button className="btn" onClick={custom.onDefaultWorld} data-testid="error-default-world">Default world</button>
