@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HttpBackend, HttpError } from './httpBackend';
+import { HttpBackend, HttpError, resolveEventSites, siteKeyIndex } from './httpBackend';
 import { StubBackend } from './stubBackend';
 import { createBackend, type SimBackend } from './api';
 import { encodeStub } from './stub';
@@ -125,6 +125,46 @@ describe('HttpBackend request mapping', () => {
     const events = await b.events('sim-7', 2);
     expect(events).toHaveLength(1);
     expect(calls[0].url).toBe('http://x/api/sim/sim-7/events?since=2');
+  });
+
+  it("turns an event's site key into the site's index, using the session's world", async () => {
+    const world = { sites: [{ key: 'OIL_FIELD' }, { key: 'CRACKER_ETHANE' }, { key: 'FUEL_DEPOT' }] };
+    const { calls, impl } = fakeFetch({
+      'GET /api/sim/sim-7/world': () => world,
+      'GET /api/sim/sim-7/events': () => [
+        { seq: 0, tick: 96, type: 'unit_failed', site: 'CRACKER_ETHANE', text: 'a' },
+        { seq: 1, tick: 97, type: 'route_break', text: 'b' },
+        { seq: 2, tick: 98, type: 'stockout', site: 'NOWHERE', text: 'c' },
+        { seq: 3, tick: 99, type: 'stockout', site: 2, text: 'd' },
+      ],
+    });
+    const b = new HttpBackend('http://x', impl);
+    await b.world('sim-7');
+    const events = await b.events('sim-7', 0);
+    expect(events.map((e) => e.site)).toEqual([1, undefined, undefined, 2]);
+    expect('site' in events[2]).toBe(false); // an unknown key is no site, never the wrong site
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual(['/api/sim/sim-7/world', '/api/sim/sim-7/events']);
+
+    // a session whose world was never asked for: fetched once, when a key first needs resolving
+    const fresh = fakeFetch({
+      'GET /api/sim/sim-9/world': () => world,
+      'GET /api/sim/sim-9/events': () => [{ seq: 0, tick: 4, type: 'stockout', site: 'FUEL_DEPOT', text: 'e' }],
+    });
+    const c = new HttpBackend('http://x', fresh.impl);
+    expect((await c.events('sim-9', 0))[0].site).toBe(2);
+    expect((await c.events('sim-9', 0))[0].site).toBe(2);
+    expect(fresh.calls.filter((x) => x.url.endsWith('/world'))).toHaveLength(1);
+  });
+
+  it("maps site keys on their own: by key, leaving indices and site-less events alone", () => {
+    const keys = siteKeyIndex({ sites: [{ key: 'A' }, { name: 'no key' }, { key: 'C' }] } as never);
+    expect([...keys]).toEqual([['A', 0], ['C', 2]]);
+    expect(siteKeyIndex(undefined).size).toBe(0);
+    expect(resolveEventSites([
+      { seq: 0, tick: 1, type: 't', text: '', site: 'C' },
+      { seq: 1, tick: 1, type: 't', text: '', site: 0 },
+      { seq: 2, tick: 1, type: 't', text: '' },
+    ], keys).map((e) => e.site)).toEqual([2, 0, undefined]);
   });
 
   it('floors the events since sentinel at the wire minimum', async () => {
