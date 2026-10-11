@@ -4,9 +4,11 @@
 // Left, every tank that buys its feed, the one that runs dry soonest first,
 // with how long its stock lasts and a red tag where its usual supplier is
 // down. Right, the chosen tank: where it stands, and every way to fill it,
-// cheapest delivered price first — who sells, by what vehicle, how far, how
-// long door to door, whether that beats the tank running dry, how much the
-// seller can spare, and what a tonne costs delivered and why.
+// in the order the plant itself would choose — who sells, by what vehicle,
+// how far, how long door to door, whether that beats the tank running dry,
+// how much the seller can spare, and what a tonne costs delivered: the price
+// an order is booked at plus freight, which is exactly what "Order one load"
+// then reports.
 //
 // Selecting a site on the map jumps to that site's first buying tank; a
 // supplier's name selects the supplier on the map. "Order one load" on an
@@ -21,9 +23,9 @@ import { fmtTonnes } from './economyData';
 import { useEconomyView } from './economyView';
 import { fmtClock } from './format';
 import {
-  blockedWords, fmtCover, fmtTrip, inTime, nextPassWords, orderBookedWords, orderCommand, orderRefusedWords,
-  priceParts, sortByCover, stateWords, supplierDown, tankHeadline, tankLabel, useSourcingDetail, useSourcingList,
-  vehicleWords, type PlaceOrderReply,
+  blockedWords, cashWords, cutOff, fmtCover, fmtTrip, inTime, nextPassWords, optionCash, orderBookedWords, orderCommand,
+  orderRefusedWords, sortByCover, stateWords, supplierDown, tankHeadline, tankLabel, useSourcingDetail, useSourcingList,
+  vehicleWords, weighedWords, type PlaceOrderReply,
 } from './supplyData';
 
 /** Hours of stock that fill the cover bar: a week. */
@@ -62,6 +64,7 @@ function TankRow({ tank, preset, chosen, onPick }: { tank: SourcingTank; preset:
             <span className={`block h-full rounded-sm ${low ? 'bg-alarm' : 'bg-blue'}`} style={{ width: `${Math.max(2, share * 100)}%` }} />
           </span>
           {down && <span className="mt-1 block"><Tag tone="alarm">usual supplier {stateWords(tank.usual_state)}</Tag></span>}
+          {cutOff(tank) && <span className="mt-1 block"><Tag tone="alarm">route closed</Tag></span>}
         </span>
       </button>
     </li>
@@ -80,6 +83,9 @@ function OptionRow({ option, coverH, presetOf, onSupplier, onOrder, busy }: {
   const blocked = blockedWords(option);
   const timing = inTime(option, coverH);
   const sellerDown = supplierDown(option.seller_state);
+  // what a tonne will actually cost: the booked price plus freight
+  const cash = optionCash(option);
+  const weighed = weighedWords(option);
   return (
     <li className="border-t border-line py-1.5" data-testid="supply-option">
       <div className="flex items-center gap-2">
@@ -94,8 +100,8 @@ function OptionRow({ option, coverH, presetOf, onSupplier, onOrder, busy }: {
         {option.chosen && <Tag tone="blue">next order</Tag>}
         {option.usual && <Tag tone="muted">usual</Tag>}
         {option.seller_state !== 'running' && <Tag tone={sellerDown ? 'alarm' : 'muted'}>{stateWords(option.seller_state)}</Tag>}
-        <span className="data ml-auto shrink-0 text-sm font-semibold text-ink" title={priceParts(option)}>
-          ${Math.round(option.landed_usd_t).toLocaleString('en-US')}
+        <span className="data ml-auto shrink-0 text-sm font-semibold text-ink" title={cashWords(cash)} data-testid="supply-option-price">
+          ${cash.delivered.toLocaleString('en-US')}
           <span className="font-normal text-muted"> /t</span>
         </span>
       </div>
@@ -115,7 +121,10 @@ function OptionRow({ option, coverH, presetOf, onSupplier, onOrder, busy }: {
         <span>can spare <span className="data">{fmtTonnes(option.free_t)}</span></span>
       </div>
       <div className="flex items-end justify-between gap-2 pl-7">
-        <span className="text-xs text-muted">{priceParts(option)}</span>
+        <span className="text-xs text-muted" data-testid="supply-option-money">
+          {cashWords(cash)}
+          {weighed !== null && <span className="block">{weighed}</span>}
+        </span>
         {onOrder !== undefined && option.feasible_now && blocked === null && (
           <button
             className="btn"
@@ -165,8 +174,13 @@ export function SupplyDetail({ detail, presetOf, onSupplier, onOrder, busy, note
         </p>
       )}
       <div className="label mb-0.5 mt-3">
-        {detail.options.length === 0 ? 'No one can supply it' : `${detail.options.length} way${detail.options.length === 1 ? '' : 's'} to supply it, cheapest delivered first`}
+        {detail.options.length === 0 ? 'No one can supply it' : `${detail.options.length} way${detail.options.length === 1 ? '' : 's'} to supply it`}
       </div>
+      {detail.options.length > 0 && (
+        <p className="mb-1 text-xs text-muted" data-testid="supply-order-of-list">
+          Listed in the order this plant would choose: it also weighs how long the trip takes and whether it knows the supplier.
+        </p>
+      )}
       {detail.options.length === 0 ? (
         <p className="text-sm text-muted">No other plant makes it, or none can be reached by any vehicle.</p>
       ) : (
@@ -177,9 +191,9 @@ export function SupplyDetail({ detail, presetOf, onSupplier, onOrder, busy, note
         </ul>
       )}
       <p className="mt-2 text-xs text-muted">
-        As of {fmtClock(detail.tick)}. Delivered price is what the buyer weighs: the seller&apos;s asking price (lower
-        when its tank is full), freight, a charge for switching away from the usual supplier, and the wait when stock
-        is short. &quot;In time&quot; compares door to door with the stock left.
+        As of {fmtClock(detail.tick)}. The price for the product is what an order is booked at now: halfway between
+        what the seller asks (less when its tank is full) and what this plant bids. Freight is for that vehicle over
+        that distance. &quot;In time&quot; compares door to door with the stock left.
       </p>
     </div>
   );
@@ -239,7 +253,7 @@ export function EconomySupply({ open }: { open: boolean }) {
       .then((raw) => {
         const reply = (raw ?? {}) as PlaceOrderReply;
         if (reply.ok === true && reply.order !== undefined) {
-          const booked = orderBookedWords(reply.order, option.seller_name, fmtClock);
+          const booked = orderBookedWords(reply.order, option.seller_name, option.door_to_door_h);
           setNote({ tank: forTank, ok: true, text: `Booked ${booked}. Waiting for a vehicle (the next dispatch is on the hour).` });
           setAwaiting({ id: reply.order.id, epoch: useSim.getState().runEpoch, tank: forTank, booked });
         } else {

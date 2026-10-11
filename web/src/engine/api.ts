@@ -155,6 +155,8 @@ export interface SourcingTank {
   inbound_t: number;
   /** how many ways there are to supply it */
   options: number;
+  /** how many of those a closed route has taken away; equal to `options` means the tank is cut off */
+  route_closed?: number;
   /** site key of the seller that has delivered most so far */
   usual: string | null;
   usual_state: SupplierState | null;
@@ -194,7 +196,9 @@ export interface SourcingOption {
   landed_usd_t: number;
   price_usd_t: number;
   feasible_now: boolean;
-  blocked: null | 'no_vehicles' | 'seller_short' | 'unreachable' | 'export_fill' | string;
+  blocked: null | 'no_vehicles' | 'seller_short' | 'unreachable' | 'export_fill' | 'route_closed' | string;
+  /** why it cannot be used now, as the engine's own plain sentence ("the road to this site is closed"); null when it can */
+  blocked_reason?: string | null;
   arrives_before_dry: boolean;
   /** the next hourly ordering pass will book this one */
   chosen: boolean;

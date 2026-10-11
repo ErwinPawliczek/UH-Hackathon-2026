@@ -2,6 +2,12 @@
 // long each can last, and every way to fill one — who could sell, by what
 // vehicle, how long door to door, whether that beats the tank running dry,
 // and what a tonne would cost delivered.
+//
+// Money is shown as the visitor would pay it: the price an order is booked
+// at plus freight. The engine ranks options by a different figure
+// (`landed_usd_t`: asking price, freight, and charges for the wait and for
+// switching supplier that nobody pays), which is why the list is not always
+// cheapest first; that figure is never shown as a price.
 
 import type { SourcingDetail, SourcingList, SourcingOption, SourcingTank, SupplierState } from '../engine/api';
 import { useSim } from '../store/sim';
@@ -52,19 +58,20 @@ const CLASS_ONE: Record<string, string> = {
 /** One vehicle of a class, in words: "tank truck", "gas carrier". */
 export const vehicleWords = (cls: string) => CLASS_ONE[cls] ?? cls.toLowerCase().replace(/_/g, ' ');
 
-/** Why an option cannot be used right now, in plain words; null when it can. */
-export function blockedWords(o: Pick<SourcingOption, 'blocked' | 'cls' | 'lot_t'>): string | null {
-  switch (o.blocked) {
-    case null:
-    case undefined:
-      return null;
-    case 'no_vehicles': return `no ${vehicleWords(o.cls)} can get there`;
-    case 'seller_short': return `not enough in its tank for one ${vehicleWords(o.cls)} load`;
-    case 'unreachable': return `no way through by ${vehicleWords(o.cls)}`;
-    case 'export_fill': return 'keeps this stock for its own customers';
-    default: return String(o.blocked).replace(/_/g, ' ');
-  }
+/**
+ * Why an option cannot be used right now: the engine's own sentence, as
+ * given ("the road to this site is closed"). Null when it can be used. An
+ * engine that sends only the code gets the code spelled out.
+ */
+export function blockedWords(o: Pick<SourcingOption, 'blocked' | 'blocked_reason'>): string | null {
+  if (typeof o.blocked_reason === 'string' && o.blocked_reason !== '') return o.blocked_reason;
+  if (o.blocked === null || o.blocked === undefined) return null;
+  return String(o.blocked).replace(/_/g, ' ');
 }
+
+/** True when every way to supply the tank has been taken away by a closed route. */
+export const cutOff = (t: Pick<SourcingTank, 'options' | 'route_closed'>) =>
+  (t.route_closed ?? 0) > 0 && (t.route_closed ?? 0) >= t.options;
 
 /**
  * Whether a delivery would beat the tank running dry. The stricter test:
@@ -80,12 +87,47 @@ export function inTime(o: Pick<SourcingOption, 'door_to_door_h'>, coverH: number
 
 const usd = (v: number) => `$${Math.round(v).toLocaleString('en-US')}`;
 
-/** What makes up the delivered price of a tonne, as one line. */
-export function priceParts(o: Pick<SourcingOption, 'ask_usd_t' | 'freight_usd_t' | 'time_usd_t' | 'switch_usd_t'>): string {
-  const parts = [`${usd(o.ask_usd_t)} asked`, `${usd(o.freight_usd_t)} freight`];
-  if (o.switch_usd_t >= 0.5) parts.push(`${usd(o.switch_usd_t)} for switching supplier`);
-  if (o.time_usd_t >= 0.5) parts.push(`${usd(o.time_usd_t)} for the wait`);
-  return parts.join(' + ');
+/** A price in whole dollars per tonne, as paid: the product, the freight, and the two together. */
+export interface CashPrice {
+  product: number;
+  freight: number;
+  delivered: number;
+}
+
+/**
+ * What a tonne actually costs: the price the order is booked at, plus
+ * freight. Each part is rounded to the dollar and the total is the sum of
+ * the rounded parts, so the line never reads "$922 + $76 = $999". Values are
+ * first taken at two decimals, the precision the engine lists options at,
+ * so a listed option and the booking it leads to round the same way.
+ */
+export function cashPrice(productUsdT: number, freightUsdT: number): CashPrice {
+  const dollars = (v: number) => Math.round(Math.round(v * 100) / 100);
+  const product = dollars(productUsdT);
+  const freight = dollars(freightUsdT);
+  return { product, freight, delivered: product + freight };
+}
+
+/** The cash price of a listed option. */
+export const optionCash = (o: Pick<SourcingOption, 'price_usd_t' | 'freight_usd_t'>): CashPrice =>
+  cashPrice(o.price_usd_t, o.freight_usd_t);
+
+/** "$922 /t for the product + $76 freight = $998 /t delivered" */
+export function cashWords(p: CashPrice): string {
+  return `${usd(p.product)} /t for the product + ${usd(p.freight)} freight = ${usd(p.delivered)} /t delivered`;
+}
+
+/**
+ * What the buyer adds on top when ranking an option that is not money paid:
+ * a charge for the wait when stock is short, and one for switching away
+ * from the usual supplier. Null when it adds neither.
+ */
+export function weighedWords(o: Pick<SourcingOption, 'time_usd_t' | 'switch_usd_t'>): string | null {
+  const parts: string[] = [];
+  if (o.time_usd_t >= 0.5) parts.push(`${usd(o.time_usd_t)} /t for the wait`);
+  if (o.switch_usd_t >= 0.5) parts.push(`${usd(o.switch_usd_t)} /t for switching supplier`);
+  if (parts.length === 0) return null;
+  return `When choosing, this plant counts an extra ${parts.join(' and ')} (not money paid).`;
 }
 
 /** "Styrenics has 3.0 days of benzene; its usual supplier, Steam cracker (flex), is shut down." */
@@ -137,24 +179,27 @@ export function orderCommand(tank: { site: string; material: string }, o: Pick<S
   return { type: 'place_order', site: tank.site, material: tank.material, seller: o.seller, cls: o.cls, tonnes: o.lot_t };
 }
 
-/** "25 t of benzene from Refinery by tank truck, $976/t, due D11 07:45" */
-export function orderBookedWords(order: NonNullable<PlaceOrderReply['order']>, sellerName: string, fmtWhen: (tick: number) => string): string {
+/**
+ * "25 t of benzene from Refinery by tank truck: $976 /t for the product +
+ * $54 freight = $1,030 /t delivered, about 9.8 h door to door" — the same
+ * money, in the same words, as the option's row. `doorToDoorH` is the
+ * option's own estimate; the reply's `etaTick` is not used, because it
+ * counts only the loaded drive from the moment of booking.
+ */
+export function orderBookedWords(order: NonNullable<PlaceOrderReply['order']>, sellerName: string, doorToDoorH?: number): string {
   const t = order.tonnes >= 100 ? Math.round(order.tonnes).toLocaleString('en-US') : String(Math.round(order.tonnes * 10) / 10);
-  return `${t} t of ${materialName(order.material)} from ${sellerName} by ${vehicleWords(order.cls)}, ${usd(order.priceUsdT)}/t, due ${fmtWhen(order.etaTick)}`;
+  const money = order.freightUsd === undefined || !(order.tonnes > 0)
+    ? `${usd(cashPrice(order.priceUsdT, 0).product)} /t for the product`
+    : cashWords(cashPrice(order.priceUsdT, order.freightUsd / order.tonnes));
+  const trip = doorToDoorH === undefined || !Number.isFinite(doorToDoorH) ? '' : `, about ${fmtTrip(doorToDoorH)} door to door`;
+  return `${t} t of ${materialName(order.material)} from ${sellerName} by ${vehicleWords(order.cls)}: ${money}${trip}`;
 }
 
-/** Why the engine refused an order, as a sentence. */
+/** Why the engine refused an order: its own sentence, as a sentence. */
 export function orderRefusedWords(reply: PlaceOrderReply): string {
   const raw = (reply.error ?? '').replace(/^place_order:\s*/, '').trim();
-  if (raw !== '') return raw.charAt(0).toUpperCase() + raw.slice(1) + (/[.!?]$/.test(raw) ? '' : '.');
-  switch (reply.blocked) {
-    case 'seller_short': return 'The supplier does not have a load to spare.';
-    case 'no_vehicles': return 'No vehicle of that type can take it.';
-    case 'unreachable': return 'There is no way through for that vehicle.';
-    case 'export_fill': return 'The supplier keeps that stock for its own customers.';
-    case 'no_room': return 'The tank has no room for another load.';
-    default: return 'The order was not accepted.';
-  }
+  if (raw === '') return 'The order was not accepted.';
+  return raw.charAt(0).toUpperCase() + raw.slice(1) + (/[.!?]$/.test(raw) ? '' : '.');
 }
 
 /** Label of a tank in the list: "Benzene", with the site it belongs to. */

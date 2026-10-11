@@ -6,8 +6,8 @@ import type { SourcingDetail, SourcingOption, SourcingTank } from '../engine/api
 import { SupplyDetail } from './EconomySupply';
 import { ECONOMY_WINDOW_ID, openSupplyOptions, useEconomyView } from './economyView';
 import {
-  blockedWords, fmtCover, fmtTrip, inTime, nextPassWords, orderBookedWords, orderCommand, orderRefusedWords,
-  priceParts, sortByCover, stateWords, supplierDown, tankHeadline, vehicleWords,
+  blockedWords, cashPrice, cashWords, cutOff, fmtCover, fmtTrip, inTime, nextPassWords, optionCash, orderBookedWords, orderCommand,
+  orderRefusedWords, sortByCover, stateWords, supplierDown, tankHeadline, vehicleWords, weighedWords,
 } from './supplyData';
 import { useWindows } from './windows';
 
@@ -36,7 +36,7 @@ const detail: SourcingDetail = {
   options: [
     option({}),
     option({ seller: 'CRACKER_FLEX', seller_index: 7, seller_name: 'Steam cracker (flex)', seller_state: 'shut_down', km: 218.09, door_to_door_h: 9.46, landed_usd_t: 1160.89, usual: true }),
-    option({ seller: 'CRACKER_ETHANE', seller_index: 6, seller_name: 'Steam cracker (ethane)', km: 293.31, door_to_door_h: 80, free_t: 12, landed_usd_t: 1188.02, blocked: 'seller_short', feasible_now: false }),
+    option({ seller: 'CRACKER_ETHANE', seller_index: 6, seller_name: 'Steam cracker (ethane)', km: 293.31, door_to_door_h: 80, free_t: 12, landed_usd_t: 1188.02, blocked: 'seller_short', blocked_reason: 'the seller does not have that much free stock', feasible_now: false }),
   ],
 };
 
@@ -78,14 +78,47 @@ describe('words', () => {
     expect(stateWords('shut_down')).toBe('shut down');
     expect(stateWords('held')).toBe('held at its lowest rate');
     expect(blockedWords(option({}))).toBeNull();
-    expect(blockedWords(option({ blocked: 'no_vehicles', cls: 'BARGE_TANK' }))).toBe('no tank barge can get there');
-    expect(blockedWords(option({ blocked: 'seller_short' }))).toBe('not enough in its tank for one tank truck load');
-    expect(blockedWords(option({ blocked: 'unreachable', cls: 'SHIP_TANK' }))).toBe('no way through by tanker');
+    // the engine's own sentence, as given
+    expect(blockedWords(option({ blocked: 'route_closed', blocked_reason: 'the road to this site is closed' }))).toBe('the road to this site is closed');
+    expect(blockedWords(option({ blocked: 'seller_short', blocked_reason: 'the seller does not have that much free stock' }))).toBe('the seller does not have that much free stock');
+    expect(blockedWords(option({ blocked: null, blocked_reason: null }))).toBeNull();
+    // an engine that sends only the code: the code, spelled out
+    expect(blockedWords(option({ blocked: 'seller_short' }))).toBe('seller short');
+    // a tank is cut off when a closed route has taken every option away
+    expect(cutOff(tank({ options: 2, route_closed: 2 }))).toBe(true);
+    expect(cutOff(tank({ options: 2, route_closed: 1 }))).toBe(false);
+    expect(cutOff(tank({ options: 0, route_closed: 0 }))).toBe(false);
+    expect(cutOff(tank({ options: 3 }))).toBe(false);
   });
 
-  it('itemises the delivered price', () => {
-    expect(priceParts(option({}))).toBe('$1,058 asked + $54 freight + $45 for switching supplier');
-    expect(priceParts(option({ switch_usd_t: 0, time_usd_t: 12.2 }))).toBe('$1,058 asked + $54 freight + $12 for the wait');
+  it("prices a tonne as it will be paid for: the booked price plus freight, never the asking price or the ranking figure", () => {
+    // booked at 978.89 with 54.04 freight; asked 1,057.78 and ranked at 1,156.82, neither of which is paid
+    expect(optionCash(option({}))).toEqual({ product: 979, freight: 54, delivered: 1033 });
+    expect(cashWords(optionCash(option({})))).toBe('$979 /t for the product + $54 freight = $1,033 /t delivered');
+    expect(cashWords(optionCash(option({})))).not.toMatch(/asked|1,058|1,157/);
+  });
+
+  it("shows parts that add up to the total shown, whatever the cents", () => {
+    // 921.5 + 76.5 is 998.0, but the parts read $922 and $77: the total shown is their sum
+    expect(cashPrice(921.5, 76.5)).toEqual({ product: 922, freight: 77, delivered: 999 });
+    for (const [a, b] of [[921.5, 76.5], [483.28, 10.59], [48.59, 7.6], [0.49, 0.49], [1057.78, 54.04]]) {
+      const p = cashPrice(a, b);
+      expect(p.delivered).toBe(p.product + p.freight);
+    }
+    // a booking's full-precision figures round like the two-decimal figures the option was listed with
+    expect(cashPrice(483.2812499999987, 211.87252180568473 / 20)).toEqual(cashPrice(483.28, 10.59));
+    expect(cashPrice(935.0925200278614, 812.6306486215377 / 20)).toEqual(cashPrice(935.09, 40.63));
+  });
+
+  it("says what the plant weighs besides money only when it weighs something, and never as a price", () => {
+    expect(weighedWords(option({ switch_usd_t: 0, time_usd_t: 0 }))).toBeNull();
+    expect(weighedWords(option({ switch_usd_t: 0.2, time_usd_t: 0.4 }))).toBeNull();
+    expect(weighedWords(option({ switch_usd_t: 0, time_usd_t: 12.2 })))
+      .toBe('When choosing, this plant counts an extra $12 /t for the wait (not money paid).');
+    expect(weighedWords(option({})))
+      .toBe('When choosing, this plant counts an extra $45 /t for switching supplier (not money paid).');
+    expect(weighedWords(option({ time_usd_t: 12.2 })))
+      .toBe('When choosing, this plant counts an extra $12 /t for the wait and $45 /t for switching supplier (not money paid).');
   });
 
   it('sums a tank up in one sentence, and what the next ordering round will do', () => {
@@ -108,20 +141,36 @@ describe('SupplyDetail', () => {
 
   it('lists every option with its vehicle, distance, timing, spare stock and delivered price', () => {
     expect(html.match(/data-testid="supply-option"/g)).toHaveLength(3);
-    expect(text).toContain('3 ways to supply it, cheapest delivered first');
-    expect(text).toMatch(/Refinery .*\$1,157 \/t/);
+    expect(text).toContain('3 ways to supply it');
+    expect(text).not.toContain('cheapest');
+    // said once, above the list: why it is not sorted by price
+    expect(text.match(/Listed in the order this plant would choose: it also weighs how long the trip takes and whether it knows the supplier\./g)).toHaveLength(1);
+    expect(text.indexOf('Listed in the order')).toBeLessThan(text.indexOf('by tank truck'));
+    // the headline figure is what a tonne will cost: booked price + freight
+    expect(html.match(/data-testid="supply-option-price"[^>]*>\$([\d,]+)/)?.[1]).toBe('1,033');
+    expect(text).not.toMatch(/1,157|1,161|1,188/); // the ranking figure is not a price and is not shown
     expect(text).toContain('by tank truck');
     expect(text).toContain('540 km');
     expect(text).toContain('9.8 h door to door');
     expect(text).toContain('arrives in time');
     expect(text).toContain('can spare 2,269 t');
-    expect(text).toContain('$1,058 asked + $54 freight + $45 for switching supplier');
+    expect(text).toContain('$979 /t for the product + $54 freight = $1,033 /t delivered');
+    expect(text).not.toMatch(/asked|\$1,058/);
+    expect(text).toContain('When choosing, this plant counts an extra $45 /t for switching supplier (not money paid).');
+  });
+
+  it("shows no switching or waiting term on a row where the plant weighs neither", () => {
+    const plain = { ...detail, options: [option({ switch_usd_t: 0, time_usd_t: 0 })] };
+    const out = renderToStaticMarkup(<SupplyDetail detail={plain} presetOf={() => 'REFINERY'} onSupplier={() => undefined} />);
+    expect(out).toContain('$979 /t for the product + $54 freight = $1,033 /t delivered');
+    expect(out).not.toMatch(/switching|for the wait|When choosing/);
+    expect(out).toContain('1 way to supply it');
   });
 
   it('marks the usual supplier, a supplier that is down, lateness and what blocks an option', () => {
     expect(text).toMatch(/Steam cracker \(flex\) usual shut down/);
     expect(text).toContain('too late by 7.4 h');
-    expect(text).toContain('Cannot be used now: not enough in its tank for one tank truck load.');
+    expect(text).toContain('Cannot be used now: the seller does not have that much free stock.');
   });
 });
 
@@ -135,9 +184,18 @@ describe('ordering by hand', () => {
   });
 
   it('says what was booked, or why it was not', () => {
-    expect(orderBookedWords(order, 'Refinery', (t) => `tick ${t}`)).toBe('25 t of benzene from Refinery by tank truck, $976/t, due tick 991');
+    // the same money, in the same words, as the row it was ordered from: 975.87 + 1,351.02 / 25
+    expect(orderBookedWords(order, 'Refinery', 9.77))
+      .toBe('25 t of benzene from Refinery by tank truck: $976 /t for the product + $54 freight = $1,030 /t delivered, about 9.8 h door to door');
+    expect(orderBookedWords(order, 'Refinery')).toContain(cashWords(cashPrice(order.priceUsdT, order.freightUsd / order.tonnes)));
+    expect(orderBookedWords(order, 'Refinery')).not.toMatch(/due|door to door/);
+    expect(orderBookedWords({ ...order, freightUsd: undefined }, 'Refinery')).toBe('25 t of benzene from Refinery by tank truck: $976 /t for the product');
+    // an option and the booking it leads to read the same, to the dollar
+    const listed = option({ price_usd_t: 975.87, freight_usd_t: 54.04 });
+    expect(orderBookedWords(order, 'Refinery')).toContain(cashWords(optionCash(listed)));
     expect(orderRefusedWords({ ok: false, error: 'place_order: the seller has only 12 t free', blocked: 'seller_short' })).toBe('The seller has only 12 t free.');
-    expect(orderRefusedWords({ ok: false, blocked: 'no_room' })).toBe('The tank has no room for another load.');
+    expect(orderRefusedWords({ ok: false, error: 'place_order: the road to this site is closed', blocked: 'route_closed' })).toBe('The road to this site is closed.');
+    expect(orderRefusedWords({ ok: false, blocked: 'no_room' })).toBe('The order was not accepted.');
     expect(orderRefusedWords({ ok: false })).toBe('The order was not accepted.');
   });
 
