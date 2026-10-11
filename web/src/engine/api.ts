@@ -132,8 +132,9 @@ export interface EconomyReply {
   plants: {
     site: string; site_index: number; name: string; process: string; process_name: string; index: number;
     designRateTph: number; rateMin: number[]; rateMean: number[]; rateMax: number[];
-    /** lowest rate the process can hold, as a share of design, when the engine reports it */
+    /** lowest rate the process can hold, as a share of design; 0 for a field or a mine */
     turndown?: number;
+    boundary?: string;
   }[];
 }
 

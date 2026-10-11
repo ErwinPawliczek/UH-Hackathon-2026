@@ -121,6 +121,42 @@ export function nextPassWords(d: SourcingDetail): string {
   return `The next ordering round will book ${parts.join(' and ')}.`;
 }
 
+/** The engine's answer to a place_order command. */
+export interface PlaceOrderReply {
+  ok?: boolean;
+  error?: string;
+  blocked?: string;
+  order?: {
+    id: number; tonnes: number; requestedTonnes?: number; material: string; seller: string; site: string; cls: string;
+    priceUsdT: number; freightUsd?: number; km?: number; etaTick: number;
+  };
+}
+
+/** The place_order command for one vehicle load of an option. */
+export function orderCommand(tank: { site: string; material: string }, o: Pick<SourcingOption, 'seller' | 'cls' | 'lot_t'>): Record<string, unknown> {
+  return { type: 'place_order', site: tank.site, material: tank.material, seller: o.seller, cls: o.cls, tonnes: o.lot_t };
+}
+
+/** "25 t of benzene from Refinery by tank truck, $976/t, due D11 07:45" */
+export function orderBookedWords(order: NonNullable<PlaceOrderReply['order']>, sellerName: string, fmtWhen: (tick: number) => string): string {
+  const t = order.tonnes >= 100 ? Math.round(order.tonnes).toLocaleString('en-US') : String(Math.round(order.tonnes * 10) / 10);
+  return `${t} t of ${materialName(order.material)} from ${sellerName} by ${vehicleWords(order.cls)}, ${usd(order.priceUsdT)}/t, due ${fmtWhen(order.etaTick)}`;
+}
+
+/** Why the engine refused an order, as a sentence. */
+export function orderRefusedWords(reply: PlaceOrderReply): string {
+  const raw = (reply.error ?? '').replace(/^place_order:\s*/, '').trim();
+  if (raw !== '') return raw.charAt(0).toUpperCase() + raw.slice(1) + (/[.!?]$/.test(raw) ? '' : '.');
+  switch (reply.blocked) {
+    case 'seller_short': return 'The supplier does not have a load to spare.';
+    case 'no_vehicles': return 'No vehicle of that type can take it.';
+    case 'unreachable': return 'There is no way through for that vehicle.';
+    case 'export_fill': return 'The supplier keeps that stock for its own customers.';
+    case 'no_room': return 'The tank has no room for another load.';
+    default: return 'The order was not accepted.';
+  }
+}
+
 /** Label of a tank in the list: "Benzene", with the site it belongs to. */
 export const tankLabel = (t: Pick<SourcingTank, 'material' | 'name'>) => ({ material: materialTitle(t.material), site: t.name });
 
@@ -142,19 +178,19 @@ function useRefreshKey(): string {
 }
 
 /** Every buying tank, refreshed at most once per simulated hour while the tab is open. */
-export function useSourcingList(open: boolean): Polled<SourcingList> {
+export function useSourcingList(open: boolean, nonce = 0): Polled<SourcingList> {
   const key = useRefreshKey();
-  return useSessionData(open, key, (backend, id) => {
+  return useSessionData(open, `${key}|${nonce}`, (backend, id) => {
     if (backend.sourcing === undefined) return Promise.reject(new Error('This view needs the hosted engine.'));
     return backend.sourcing(id);
   });
 }
 
 /** One tank and its supply options, refreshed on the same rhythm; nothing is fetched until a tank is chosen. */
-export function useSourcingDetail(open: boolean, site: string | null, material: string | null): Polled<SourcingDetail> {
+export function useSourcingDetail(open: boolean, site: string | null, material: string | null, nonce = 0): Polled<SourcingDetail> {
   const key = useRefreshKey();
   const ready = open && site !== null && material !== null;
-  return useSessionData(ready, `${key}|${site}|${material}`, (backend, id) => {
+  return useSessionData(ready, `${key}|${site}|${material}|${nonce}`, (backend, id) => {
     if (backend.sourcingTank === undefined || site === null || material === null) {
       return Promise.reject(new Error('This view needs the hosted engine.'));
     }

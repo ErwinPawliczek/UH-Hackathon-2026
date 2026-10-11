@@ -101,9 +101,9 @@ const reply: EconomyReply = {
   ],
   totals: { spendUsd: [1, 2, 3], freightUsd: [1, 1, 1], energyUsd: [0, 0, 0], unmetUsd: [0, 0, 5], unmetT: [0, 0, 1], demandT: [10, 10, 10], service: [1, 1, 0.9], shutdownH: [0, 24, 6] },
   plants: [
-    { site: 'REFINERY', site_index: 5, name: 'Refinery', process: 'FCC', process_name: 'Fluid catalytic cracking', index: 7, designRateTph: 80, rateMin: [1, 0, 0.5], rateMean: [1, 0, 0.55], rateMax: [1, 0, 0.6] },
-    { site: 'REFINERY', site_index: 5, name: 'Refinery', process: 'CRUDE_DISTILLATION', process_name: 'Crude distillation', index: 5, designRateTph: 321, rateMin: [1, 1, 1], rateMean: [1, 1, 1], rateMax: [1, 1, 1] },
-    { site: 'OIL_FIELD', site_index: 0, name: 'Oil field', process: 'OIL_PRODUCTION', process_name: 'Oil wellhead and gathering', index: 0, designRateTph: 165, rateMin: [0.9, 0.9, 0.2], rateMean: [0.94, 0.94, 0.3], rateMax: [1, 1, 0.4] },
+    { site: 'REFINERY', site_index: 5, name: 'Refinery', process: 'FCC', process_name: 'Fluid catalytic cracking', index: 7, designRateTph: 80, turndown: 0.6, rateMin: [1, 0, 0.5], rateMean: [1, 0, 0.55], rateMax: [1, 0, 0.6] },
+    { site: 'REFINERY', site_index: 5, name: 'Refinery', process: 'CRUDE_DISTILLATION', process_name: 'Crude distillation', index: 5, designRateTph: 321, turndown: 0.6, rateMin: [1, 1, 1], rateMean: [1, 1, 1], rateMax: [1, 1, 1] },
+    { site: 'OIL_FIELD', site_index: 0, name: 'Oil field', process: 'OIL_PRODUCTION', process_name: 'Oil wellhead and gathering', index: 0, designRateTph: 165, turndown: 0, rateMin: [0.9, 0.9, 0.2], rateMean: [0.94, 0.94, 0.3], rateMax: [1, 1, 0.4] },
   ],
 };
 
