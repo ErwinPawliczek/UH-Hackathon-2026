@@ -96,7 +96,15 @@ export function roomSource(code: string): RoomSource {
       const snap = decode(await res.arrayBuffer());
       return lastTick !== null && Number(snap.tick) === lastTick ? null : snap;
     },
-    scores: () => json<RoomScores>(`${base}/scores`),
+    // The server ranks all sites, customers included; a game ranks only the
+    // plants a player can run, so keep those and number them again.
+    async scores() {
+      const [all, room] = await Promise.all([json<RoomScores>(`${base}/scores`), json<RoomInfo>(base)]);
+      const playable = new Set(room.sites.filter((s) => s.playable).map((s) => s.index));
+      const rows = all.scores.filter((r) => playable.has(r.site)).sort((a, b) => b.profitUsd - a.profitUsd);
+      rows.forEach((r, i) => { r.rank = i + 1; });
+      return { ...all, scores: rows };
+    },
     host: (hostToken, action) => json(`${base}/host`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ hostToken, ...action }) }),
     join: (name) => json(`${base}/join`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ name }) }),
     claim: (token, site) => json(`${base}/claim`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ token, site }) }),
