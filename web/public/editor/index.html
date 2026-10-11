@@ -254,7 +254,7 @@ const NET_MODES = ['road','river','sea'], CARRY = {road:'T',river:'B',sea:'S'};
 const EDGE = 60, SNAP = 12, W_KM = 600, H_KM = 400, CELL = 10, COLS = W_KM/CELL, ROWS = H_KM/CELL;
 const KEY = 'petrogrid-layout-v2', RUN_KEY = 'petrogrid-run-custom';
 const HINTS = {
-  select:'Drag a site to move it. Click a road, lane or pipeline to pick it, then drag its points. Double-click a pipeline to add a bend. Right-click to erase or remove.',
+  select:'Drag a site to move it. Click a road, lane or pipeline to pick it, then drag its points. Double-click a pipeline to add a bend. Right-click to erase or remove. Ctrl+Z undoes.',
   road:'Press, drag and release to lay one straight road. Lay them end to end for bends. Ends snap to sites, to other ends, and onto the middle of a road.',
   river:'Press, drag and release to lay a river lane for barges, on water. Ends snap to sites within reach and to other river lanes.',
   sea:'Press, drag and release to lay a sea lane for ships, on water. Ends snap to sites within reach and to other sea lanes.',
@@ -296,7 +296,7 @@ function conform(obj){
     return {from:d.from, to:d.to, mode:'pipeline', material:d.material, points:[at(d.from), ...mid, at(d.to)]};});
   return {layout:out, kept, extraSites:Math.max(0, theirs.size - kept), extraPipes:[...pipes.keys()].filter(k => !DEFAULT.connections.some(d => connKey(d) === k)).length};
 }
-function load(obj, quiet){const r = conform(obj); S = r.layout; sel = null; netDraft = null; drag = null; ring = null; refresh(true); if (!quiet) save(); queueCheck();
+function load(obj, quiet){const r = conform(obj); S = r.layout; sel = null; netDraft = null; drag = null; ring = null; refresh(true); if (!quiet) save(); remember(); queueCheck();
   if (!quiet && (r.kept < DEFAULT.sites.length || r.extraSites || r.extraPipes)) toast('This world keeps the 22 default sites and 9 pipelines: positions and bends were taken where they matched, the rest left as the default.');}
 function save(){try{localStorage.setItem(KEY, JSON.stringify(S));}catch(e){}}
 
@@ -356,8 +356,9 @@ function draw(){
   const wrong = new Set(((lastCheck && lastCheck.errors) || []).map(e => e.site).filter(id => id !== null && id !== undefined));
   for (const s of S.sites){const on = sel && sel.t === 'site' && sel.id === s.id, x = X(s.x), y = Y(s.y), bad = wrong.has(s.id) && checkedText === JSON.stringify(S);
     const t = s.name.toUpperCase(), w = ctx.measureText(t).width + s.name.length*1.2;
-    ctx.fillStyle = 'rgba(255,255,255,.88)'; ctx.fillRect(x+11, y-9, w+14, 18); ctx.strokeStyle = bad ? '#d1372f' : on ? '#1764d6' : '#e4e7ea'; ctx.lineWidth = 1; ctx.strokeRect(x+11.5, y-8.5, w+13, 17);
-    ctx.fillStyle = bad ? '#d1372f' : on ? '#1764d6' : '#5f656c'; if (ctx.letterSpacing !== undefined) ctx.letterSpacing = '1.2px'; ctx.fillText(t, x+19, y+.5); if (ctx.letterSpacing !== undefined) ctx.letterSpacing = '0px';
+    const lx = x+25+w+14 > r.width ? x-11-(w+14) : x+11;   /* to the left of the badge when it would run off the right edge */
+    ctx.fillStyle = 'rgba(255,255,255,.88)'; ctx.fillRect(lx, y-9, w+14, 18); ctx.strokeStyle = bad ? '#d1372f' : on ? '#1764d6' : '#e4e7ea'; ctx.lineWidth = 1; ctx.strokeRect(lx+.5, y-8.5, w+13, 17);
+    ctx.fillStyle = bad ? '#d1372f' : on ? '#1764d6' : '#5f656c'; if (ctx.letterSpacing !== undefined) ctx.letterSpacing = '1.2px'; ctx.fillText(t, lx+(lx < x ? 6 : 8), y+.5); if (ctx.letterSpacing !== undefined) ctx.letterSpacing = '0px';
     badge(s.preset, x, y, on, bad);}
   if (ring){const s = siteById(ring.id); if (s){ctx.beginPath(); ctx.arc(X(s.x), Y(s.y), 24, 0, 7); ctx.lineWidth = 3; ctx.strokeStyle = '#d1372f'; ctx.stroke();}}
   let roadKm = 0; for (const n of S.network) if (n.mode === 'road') for (let i = 1; i < n.points.length; i++) roadKm += Math.hypot(n.points[i][0]-n.points[i-1][0], n.points[i][1]-n.points[i-1][1]);
@@ -414,7 +415,9 @@ cv.oncontextmenu = e => {e.preventDefault(); netDraft = null; drag = null; const
   const r = cv.getBoundingClientRect(); menu.style.display = 'block'; menu.style.left = Math.min(e.clientX-r.left, r.width-230)+'px'; menu.style.top = Math.min(e.clientY-r.top, r.height-items.length*34-10)+'px';};
 window.addEventListener('mousedown', e => {if (!menu.contains(e.target)) hideMenu();}, true);
 const KEYS = {v:'select', r:'road', b:'river', s:'sea', w:'water', e:'land'};
-window.onkeydown = e => {if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || e.metaKey || e.ctrlKey) return; const k = e.key.toLowerCase();
+window.onkeydown = e => {if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return; const k = e.key.toLowerCase();
+  if ((e.metaKey || e.ctrlKey) && k === 'z'){undo(); e.preventDefault(); return;}
+  if (e.metaKey || e.ctrlKey) return;
   if (k === 'escape'){netDraft = null; sel = null; ring = null; refresh(true);}
   else if (k === 'delete' || k === 'backspace'){const c = selLine();
     if (c && sel.h !== undefined) removeBend(c, sel.h);
@@ -449,7 +452,11 @@ function localProblems(acc){const errors = [], set = waterSet();
 function tieSites(){for (const s of S.sites) for (const mode of NET_MODES){let near = false, hit = null, bd = SNAP;
   for (const n of S.network){if (n.mode !== mode) continue; if (n.points.some(q => Math.hypot(q[0]-s.x, q[1]-s.y) <= SNAP)){near = true; break;} const h = segHit(n.points, [s.x, s.y]); if (h && h.d < bd){bd = h.d; hit = {n, h};}}
   if (!near && hit) hit.n.points.splice(hit.h.k, 0, [hit.h.pt[0], hit.h.pt[1]]);}}
-function refresh(noEdit){if (!noEdit){tieSites(); save();} draw(); const acc = access(S);
+/* undo: the layout as text after each edit; Ctrl+Z steps back */
+const history = []; let histAt = '';
+function remember(){const now = JSON.stringify(S); if (now === histAt) return; if (histAt) history.push(histAt); if (history.length > 80) history.shift(); histAt = now;}
+function undo(){if (!history.length){toast('Nothing to undo.'); return;} histAt = history.pop(); S = JSON.parse(histAt); sel = null; netDraft = null; drag = null; save(); refresh(true); queueCheck();}
+function refresh(noEdit){if (!noEdit){tieSites(); save(); remember();} draw(); const acc = access(S);
   const el = $('sel');
   if (!sel){el.innerHTML = '<p class="hint">Nothing selected. Click a site, a road, a lane or a pipeline.</p>';}
   else if (sel.t === 'site'){const s = siteById(sel.id), P = PRESETS[s.preset];
