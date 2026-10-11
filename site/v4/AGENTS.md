@@ -13,3 +13,6 @@
 - Keep the hexagonal scroll study in a dedicated SVG scene, with the exact source logo in a separate mark component and snapping geometry in a tested pure module; this keeps logo preservation independent of scroll behavior.
 - Apply scroll updates through requestAnimationFrame and use hysteresis for neighboring grid selection; animate only the brand's hop with an interruptible Web Animation, bypassed for reduced motion, so ordinary scrolling stays registered with the lattice.
 - Paint the lattice as a document-attached SVG pattern that scrolls natively, with the brand placed on the same sheet at its snap row's page position, and derive every hexagon dimension and wordmark offset from one grid-scale constant; native scrolling guarantees the grid visibly moves with zero lag and the brand only re-renders on a hop.
+
+- Keep QR-specific presentation isolated and follow QR_PAGE_CONTEXT.md; main-page changes must not alter the approved QR page.
+- Keep QR placement in the independent qr-layout module; this avoids coupling the transferable QR page to pitch content.
