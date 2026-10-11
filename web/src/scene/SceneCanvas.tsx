@@ -14,6 +14,7 @@ export function SceneCanvas() {
   const world = useSim((s) => s.world);
 
   const sceneRef = useRef<MapScene | null>(null);
+  const arriving = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('from') === 'build';
 
   // build/teardown the scene when the world changes
   useEffect(() => {
@@ -24,6 +25,7 @@ export function SceneCanvas() {
     // `?debug` exposes the scene to the console and to capture scripts, which
     // may also hand it a trip to draw (window.__petrogridTrip)
     const debug = new URLSearchParams(window.location.search).has('debug');
+    const fromBuild = new URLSearchParams(window.location.search).get('from') === 'build';
     if (debug) (window as unknown as { __petrogridScene?: MapScene }).__petrogridScene = scene;
 
     const ro = new ResizeObserver(() => {
@@ -34,6 +36,8 @@ export function SceneCanvas() {
       scene.resize(canvas.parentElement.clientWidth, canvas.parentElement.clientHeight);
       ro.observe(canvas.parentElement);
     }
+    // arriving from the map builder's build animation (`?from=build`): the flat map stands up into the world
+    if (fromBuild) scene.playIntro();
 
     let raf = 0;
     let last = performance.now();
@@ -103,6 +107,8 @@ export function SceneCanvas() {
   return (
     <>
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-label="Simulation map" />
+      {/* from the build animation: the app fades in from the same paper white the drawing faded to */}
+      {arriving && <div className="build-arrival pointer-events-none fixed inset-0 z-[70] bg-white" aria-hidden="true" />}
       <div className="absolute bottom-4 right-4 z-10 flex gap-2">
       {/* plant names get big beside a zoomed-out map: names and icons, icons only, or nothing */}
       <button

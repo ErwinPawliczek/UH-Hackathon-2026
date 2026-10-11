@@ -56,6 +56,9 @@ const CONVOY_GAP_ROAD_KM = 5;
 const CONVOY_GAP_WATER_KM = 10;
 /** How far past the framed view the camera may pull back. */
 const ZOOM_OUT_LIMIT = 1.25;
+/** The build hand-over: how long the camera takes to stand the map up, and how near straight down it starts (radians). */
+const INTRO_MS = 2600;
+const INTRO_POLAR = 0.02;
 /** The framed map should fill this share of the free height; steeper looks to try when it does not (radians from vertical). */
 const FRAME_FILL = 0.74;
 const STEEPER_POLAR = [0.68, 0.62, 0.56, 0.5];
@@ -112,6 +115,8 @@ export class MapScene {
   /** False until the visitor moves the camera; until then resizes re-frame the map. */
   private userMoved = false;
   /** Viewport height at the last resize, and the camera distance that frames the whole map there. */
+  /** the camera's ease from top-down into the framed view, while it runs (see playIntro) */
+  private intro: { t0: number; ms: number; fromTarget: THREE.Vector3; toTarget: THREE.Vector3; fromDist: number; toDist: number; toPolar: number } | null = null;
   private viewHeight = 0;
   private framedDist = 0;
   private readonly ring: THREE.Mesh;
@@ -362,6 +367,55 @@ export class MapScene {
     if (this.viewHeight <= 0) return;
     this.userMoved = false;
     this.frameMap(this.viewHeight);
+  }
+
+  /**
+   * The hand-over from the map builder's build animation: start looking
+   * straight down at the whole map, as the flat drawing was seen, and ease
+   * into the framed view, so the drawing reads as standing up into the
+   * world. Runs once; the camera cannot be moved until it ends.
+   */
+  playIntro(durationMs = INTRO_MS): void {
+    if (this.viewHeight <= 0 || this.framedDist <= 0) return;
+    this.userMoved = false;
+    this.frameMap(this.viewHeight);
+    const w = this.world.wKm * SCALE;
+    const h = this.world.hKm * SCALE;
+    const to = this.camera.position.clone().sub(this.controls.target);
+    const half = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+    this.intro = {
+      t0: performance.now(),
+      ms: durationMs,
+      fromTarget: new THREE.Vector3(w / 2, 0, h / 2),
+      toTarget: this.controls.target.clone(),
+      // far enough, looking straight down, for the whole map with a margin
+      fromDist: Math.max((h * 1.2) / (2 * half), (w * 1.06) / (2 * half * this.camera.aspect)),
+      toDist: to.length(),
+      toPolar: Math.acos(to.y / to.length()),
+    };
+    this.controls.enabled = false;
+    this.stepIntro(performance.now());
+  }
+
+  /** Place the camera along the intro; true while it is still running. */
+  private stepIntro(now: number): boolean {
+    const it = this.intro;
+    if (it === null) return false;
+    const k = Math.min(1, (now - it.t0) / it.ms);
+    const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2; // ease in and out
+    const polar = INTRO_POLAR + (it.toPolar - INTRO_POLAR) * e;
+    const dist = it.fromDist + (it.toDist - it.fromDist) * e;
+    const target = it.fromTarget.clone().lerp(it.toTarget, e);
+    this.camera.position.set(target.x, target.y + Math.cos(polar) * dist, target.z + Math.sin(polar) * dist);
+    this.camera.lookAt(target);
+    this.controls.target.copy(target);
+    if (k >= 1) {
+      this.intro = null;
+      this.controls.enabled = true;
+      this.controls.update();
+      return false;
+    }
+    return true;
   }
 
   /** Keep the point the camera orbits on the map, so a pan cannot carry the map off the screen. */
@@ -743,7 +797,11 @@ export class MapScene {
     resizeFlowLines(this.flowLines, width, height);
     this.trip.resize(width, height);
     this.viewHeight = height;
-    if (!this.userMoved) this.frameMap(height);
+    if (this.intro !== null) {
+      // the viewport changed mid-intro: start it again for the new shape
+      this.frameMap(height);
+      this.playIntro(Math.max(400, this.intro.ms - (performance.now() - this.intro.t0)));
+    } else if (!this.userMoved) this.frameMap(height);
     else {
       // keep the zoom-out limit in step with the new viewport without moving the visitor's view
       const pos = this.camera.position.clone();
@@ -756,8 +814,10 @@ export class MapScene {
   }
 
   render(): void {
-    this.controls.update();
-    this.clampPan();
+    if (!this.stepIntro(performance.now())) {
+      this.controls.update();
+      this.clampPan();
+    }
     this.renderer.render(this.scene, this.camera);
     this.labels.update(
       this.camera,

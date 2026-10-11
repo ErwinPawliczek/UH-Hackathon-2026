@@ -467,3 +467,13 @@ h2 {
 :root[data-names='hidden'] .pipeline-labels {
   display: none !important;
 }
+
+/* Arriving from the map builder's build animation: white, then the world. */
+.build-arrival {
+  animation: build-arrival 1.1s ease-out 0.15s both;
+}
+
+@keyframes build-arrival {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
