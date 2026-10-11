@@ -234,6 +234,24 @@ std::string Sim::command(const std::string& json_cmd) {
     }
     const std::string& actor = rec_.actor_name;
 
+    // end_events: every running or queued disruption ends at the next tick
+    // (outages repair, routes reopen, shocks and weather stop). Units a
+    // player switched off by hand have no event and stay as they are.
+    if (type == "end_events") {
+      const uint64_t now = state_.tick + 1;
+      if (state_.hurricane_until > now) state_.hurricane_until = now;
+      if (state_.water_stop_until > now) state_.water_stop_until = now;
+      for (EventDef& def : state_.active) {
+        if (def.end_tick <= now) continue;
+        for (UnitState& us : state_.unit)
+          if (us.trains_down != 0 && us.back_at_tick == def.end_tick) us.back_at_tick = now;
+        def.end_tick = now;
+      }
+      state_.pending.clear();
+      logEvent(rec_, state_.tick, "events_ended", "", "", "Every running event was ended");
+      return R"({"ok":true})";
+    }
+
     if (type == "hurricane" || type == "water_restriction") {
       const bool storm = type == "hurricane";
       double hours = storm ? 72.0 : 120.0;

@@ -1050,7 +1050,7 @@ TEST_CASE("R1 room: create, join, claim, and the lobby state") {
   CHECK(state.at("players").empty());
   int playable = 0;
   for (const json& s : state.at("sites")) playable += s.at("playable").get<bool>() ? 1 : 0;
-  CHECK(playable == 13);  // 9 plants and 4 sources; customers, ports and the gas grid are not
+  CHECK(playable == 9);  // the 9 plants; sources need the host's switch, customers, ports and the gas grid never
 
   // The code is not case sensitive; an unknown one is a plain 404.
   std::string lower = code;

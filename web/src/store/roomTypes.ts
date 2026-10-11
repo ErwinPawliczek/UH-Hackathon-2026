@@ -28,6 +28,8 @@ export interface RoomInfo {
   tick: number;
   /** simulated hours per real second while running */
   speed: number;
+  /** whether fields and mines can be picked (the host's lobby switch); absent on older servers */
+  allowSources?: boolean;
   players: RoomPlayer[];
   sites: RoomSite[];
 }
@@ -59,6 +61,7 @@ export interface RoomScores {
 /** What the host may ask of a room (POST /api/room/{code}/host). */
 export type HostAction =
   | { action: 'start' | 'pause' | 'resume' | 'end' }
+  | { action: 'sources'; allow: boolean }
   | { action: 'speed'; speed: number }
   | { action: 'scenario'; command: Record<string, unknown> };
 
