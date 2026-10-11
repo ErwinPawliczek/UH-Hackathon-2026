@@ -403,6 +403,7 @@ export function PlayApp() {
   const roomError = useSim((s) => s.error);
   const events = useSim((s) => s.events);
   const leave = usePlay((s) => s.leave);
+  const ownDown = usePlay((s) => s.ownDown);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menu, setMenu] = useState<Menu>(null);
   const [seenHit, setSeenHit] = useState(-1);
@@ -448,7 +449,8 @@ export function PlayApp() {
 
   const mySite = me?.site ?? null;
   const playing = room !== null && room.phase !== 'lobby' && mySite !== null;
-  const hit = mySite === null ? undefined : [...events].reverse().find((e) => e.site === mySite && isHit(e.type));
+  // trouble at my plant that I did not cause myself
+  const hit = mySite === null ? undefined : [...events].reverse().find((e) => e.site === mySite && isHit(e.type) && !(ownDown.length > 0 && (e.type === 'unit_failed' || e.type === 'process_shutdown')));
   const banner = room?.phase === 'paused'
     ? 'Paused by the host'
     : room?.phase === 'ended'

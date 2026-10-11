@@ -29,6 +29,8 @@ export interface PlayState {
   /** when the server last confirmed a control change (performance.now clock), or null */
   confirmedAt: number | null;
   sending: boolean;
+  /** units the player took down themselves: their going down is not news to them */
+  ownDown: number[];
   open: (code: string, source: RoomSource) => void;
   join: (name: string) => Promise<void>;
   claim: (site: number | null) => Promise<void>;
@@ -82,7 +84,7 @@ export const usePlay = create<PlayState>()((set, get) => {
   };
 
   return {
-    code: null, source: null, seat: null, scores: [], profitTrend: [], error: null, pending: {}, confirmedAt: null, sending: false,
+    code: null, source: null, seat: null, scores: [], profitTrend: [], error: null, pending: {}, confirmedAt: null, sending: false, ownDown: [],
 
     open: (code, source) => {
       const seat = loadSeat(code);
@@ -137,7 +139,8 @@ export const usePlay = create<PlayState>()((set, get) => {
       set({ sending: true });
       try {
         const r = await source.play(seat.token, { action: 'unit', unit_index: unitIndex, down });
-        set(r.ok === false ? { error: r.error ?? 'The game did not accept that.' } : { confirmedAt: performance.now(), error: null });
+        if (r.ok === false) set({ error: r.error ?? 'The game did not accept that.' });
+        else set((s) => ({ confirmedAt: performance.now(), error: null, ownDown: down ? [...new Set([...s.ownDown, unitIndex])] : s.ownDown.filter((u) => u !== unitIndex) }));
       } catch (err) {
         set({ error: say(err) });
       } finally {
