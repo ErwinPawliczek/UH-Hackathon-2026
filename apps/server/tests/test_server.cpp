@@ -17,6 +17,7 @@
 #include <set>
 #include <map>
 #include <cctype>
+#include <sstream>
 #include <string>
 #include <thread>
 
@@ -663,6 +664,73 @@ TEST_CASE("world json: every unit and process stream has a plain name") {
   CHECK(names.at("AIR_O2") == "Air");
   CHECK(names.at("PE") == "Polyethylene");
   CHECK(names.at("CAUSTIC") == "Caustic soda");
+}
+
+TEST_CASE("map builder: check a layout, then run, rewind and inspect a session on it") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  std::ifstream in(std::string(CRX_TEST_LAYOUT_DIR) + "/erwin-world-v1.json");
+  REQUIRE(static_cast<bool>(in));
+  std::ostringstream buf;
+  buf << in.rdbuf();
+  json layout = json::parse(buf.str());
+  const auto post = [&cli](const std::string& path, const std::string& body) {
+    auto res = cli.Post(path, body, "application/json");
+    REQUIRE(res);
+    return *res;
+  };
+
+  // The default layout checks clean and its trial passes.
+  const auto ok = post("/api/worlds/check", json{{"layout", layout}}.dump());
+  CHECK(ok.status == 200);
+  const json good = json::parse(ok.body);
+  CHECK(good.at("ok") == true);
+  CHECK(good.at("errors").empty());
+  CHECK(good.at("summary").at("vehicles") == 82);
+  CHECK(good.at("trial").at("pass") == true);
+  CHECK(good.at("trial").at("days") == 30);
+  CHECK(good.at("trial").at("worst").at("service").get<double>() >= 0.9);
+
+  // A broken one is an answer, never a failure.
+  json broken = layout;
+  broken["sites"].erase(21);
+  const auto bad = post("/api/worlds/check", json{{"layout", broken}}.dump());
+  CHECK(bad.status == 200);
+  const json why = json::parse(bad.body);
+  CHECK(why.at("ok") == false);
+  CHECK(why.at("trial").is_null());
+  CHECK(why.at("errors")[0].at("text") == "Port terminal B (site 22) is missing from the layout");
+  CHECK(why.at("errors")[0].at("site") == 22);
+  CHECK(json::parse(post("/api/worlds/check", "not json").body).at("ok") == false);
+  CHECK(json::parse(post("/api/worlds/check", R"({"map":1})").body).at("ok") == false);
+  CHECK(post("/api/worlds/check", std::string(1100000, ' ')).status == 200);
+  CHECK(post("/api/sim", json{{"seed", 42}, {"world", "erwin-world-v1"}, {"layout", broken}}.dump())
+            .status == 400);
+
+  // A session on a redrawn map: step, command, rewind, and the read-only views.
+  for (json& s : layout["sites"])
+    if (s.at("id") == 19) s["name"] = "Paint works";
+  const std::string cfg = json{{"seed", 42}, {"world", "erwin-world-v1"}, {"layout", layout}}.dump();
+  const std::string id = createSession(cli, cfg);
+  const json world = json::parse(cli.Get("/api/sim/" + id + "/world")->body);
+  CHECK(world.at("sites")[18].at("name") == "Paint works");
+  post("/api/sim/" + id + "/step", R"({"ticks":480})");
+  post("/api/sim/" + id + "/command",
+       R"({"type":"unit_outage","site":"CRACKER_ETHANE","unit":"SC-CGC","trains":1,"duration_h":48})");
+  post("/api/sim/" + id + "/step", R"({"ticks":96})");
+  CHECK(post("/api/sim/" + id + "/forecast", R"({"days":5})").status == 200);
+  CHECK(cli.Get("/api/sim/" + id + "/economy")->status == 200);
+  CHECK(json::parse(cli.Get("/api/sim/" + id + "/sourcing")->body).at("tanks").size() == 20);
+  CHECK(cli.Get("/api/sim/" + id + "/vehicle?index=3")->status == 200);
+  CHECK(post("/api/sim/" + id + "/rewind", R"({"tick":500})").status == 200);
+  // The rewound run is the layout's run: same as a fresh one stepped there.
+  const std::string twin = createSession(cli, cfg);
+  post("/api/sim/" + twin + "/step", R"({"ticks":480})");
+  post("/api/sim/" + twin + "/command",
+       R"({"type":"unit_outage","site":"CRACKER_ETHANE","unit":"SC-CGC","trains":1,"duration_h":48})");
+  post("/api/sim/" + twin + "/step", R"({"ticks":20})");
+  CHECK(post("/api/sim/" + id + "/step", R"({"ticks":0})").body ==
+        post("/api/sim/" + twin + "/step", R"({"ticks":0})").body);
 }
 
 TEST_CASE("world json: fleet manifest without a fabricated shuttle schedule") {

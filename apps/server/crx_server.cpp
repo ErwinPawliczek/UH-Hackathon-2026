@@ -378,7 +378,32 @@ void registerRoutes(httplib::Server& svr, SessionRegistry& sessions, const std::
   // Route captures match on std::regex; `([^/]+)` is the session id.
   const std::string id = "([^/]+)";
 
+  // The map builder's check: {"layout": {...}, "world"?: name}. Always 200
+  // with {"ok", "errors", ...}; a bad layout is an answer, not a failure.
+  svr.Post("/api/worlds/check", [](const httplib::Request& req, httplib::Response& res) {
+    const auto problem = [&res](const std::string& text) {
+      sendJson(res, 200,
+               json::json{{"ok", false},
+                          {"errors", json::json::array({{{"site", nullptr}, {"mode", nullptr}, {"text", text}}})},
+                          {"warnings", json::json::array()},
+                          {"summary", nullptr},
+                          {"trial", nullptr}}
+                   .dump());
+    };
+    if (req.body.size() > 1024 * 1024 + 4096) return problem("The layout is too large (over 1 MB)");
+    const json::json body = json::json::parse(req.body, nullptr, false);
+    if (!body.is_object() || !body.contains("layout") || !body["layout"].is_object())
+      return problem("Send the map as {\"layout\": {...}}");
+    const std::string world = body.contains("world") && body["world"].is_string()
+                                  ? body["world"].get<std::string>() : "erwin-world-v1";
+    sendJson(res, 200, crx_check_layout(world.c_str(), body["layout"].dump().c_str()));
+  });
+
   svr.Post("/api/sim", [&sessions](const httplib::Request& req, httplib::Response& res) {
+    if (req.body.size() > 1024 * 1024 + 4096) {
+      sendJson(res, 400, jsonError("the config is too large (a layout may be at most 1 MB)"));
+      return;
+    }
     const auto result = sessions.create(req.body);
     switch (result.status) {
       case SessionRegistry::CreateStatus::kCreated:
