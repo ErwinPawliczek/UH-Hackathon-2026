@@ -593,6 +593,31 @@ void registerRoutes(httplib::Server& svr, SessionRegistry& sessions, const std::
             sendBinary(res, std::move(kpis));
           });
 
+  // One vehicle: where it is going, where from, and what it holds.
+  svr.Get("/api/sim/" + id + "/vehicle",
+          [&sessions](const httplib::Request& req, httplib::Response& res) {
+            bool ok = false;
+            const uint32_t index = parseU32(req.get_param_value("index"), &ok);
+            if (!ok) {
+              sendJson(res, 400, jsonError("query must be ?index=N"));
+              return;
+            }
+            std::string doc;
+            const bool found = sessions.withSession(req.matches[1].str(), [&](Session& s) {
+              const char* text = crx_vehicle(s.sim, index);
+              if (text != nullptr) doc = text;
+            });
+            if (!found) {
+              sendJson(res, 404, jsonError("unknown session"));
+              return;
+            }
+            if (doc.empty()) {
+              sendJson(res, 400, jsonError("no vehicle with that index"));
+              return;
+            }
+            sendJson(res, 200, std::move(doc));
+          });
+
   // Static front end: serve the built app from the same origin when present.
   std::error_code ec;
   const bool webBuilt = !webDir.empty() &&

@@ -20,6 +20,7 @@ add_library(crx_engine STATIC
   engine/src/sim/control.cpp
   engine/src/sim/dispatch.cpp
   engine/src/sim/events.cpp
+  engine/src/sim/inspect.cpp
   engine/src/sim/pipelines.cpp
   engine/src/sim/production.cpp
   engine/src/sim/procurement.cpp

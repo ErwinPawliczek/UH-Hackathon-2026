@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -260,6 +261,80 @@ TEST_CASE("forecast: with and without the disruptions, cost and countdown, sessi
   const std::string six = createSession(cli, R"({"seed":42})");
   post("/api/sim/" + six + "/step", R"({"ticks":200})");
   CHECK(post("/api/sim/" + six + "/forecast", R"({"days":10})").status == 200);
+}
+
+TEST_CASE("vehicle: where it is going, where from, and what it holds") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42})");
+  const auto get = [&](const std::string& query) {
+    auto res = cli.Get("/api/sim/" + id + "/vehicle" + query);
+    REQUIRE(res);
+    return *res;
+  };
+  const auto world = cli.Get("/api/sim/" + id + "/world");
+  REQUIRE(world);
+  const json sites = json::parse(world->body).at("sites");
+
+  // At rest: no order, no path.
+  const json parked = json::parse(get("?index=0").body);
+  CHECK(parked.at("status") == "idle");
+  CHECK(parked.at("cls") == "TRUCK_TANK");
+  CHECK(parked.at("capacityT") == 25);
+  CHECK(parked.at("order").is_null());
+  CHECK(parked.at("cargo").is_null());
+  CHECK(parked.at("legDestination").is_null());
+  CHECK(parked.at("path").empty());
+  CHECK(parked.at("at").at("site").is_number());
+
+  // Run until a truck is on the road with cargo aboard (the fuel-oil lane
+  // from the cracker to the port), an hour at a time.
+  json moving;
+  for (int hour = 0; hour < 24 * 30 && moving.is_null(); ++hour) {
+    REQUIRE(cli.Post("/api/sim/" + id + "/step", R"({"ticks":4})", "application/json"));
+    for (int v = 0; v < 2 && moving.is_null(); ++v) {
+      const json doc = json::parse(get("?index=" + std::to_string(v)).body);
+      if (doc.at("status") == "to_dropoff" && doc.at("path").size() >= 2) moving = doc;
+    }
+  }
+  REQUIRE(!moving.is_null());
+  const json& order = moving.at("order");
+  CHECK(order.at("material") == "FUEL_OIL");
+  CHECK(order.at("from").at("key") == "STEAM_CRACKER");
+  CHECK(order.at("to").at("key") == "PORT_TERMINAL");
+  CHECK(order.at("tonnes").get<double>() > 0.0);
+  CHECK(order.at("tonnes").get<double>() <= 25.0);
+  CHECK(order.at("etaTick").get<uint64_t>() >= order.at("createdTick").get<uint64_t>());
+  CHECK(order.at("priceUsdT").get<double>() > 0.0);
+  CHECK(order.at("freightUsd").get<double>() > 0.0);
+  // Loaded and on its way: the cargo is the order's lot, bound for the buyer.
+  CHECK(moving.at("cargo").at("material") == "FUEL_OIL");
+  CHECK(moving.at("cargo").at("tonnes").get<double>() ==
+        doctest::Approx(order.at("tonnes").get<double>()));
+  CHECK(moving.at("legDestination").at("key") == "PORT_TERMINAL");
+
+  // The path starts where the vehicle is, ends at the destination site, and
+  // its length is the distance left.
+  const json& path = moving.at("path");
+  CHECK(path.front() == moving.at("position"));
+  const json& port = sites.at(order.at("to").at("site").get<size_t>());
+  CHECK(path.back().at(0).get<double>() == doctest::Approx(port.at("x").get<double>()));
+  CHECK(path.back().at(1).get<double>() == doctest::Approx(port.at("y").get<double>()));
+  double length = 0;
+  for (size_t i = 1; i < path.size(); ++i)
+    length += std::hypot(path[i].at(0).get<double>() - path[i - 1].at(0).get<double>(),
+                         path[i].at(1).get<double>() - path[i - 1].at(1).get<double>());
+  CHECK(length == doctest::Approx(moving.at("remainingKm").get<double>()).epsilon(1e-6));
+  CHECK(moving.at("remainingKm").get<double>() > 0.0);
+  CHECK(moving.at("remainingKm").get<double>() <= moving.at("tripKm").get<double>() + 1e-9);
+
+  // Refusals.
+  CHECK(get("").status == 400);
+  CHECK(get("?index=abc").status == 400);
+  CHECK(get("?index=2").status == 400);  // the six-site world has two trucks
+  auto unknown = cli.Get("/api/sim/nope/vehicle?index=0");
+  REQUIRE(unknown);
+  CHECK(unknown->status == 404);
 }
 
 TEST_CASE("world json: fleet manifest without a fabricated shuttle schedule") {

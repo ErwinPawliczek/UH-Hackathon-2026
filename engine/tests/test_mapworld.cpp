@@ -20,6 +20,7 @@
 #include <doctest/doctest.h>
 
 #include "sim/dispatch.h"
+#include "sim/inspect.h"
 #include "sim/routes.h"
 #include "sim/sim.h"
 #include "sim/window.h"
@@ -520,4 +521,66 @@ TEST_CASE("M9: a window of a run accounts for exactly that stretch") {
   bool saw_null = false;
   for (const json& pl : doc.at("plants")) saw_null = saw_null || pl.at("first_down_tick").is_null();
   CHECK(saw_null);
+}
+
+TEST_CASE("M10: every vehicle on the map world can say where it is going") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  const World& w = sim->world();
+  const std::set<std::string> statuses = {"idle", "to_pickup", "queue_load", "loading",
+                                          "to_dropoff", "queue_unload", "unloading"};
+  size_t travelling = 0, loaded = 0;
+  for (int hour = 0; hour < 96; ++hour) {
+    sim->step(4);
+    const State& st = sim->state();
+    for (uint32_t v = 0; v < st.vehicle.size(); ++v) {
+      const std::string text = vehicleJson(w, st, v);
+      REQUIRE(!text.empty());
+      const json doc = json::parse(text);
+      const std::string status = doc.at("status").get<std::string>();
+      REQUIRE(statuses.count(status) == 1);
+      CHECK(doc.at("index") == v);
+      if (status == "idle") {
+        CHECK(doc.at("order").is_null());
+        CHECK(doc.at("path").empty());
+        continue;
+      }
+      REQUIRE(doc.at("order").is_object());
+      const json& order = doc.at("order");
+      CHECK(order.at("from").at("site") != order.at("to").at("site"));
+      const bool to_pickup = status == "to_pickup" || status == "queue_load" || status == "loading";
+      CHECK(doc.at("legDestination").at("site") ==
+            (to_pickup ? order.at("from") : order.at("to")).at("site"));
+      if (!doc.at("cargo").is_null()) {
+        ++loaded;
+        CHECK(doc.at("cargo").at("material") == order.at("material"));
+        CHECK(doc.at("cargo").at("tonnes").get<double>() <=
+              doc.at("capacityT").get<double>() + 1e-9);
+      }
+      if (status != "to_pickup" && status != "to_dropoff") {
+        CHECK(doc.at("path").empty());
+        continue;
+      }
+      const json& path = doc.at("path");
+      REQUIRE(!path.empty());
+      ++travelling;
+      // Starts at the vehicle, ends on the destination site's node in its
+      // mode, and is as long as the distance it says is left.
+      CHECK(path.front() == doc.at("position"));
+      const VehicleClass& vc = w.catalog.vehicle_classes[w.fleet[v].cls];
+      const uint32_t dest_site = doc.at("legDestination").at("site").get<uint32_t>();
+      const RouteNode& node = w.nodes[w.sites[dest_site].node[modeIndex(vc.mode)]];
+      CHECK(path.back().at(0).get<double>() == doctest::Approx(node.x_km));
+      CHECK(path.back().at(1).get<double>() == doctest::Approx(node.y_km));
+      double length = 0;
+      for (size_t i = 1; i < path.size(); ++i)
+        length += std::hypot(path[i].at(0).get<double>() - path[i - 1].at(0).get<double>(),
+                             path[i].at(1).get<double>() - path[i - 1].at(1).get<double>());
+      CHECK(length == doctest::Approx(doc.at("remainingKm").get<double>()).epsilon(1e-6));
+      CHECK(doc.at("remainingKm").get<double>() <= doc.at("tripKm").get<double>() + 1e-6);
+    }
+  }
+  CHECK(travelling > 100);
+  CHECK(loaded > 50);
+  CHECK(vehicleJson(w, sim->state(), static_cast<uint32_t>(w.fleet.size())).empty());
 }

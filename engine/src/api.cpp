@@ -14,6 +14,7 @@
 
 #include "api_world.h"
 #include "sim/routes.h"
+#include "sim/inspect.h"
 #include "sim/sim.h"
 #include "sim/window.h"
 
@@ -817,6 +818,13 @@ const char* crx_step_report(crx_sim* sim, uint32_t ticks) {
   api->snap_dirty = true;
   api->reply = crx::sim::windowJson(api->sim->world(), report);
   return api->reply.c_str();
+}
+
+const char* crx_vehicle(const crx_sim* sim, uint32_t index) {
+  const ApiSim* api = asApi(sim);
+  if (api == nullptr) return nullptr;
+  api->reply = crx::sim::vehicleJson(api->sim->world(), api->sim->state(), index);
+  return api->reply.empty() ? nullptr : api->reply.c_str();
 }
 
 uint64_t crx_tick(const crx_sim* sim) { return asApi(sim)->sim->state().tick; }

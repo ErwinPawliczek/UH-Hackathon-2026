@@ -56,6 +56,11 @@ const double* crx_kpis(const crx_sim* sim, uint32_t* n);
    first tick it stopped. Reply valid until the next call on this sim. */
 const char* crx_step_report(crx_sim* sim, uint32_t ticks);
 
+/* One vehicle as JSON: class, status, cargo, the order it serves with both
+   ends named, where its current leg ends, and the path from here to there.
+   NULL when `index` is not a vehicle. Reply valid until the next call. */
+const char* crx_vehicle(const crx_sim* sim, uint32_t index);
+
 uint64_t crx_tick(const crx_sim* sim);
 uint64_t crx_state_hash(const crx_sim* sim);
 const char* crx_version(void);
