@@ -5,6 +5,13 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Two pages share one bundle: the app at / and the multiplayer host screen
+  // at /host/ (host/index.html), so the server finds a real file at each path.
+  build: {
+    rollupOptions: {
+      input: { main: 'index.html', host: 'host/index.html' },
+    },
+  },
   // The catalog of process recipes lives with the engine
   // (../engine/data/catalog/processes/*.json) and is imported into the bundle
   // as the single source of truth — allow the dev server to read it. `vite
