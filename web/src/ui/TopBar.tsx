@@ -11,6 +11,8 @@ import { useSim, SPEEDS, TICKS_PER_DAY } from '../store/sim';
 import { SCENARIOS } from '../engine/events';
 import { scenariosFor } from '../engine/scenarios';
 import { fmtClock } from './format';
+import { LOG_WINDOW_AT, LOG_WINDOW_ID } from './EventLog';
+import { useWindows } from './windows';
 
 export function TopBar() {
   const playing = useSim((s) => s.playing);
@@ -24,6 +26,7 @@ export function TopBar() {
   const world = useSim((s) => s.world);
   const triggered = useSim((s) => s.triggered);
   const live = useSim((s) => s.sendCommand !== null);
+  const logOpen = useWindows((s) => s.windows[LOG_WINDOW_ID]?.open === true);
 
   const { togglePlay, setSpeed, setSeed, setScenario, triggerScenario } = useSim.getState();
   const engineScenarios = backendKind === 'http' ? scenariosFor(world) : [];
@@ -105,7 +108,17 @@ export function TopBar() {
         </label>
       )}
 
-      <span className="data ml-auto text-muted">{Math.floor(Number(tick ?? 0) / TICKS_PER_DAY)}/60 d</span>
+      {/* floating windows: each toggle opens or closes one draggable panel */}
+      <button
+        className={`btn ml-auto ${logOpen ? 'btn-active' : ''}`}
+        onClick={() => useWindows.getState().toggle(LOG_WINDOW_ID, LOG_WINDOW_AT)}
+        aria-pressed={logOpen}
+        data-testid="log-toggle"
+      >
+        Log
+      </button>
+
+      <span className="data text-muted">{Math.floor(Number(tick ?? 0) / TICKS_PER_DAY)}/60 d</span>
 
       {error !== null && (
         <span

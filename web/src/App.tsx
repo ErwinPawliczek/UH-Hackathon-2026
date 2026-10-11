@@ -10,6 +10,7 @@ import { EngineErrorOverlay } from './ui/EngineErrorOverlay';
 import { SiteInspector } from './ui/SiteInspector';
 import { VehicleInspector } from './ui/VehicleInspector';
 import { Timeline } from './ui/Timeline';
+import { EventLog } from './ui/EventLog';
 
 function InspectorPanel() {
   const selected = useSim((s) => s.selected);
@@ -43,10 +44,11 @@ export default function App() {
       <TopBar />
       <InspectorPanel />
       <Timeline />
+      <EventLog />
 
       {/* A new run waits here, paused at day 0, until the visitor starts it. */}
       {world !== null && snap !== null && !started && error === null && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-24 z-10 flex justify-center">
+        <div className="pointer-events-none absolute inset-x-0 bottom-20 z-10 flex justify-center">
           <button
             className="btn btn-active pointer-events-auto"
             // sized inline: the .btn component class pins control-size padding and type

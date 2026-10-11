@@ -21,9 +21,9 @@ export interface PickHit {
   index: number;
 }
 
-/** Screen pixels the top bar and the timeline panel cover — the map is framed between them. */
+/** Screen pixels the top bar and the timeline strip cover — the map is framed between them. */
 const TOP_INSET_PX = 64;
-const BOTTOM_INSET_PX = 176;
+const BOTTOM_INSET_PX = 84;
 /** Default view direction from the orbit target to the camera (tilted, looking north). */
 const VIEW_DIR = new THREE.Vector3(0, 42, 38).normalize();
 

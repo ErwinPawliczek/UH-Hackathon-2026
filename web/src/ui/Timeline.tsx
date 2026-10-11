@@ -1,18 +1,24 @@
-// Timeline panel: 60-day horizon strip with event markers coloured by type,
-// a playhead at the current tick, and a rolling event log beneath.
+// Timeline strip: the 60-day horizon with a marker per notable event and a
+// playhead at the current tick. The event text lives in the Event log window
+// (top bar → Log); routine dispatches and deliveries get no marker — there
+// are hundreds a day on the full map.
 
 import type { SimEvent } from '../engine/events';
 import { HORIZON_DAYS, TICKS_PER_DAY, useSim } from '../store/sim';
+import { CRITICAL_EVENTS, isRoutineEvent } from './eventKinds';
 import { fmtClock } from './format';
 
 const HORIZON_TICKS = HORIZON_DAYS * TICKS_PER_DAY;
 
 // Alarm red is reserved for bad states (stockouts, failures, shutdowns);
 // every other event is the one blue.
-const CRITICAL = new Set(['stockout', 'unit_failed', 'process_shutdown', 'scenario']);
-
 function markerColor(e: SimEvent): string {
-  return CRITICAL.has(e.type) ? 'var(--alarm)' : 'var(--blue)';
+  return CRITICAL_EVENTS.has(e.type) ? 'var(--alarm)' : 'var(--blue)';
+}
+
+/** Events that get a marker on the strip: everything notable up to `tick`. */
+export function timelineMarkers(events: SimEvent[], tick: number): SimEvent[] {
+  return events.filter((e) => e.tick <= tick && !isRoutineEvent(e));
 }
 
 export function Timeline() {
@@ -20,24 +26,23 @@ export function Timeline() {
   const tick = useSim((s) => s.snap?.tick ?? 0);
   const select = useSim((s) => s.select);
 
-  const visible = events.filter((e) => e.tick <= tick);
-  const recent = [...visible].reverse().slice(0, 4);
+  const markers = timelineMarkers(events, Number(tick));
 
   return (
-    <footer className="panel pointer-events-auto absolute inset-x-2 bottom-2 z-10 p-3" data-testid="timeline">
+    <footer className="panel pointer-events-auto absolute inset-x-2 bottom-2 z-10 px-3 pb-2 pt-4" data-testid="timeline">
       <div className="relative mb-2 h-1 w-full rounded-sm bg-line-2">
         {/* day gridlines every 10 days */}
         {Array.from({ length: HORIZON_DAYS / 10 - 1 }, (_, i) => (
           <div key={i} className="absolute top-0 h-full w-px bg-line" style={{ left: `${((i + 1) * 10 * TICKS_PER_DAY * 100) / HORIZON_TICKS}%` }} />
         ))}
         {/* event markers */}
-        {visible.map((e) => (
+        {markers.map((e) => (
           <button
             key={e.seq}
             title={`D${Math.floor(e.tick / 96) + 1} — ${e.text}`}
-            className={`absolute bottom-0 w-1.5 cursor-pointer rounded-t-sm ${CRITICAL.has(e.type) ? 'h-5' : 'h-3'}`}
+            className={`absolute bottom-0 w-1.5 cursor-pointer rounded-t-sm ${CRITICAL_EVENTS.has(e.type) ? 'h-3' : 'h-2'}`}
             style={{
-              left: `${(e.tick * 100) / HORIZON_TICKS}%`,
+              left: `${Math.min(100, (e.tick * 100) / HORIZON_TICKS)}%`,
               backgroundColor: markerColor(e),
             }}
             onClick={() => e.site !== undefined && select({ kind: 'site', index: e.site })}
@@ -47,7 +52,7 @@ export function Timeline() {
         {/* playhead */}
         <div
           className="absolute -top-1 h-3 w-0.5 bg-ink"
-          style={{ left: `${(Number(tick) * 100) / HORIZON_TICKS}%` }}
+          style={{ left: `${Math.min(100, (Number(tick) * 100) / HORIZON_TICKS)}%` }}
           data-testid="playhead"
         />
       </div>
@@ -57,17 +62,6 @@ export function Timeline() {
           <span key={i} className="label">D{i * 10 + 1}</span>
         ))}
       </div>
-
-      <ul className="data mt-2 space-y-1">
-        {recent.map((e) => (
-          <li key={e.seq} className="flex gap-2">
-            <span className="w-20 shrink-0 text-muted">{fmtClock(e.tick)}</span>
-            <span className="label w-36 shrink-0">{e.type.replace(/_/g, ' ')}</span>
-            <span className="truncate">{e.text}</span>
-          </li>
-        ))}
-        {recent.length === 0 && <li className="text-muted">No events yet — advance the sim.</li>}
-      </ul>
     </footer>
   );
 }
