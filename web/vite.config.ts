@@ -5,6 +5,12 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Two pages: the app at / and the multiplayer player's screen at /play/.
+  build: {
+    rollupOptions: {
+      input: { main: 'index.html', play: 'play/index.html' },
+    },
+  },
   // The catalog of process recipes lives with the engine
   // (../engine/data/catalog/processes/*.json) and is imported into the bundle
   // as the single source of truth — allow the dev server to read it. `vite
