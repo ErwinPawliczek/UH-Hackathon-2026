@@ -15,6 +15,7 @@ import { MODE_LINE_STYLE, PIPELINE_WIDTH, V3, flowColor, routeLineColor } from '
 import { SiteLabels } from './siteLabels';
 import { PipelineLabels } from './pipelineLabels';
 import { buildRails, resizeRails, type RailLayer } from './rails';
+import { TripOverlay, type VehicleTrip } from './tripOverlay';
 import { buildSiteLayer, updateInstances, type SiteLayer } from './siteClusters';
 import {
   buildVehicleLayer, classMode, updateVehicleCargo, updateVehicles, waterSpan,
@@ -41,8 +42,13 @@ const AT_SITE = new Set([0, 2, 3, 5, 6]);
  * Set true to draw idle vehicles parked in their rows again.
  */
 const DRAW_IDLE_VEHICLES = false;
-/** §4.4 VehStatus value of a vehicle with no job. */
+/** §4.4 VehStatus values: no job, driving to load, driving to deliver. */
 const VEH_IDLE = 0;
+const VEH_TO_PICKUP = 1;
+const VEH_TO_DROPOFF = 4;
+/** Screen pixels within which a click picks a moving vehicle, and one standing at a site. */
+const PICK_MOVING_PX = 18;
+const PICK_STANDING_PX = 9;
 /** Seconds a vehicle takes to appear or fade out. */
 const VEHICLE_FADE_S = 0.25;
 /** Trucks standing at a site park in rows on its near side, this many per row. */
@@ -86,6 +92,7 @@ export class MapScene {
   private readonly labels: SiteLabels;
   private readonly pipelineLabels: PipelineLabels;
   private readonly rails: RailLayer | null;
+  private readonly trip: TripOverlay;
   private readonly flowLines: FlowLine[] = [];
   /** flowLines[i] for i < routeLineCount is world.routes[i]; pipelines follow. */
   private routeLineCount = 0;
@@ -214,6 +221,7 @@ export class MapScene {
 
     this.vehicleLayer = buildVehicleLayer(world);
     for (const mesh of this.vehicleLayer.meshes) this.scene.add(mesh);
+    this.trip = new TripOverlay(this.scene, this.siteLayer.siteAnchors);
 
     // canvas is always in the DOM here; a detached canvas just gets an
     // off-screen host so labels exist but render nowhere
@@ -349,7 +357,6 @@ export class MapScene {
       this.motionEpoch = epoch;
     }
     this.motion.sample(nowMs, this.poses);
-    const world = this.world;
     const fade = Math.min(1, Math.max(0, (nowMs - this.lastFrameMs) / 1000) / VEHICLE_FADE_S);
     this.lastFrameMs = nowMs;
     for (let v = 0; v < cur.nVeh; v++) {
@@ -362,7 +369,7 @@ export class MapScene {
       this.vehicleLayer,
       this.poses,
       // trucks keep to the road deck over water; vessels ride the water surface
-      (x, y, v) => (classMode(world.vehicles[v]?.cls ?? '') === 'road' ? deckYAt(world, x, y) : surfaceYAt(world, x, y)),
+      (x, y, v) => this.vehicleY(v, x, y),
       (v) => this.shown[v] ?? 1,
     );
     if (cur !== this.cargoSnap) {
@@ -370,6 +377,26 @@ export class MapScene {
       this.cargoSnap = cur;
     }
     this.syncRing(selection, this.poses);
+  }
+
+  /** World Y of what vehicle `v` stands on at a map point: the road deck for trucks, the water for vessels. */
+  private vehicleY(v: number, x: number, y: number): number {
+    return classMode(this.world.vehicles[v]?.cls ?? '') === 'road'
+      ? deckYAt(this.world, x, y)
+      : surfaceYAt(this.world, x, y);
+  }
+
+  /**
+   * Draw the selected vehicle's trip: the way ahead of it and rings on the
+   * sites it runs between. `trip` is what the UI fetched for the selected
+   * vehicle, or null; it is ignored unless it is for the vehicle selected
+   * now and that vehicle is on the map.
+   */
+  showTrip(trip: VehicleTrip | null, selection: Selection): void {
+    const v = selection !== null && selection.kind === 'vehicle' ? selection.index : -1;
+    const pose = v >= 0 ? this.poses[v] : undefined;
+    const active = trip !== null && pose !== undefined && trip.index === v && (this.shown[v] ?? 1) >= 0.5;
+    this.trip.update(active ? trip : null, active ? pose : null, (x, y) => this.vehicleY(v, x, y));
   }
 
   /** Where every vehicle is drawn this frame (map km) — for the selection ring, picking and checks. */
@@ -524,7 +551,7 @@ export class MapScene {
         return;
       }
       const [x, z] = mapToWorld(pose.x, pose.y);
-      this.ringPivot.position.set(x, surfaceYAt(this.world, pose.x, pose.y) + 0.15, z);
+      this.ringPivot.position.set(x, this.vehicleY(selection.index, pose.x, pose.y) + 0.15, z);
       this.ring.scale.setScalar(1.2);
     }
     this.ring.visible = true;
@@ -537,6 +564,10 @@ export class MapScene {
       ((clientX - rect.left) / rect.width) * 2 - 1,
       -((clientY - rect.top) / rect.height) * 2 + 1,
     );
+    // A moving vehicle is a small, fast target: one near the pointer wins,
+    // even over a site underneath it.
+    const moving = this.vehicleNear(clientX - rect.left, clientY - rect.top, rect, PICK_MOVING_PX, true);
+    if (moving >= 0) return { kind: 'vehicle', index: moving };
     this.raycaster.setFromCamera(this.ndc, this.camera);
     const hits = this.raycaster.intersectObjects(
       [this.siteLayer.pads, ...this.vehicleLayer.meshes],
@@ -553,6 +584,9 @@ export class MapScene {
         if (index !== undefined && (this.shown[index] ?? 1) >= 0.5) return { kind: 'vehicle', index };
       }
     }
+    // a vehicle standing at a site (queueing, loading, unloading), when the pointer is right on it
+    const standing = this.vehicleNear(clientX - rect.left, clientY - rect.top, rect, PICK_STANDING_PX, false);
+    if (standing >= 0) return { kind: 'vehicle', index: standing };
     // Small pads on a large map miss raycasts by a few pixels — fall back
     // to the projected site centre within a click tolerance.
     const v = new THREE.Vector3();
@@ -572,6 +606,34 @@ export class MapScene {
     return bestSite >= 0 ? { kind: 'site', index: bestSite } : null;
   }
 
+  /**
+   * The drawn vehicle nearest to a canvas point, within `radiusPx`, or -1.
+   * `moving` picks among vehicles on the road or water; otherwise among the
+   * ones standing at a site.
+   */
+  private vehicleNear(px: number, py: number, rect: DOMRect, radiusPx: number, moving: boolean): number {
+    const snap = this.motionSnap;
+    if (snap === null) return -1;
+    const v3 = new THREE.Vector3();
+    let best = -1;
+    let bestD = radiusPx;
+    for (let v = 0; v < this.poses.length; v++) {
+      if ((this.shown[v] ?? 1) < 0.5) continue;
+      const status = snap.vehStatus[2 * v];
+      if ((status === VEH_TO_PICKUP || status === VEH_TO_DROPOFF) !== moving) continue;
+      const pose = this.poses[v];
+      const [x, z] = mapToWorld(pose.x, pose.y);
+      v3.set(x, this.vehicleY(v, pose.x, pose.y) + 0.15, z).project(this.camera);
+      if (v3.z > 1) continue;
+      const d = Math.hypot((v3.x * 0.5 + 0.5) * rect.width - px, (-v3.y * 0.5 + 0.5) * rect.height - py);
+      if (d < bestD) {
+        bestD = d;
+        best = v;
+      }
+    }
+    return best;
+  }
+
   resize(width: number, height: number): void {
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
@@ -580,6 +642,7 @@ export class MapScene {
     this.pipelineLabels.setSize(width, height);
     resizeFlowLines(this.flowLines, width, height);
     resizeRails(this.rails, width, height);
+    this.trip.resize(width, height);
     if (!this.userMoved) this.frameMap(height);
   }
 
@@ -603,6 +666,7 @@ export class MapScene {
   dispose(): void {
     this.labels.dispose();
     this.pipelineLabels.dispose();
+    this.trip.dispose();
     this.controls.dispose();
     this.scene.traverse((obj) => {
       // (Line2 is a Mesh, so the fat route lines are covered too.)
