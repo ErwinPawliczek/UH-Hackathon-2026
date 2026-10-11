@@ -618,7 +618,14 @@ void buildSnapshot(const Sim& sim, const std::vector<uint32_t>& edge_route,
       restarting = restarting || st.proc[p].status == ProcStatus::Restarting;
       holding = holding || st.proc[p].status == ProcStatus::HoldMin;
     }
-    siteStatus[s] = down ? 3 : restarting ? 4 : holding ? 1 : 0;
+    // 5 = limited: nothing is stopped, but a supply or demand shock is
+    // holding the site away from normal.
+    bool limited = false;
+    for (const auto& ev : st.active)
+      limited = limited || (ev.site == s && ev.multiplier != 1.0 &&
+                            (ev.type == crx::sim::EventDef::Type::SupplyShock ||
+                             ev.type == crx::sim::EventDef::Type::DemandShock));
+    siteStatus[s] = down ? 3 : restarting ? 4 : holding ? 1 : limited ? 5 : 0;
     double worst = 1.0;
     for (uint32_t t = 0; t < nTanks; ++t) {
       if (w.tanks[t].site.v != s) continue;
