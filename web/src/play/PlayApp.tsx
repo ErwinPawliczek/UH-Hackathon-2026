@@ -20,8 +20,10 @@ import {
   PRICE_MAX, PRICE_MIN, PRICE_STEP, fmtProfit, fmtSold, isHit, makesWords, minRate, myScore, othersWords, pctSigned, plantState,
   priceWords, rankWords, rateWords, roomCode, siteUnits,
 } from './playLogic';
-import { mePlayer, startRoomLoop, usePlay } from './playStore';
-import type { RoomSite, RoomState } from './roomApi';
+import { openRoom, roomSource } from '../store/room';
+import { mockRoom, mockRoomWanted } from '../store/roomMock';
+import type { RoomInfo, RoomSite } from '../store/roomTypes';
+import { mePlayer, startScoresLoop, usePlay } from './playStore';
 
 type Menu = 'leaderboard' | 'economy' | 'log' | 'how' | null;
 
@@ -104,7 +106,7 @@ function Sheet({ open, onToggle, peek, children }: { open: boolean; onToggle: ()
 }
 
 /** Screen 2: pick a plant, by tapping the map or from the list. */
-function LobbySheet({ room }: { room: RoomState }) {
+function LobbySheet({ room }: { room: RoomInfo }) {
   const world = useSim((s) => s.world);
   const selected = useSim((s) => s.selected);
   const select = useSim((s) => s.select);
@@ -194,7 +196,7 @@ function Slider({ id, label, value, min, max, step, shown, words, onChange }: {
 }
 
 /** Screen 3: your plant. */
-function PlantSheet({ room, site }: { room: RoomState; site: number }) {
+function PlantSheet({ room, site }: { room: RoomInfo; site: number }) {
   const world = useSim((s) => s.world);
   const snap = useSim((s) => s.snap);
   const scores = usePlay((s) => s.scores);
@@ -338,7 +340,7 @@ function Leaderboard({ mySite }: { mySite: number | null }) {
 }
 
 /** The economy on a phone, from what a room reports: read-only. */
-function EconomyOverview({ room }: { room: RoomState }) {
+function EconomyOverview({ room }: { room: RoomInfo }) {
   const scores = usePlay((s) => s.scores);
   const snap = useSim((s) => s.snap);
   const total = (f: (s: (typeof scores)[number]) => number) => scores.reduce((a, s) => a + f(s), 0);
@@ -371,7 +373,7 @@ function EconomyOverview({ room }: { room: RoomState }) {
 }
 
 function LogList() {
-  const events = usePlay((s) => s.events);
+  const events = useSim((s) => s.events);
   const notable = events.filter((e) => e.type !== 'dispatch' && e.type !== 'delivered').slice(-60).reverse();
   if (notable.length === 0) return <p className="text-sm text-muted">Nothing has happened yet.</p>;
   return (
@@ -395,12 +397,11 @@ const HOW = [
 
 export function PlayApp() {
   const code = useMemo(() => roomCode(window.location), []);
-  const mock = useMemo(() => new URLSearchParams(window.location.search).get('mock'), []);
   const open = usePlay((s) => s.open);
   const seat = usePlay((s) => s.seat);
-  const room = usePlay((s) => s.room);
-  const gone = usePlay((s) => s.gone);
-  const events = usePlay((s) => s.events);
+  const room = useSim((s) => s.room);
+  const roomError = useSim((s) => s.error);
+  const events = useSim((s) => s.events);
   const leave = usePlay((s) => s.leave);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menu, setMenu] = useState<Menu>(null);
@@ -408,11 +409,18 @@ export function PlayApp() {
 
   useEffect(() => {
     if (code === null) return undefined;
-    open(code, mock);
-    return startRoomLoop();
-  }, [code, mock, open]);
+    // the room mode of the app does the watching; `?mockroom` swaps in its stand-in room
+    const source = mockRoomWanted() ? mockRoom(code) : roomSource(code);
+    open(code, source);
+    const stopRoom = openRoom(code, source);
+    const stopScores = startScoresLoop();
+    return () => { stopScores(); stopRoom(); };
+  }, [code, open]);
 
-  const me = mePlayer({ room, seat });
+  const me = mePlayer(room, seat);
+  // tell the scene which plant is mine: its label says "yours"
+  const mySiteNow = me?.site ?? null;
+  useEffect(() => { useSim.getState().setMySite(mySiteNow); }, [mySiteNow]);
   // a seat the room no longer knows (the game was restarted): ask the name again
   useEffect(() => {
     if (room !== null && seat !== null && me === null) leave();
@@ -426,6 +434,7 @@ export function PlayApp() {
       </main>
     );
   }
+  const gone = room === null && roomError !== null && /no game|has ended/i.test(roomError);
   if (gone) {
     return (
       <main className="flex h-full flex-col items-center justify-center gap-4 bg-white px-6 text-center" data-testid="play-gone">
@@ -489,7 +498,7 @@ export function PlayApp() {
       </div>
 
       {room === null
-        ? <div className="shrink-0 border-t border-line bg-panel px-4 py-4 text-sm text-muted">Finding the game…</div>
+        ? <div className="shrink-0 border-t border-line bg-panel px-4 py-4 text-sm text-muted" role="status">{roomError ?? 'Finding the game…'}</div>
         : playing && mySite !== null
           ? <PlantSheet room={room} site={mySite} />
           : room.phase !== 'lobby' && mySite === null

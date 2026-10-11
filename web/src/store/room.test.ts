@@ -26,6 +26,10 @@ describe('room', () => {
       snapshot: async (last) => { calls.push('snapshot'); return last === tick ? null : snap(tick); },
       scores: async () => ({ tick, scores: [] }),
       host: async () => ({ ok: true }),
+      join: async () => ({ playerId: 'p', token: 't' }),
+      identify: () => undefined,
+      claim: async () => ({ ok: true }),
+      play: async () => ({ ok: true }),
       reads: () => ({ id: 'ABCD', backend }),
       close: () => calls.push('close'),
     });

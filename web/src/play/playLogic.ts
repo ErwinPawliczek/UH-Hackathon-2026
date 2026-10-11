@@ -3,7 +3,7 @@
 import type { Snapshot } from '../engine/snapshot';
 import type { WorldSpec } from '../engine/world';
 import { materialName } from '../ui/materials';
-import type { RoomState, Score } from './roomApi';
+import type { RoomInfo, RoomScore } from '../store/roomTypes';
 
 /** Price steps the slider offers: 20% under the going rate to 30% over, in 5% steps. */
 export const PRICE_MIN = -0.2;
@@ -96,7 +96,7 @@ export function plantState(snap: Snapshot | null, site: number): { text: string;
 }
 
 /** Who else is in, for the waiting line: "Maya, Omar and 3 more". */
-export function othersWords(room: RoomState, me: string | null): string {
+export function othersWords(room: RoomInfo, me: string | null): string {
   const names = room.players.filter((p) => p.id !== me).map((p) => p.name);
   if (names.length === 0) return 'You are the first one in.';
   const shown = names.slice(0, 3);
@@ -105,7 +105,7 @@ export function othersWords(room: RoomState, me: string | null): string {
 }
 
 /** The score row of a site, and how many plants are ranked. */
-export function myScore(scores: Score[], site: number | null): { score: Score | null; of: number } {
+export function myScore(scores: RoomScore[], site: number | null): { score: RoomScore | null; of: number } {
   return { score: scores.find((s) => s.site === site) ?? null, of: scores.length };
 }
 
