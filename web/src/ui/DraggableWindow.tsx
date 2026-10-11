@@ -27,6 +27,7 @@ export function DraggableWindow({
   width = 440,
   maxHeight = '60vh',
   actions,
+  header,
   open: openProp,
   onClose,
   at = DEFAULT_AT,
@@ -41,6 +42,13 @@ export function DraggableWindow({
   maxHeight?: string;
   /** extra controls for the title bar, left of the close button */
   actions?: ReactNode;
+  /**
+   * The title bar's own content, in place of the plain title — for a window
+   * whose heading is more than a name (a site's icon, name and state). It is
+   * part of the drag handle. `title` still names the window for assistive
+   * technology and its close button.
+   */
+  header?: ReactNode;
   /** controlled mode: show while true, whatever the windows store says */
   open?: boolean;
   /** controlled mode: the close button was pressed */
@@ -119,7 +127,9 @@ export function DraggableWindow({
         onPointerCancel={endDrag}
         data-testid={`window-${id}-titlebar`}
       >
-        <h2 className="label mr-auto">{title}</h2>
+        {header !== undefined
+          ? <div className="mr-auto min-w-0 flex-1">{header}</div>
+          : <h2 className="label mr-auto">{title}</h2>}
         {actions}
         <button
           className="btn btn-glyph"

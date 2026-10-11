@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { clampToViewport, useWindows } from './windows';
 import { logRows } from './EventLog';
-import { eventLabel, eventMark, isRoutineEvent, notableEvents } from './eventKinds';
+import { eventLabel, eventMark, isRoutineEvent, isUserEvent, notableEvents } from './eventKinds';
 import type { SimEvent } from '../engine/events';
 
 describe('windows store', () => {
@@ -51,10 +51,18 @@ describe('event log rows and notable events', () => {
   const ev = (seq: number, tick: number, type: string): SimEvent => ({ seq, tick, type, text: `${type} ${seq}` });
   const events = [ev(0, 10, 'dispatch'), ev(1, 20, 'unit_failed'), ev(2, 30, 'delivered'), ev(3, 40, 'process_shutdown'), ev(4, 90, 'unit_repaired')];
 
-  it('lists newest first, up to the current tick, without routine logistics by default', () => {
-    expect(logRows(events, 50, false).map((e) => e.seq)).toEqual([3, 1]);
-    expect(logRows(events, 50, true).map((e) => e.seq)).toEqual([3, 2, 1, 0]);
-    expect(logRows(events, 100, true, 2).map((e) => e.seq)).toEqual([4, 3]);
+  it('lists only what the visitor did by default; the engine\'s entries are behind the tick boxes', () => {
+    const mine = [
+      ...events,
+      { seq: -1, tick: 15, type: 'scenario', text: 'Refinery crude unit down (7 days)' },
+      { seq: -2, tick: 35, type: 'user_order', text: 'You ordered 25 t of salt …' },
+    ].sort((a, b) => a.tick - b.tick);
+    const off = { consequences: false, deliveries: false };
+    expect(logRows(mine, 50, off).map((e) => e.seq)).toEqual([-2, -1]);
+    expect(logRows(mine, 50, { consequences: true, deliveries: false }).map((e) => e.seq)).toEqual([3, -2, 1, -1]);
+    expect(logRows(mine, 50, { consequences: false, deliveries: true }).map((e) => e.seq)).toEqual([-2, 2, -1, 0]);
+    expect(logRows(mine, 100, { consequences: true, deliveries: true }, 2).map((e) => e.seq)).toEqual([4, 3]);
+    expect(logRows(events, 100, off)).toEqual([]); // nothing changed by the visitor yet
   });
 
   it('keeps only notable events for markers', () => {
@@ -78,5 +86,24 @@ describe('event kinds', () => {
   it('keeps plant events on bars: red for bad states, blue for the rest', () => {
     expect(eventMark(ev('unit_failed'))).toEqual({ color: 'var(--alarm)', shape: 'bar' });
     expect(eventMark(ev('unit_repaired'))).toEqual({ color: 'var(--blue)', shape: 'bar' });
+  });
+});
+
+describe('whose entry it is', () => {
+  it('is decided by the entry itself: the client numbers the visitor\'s actions below zero', () => {
+    expect(isUserEvent({ seq: -3 })).toBe(true);
+    expect(isUserEvent({ seq: 0 })).toBe(false);
+    expect(isUserEvent({ seq: 812 })).toBe(false);
+  });
+
+  it('labels the visitor\'s entries as theirs and keeps a rewind note out of Back in time', () => {
+    const ev = (seq: number, type: string): SimEvent => ({ seq, tick: 5, type, text: '' });
+    expect(eventLabel(ev(-1, 'user_outage'))).toBe('you: disruption');
+    expect(eventLabel(ev(-2, 'user_order'))).toBe('you: order');
+    expect(eventLabel(ev(-3, 'rewind'))).toBe('back in time');
+    expect(eventMark(ev(-1, 'user_outage')).color).toBe('var(--alarm)');
+    expect(eventMark(ev(-2, 'user_order')).color).toBe('var(--blue)');
+    expect(notableEvents([ev(-1, 'user_outage'), ev(-3, 'rewind'), ev(4, 'unit_failed')], 10).map((e) => e.type))
+      .toEqual(['user_outage', 'unit_failed']);
   });
 });

@@ -18,6 +18,7 @@ import type { BackendKind, SimBackend } from '../engine/api';
 import { HttpError } from '../engine/httpBackend';
 import { resolveWorld } from '../engine/world';
 import { nextStep, useSim } from './sim';
+import { describeCommand, isUserEvent, momentWords, userSeq } from './userNotes';
 
 /** How often the loop checks whether a step is due — the pacing error of any one step. */
 const POLL_MS = 25;
@@ -87,7 +88,11 @@ async function rewindSession({ id, backend }: LiveSession, tick: number): Promis
     const log = await backend.events(id, -1);
     useSim.setState((s) => {
       const kept = s.triggered.filter((key) => (s.triggeredAt[key] ?? 0) < tick);
-      const notes = s.events.filter((e) => e.seq < 0 && e.type === 'scenario' && e.tick < tick);
+      // what the visitor did before that moment still happened; going back is itself something they did
+      const notes = [
+        ...s.events.filter((e) => isUserEvent(e) && e.tick < tick),
+        { seq: userSeq(), tick, type: 'rewind', text: `You went back to ${momentWords(tick)}` },
+      ];
       return {
         snap,
         prevSnap: null,
@@ -146,7 +151,18 @@ async function openSessionFor(
     selected: null,
     prevSnap: null,
     snap: null,
-    sendCommand: (cmd) => serial(() => backend.command(id, cmd)),
+    // a command the engine accepts is something the visitor did: note it in the log
+    sendCommand: async (cmd, opts) => {
+      const reply = await serial(() => backend.command(id, cmd));
+      const refused = typeof reply === 'object' && reply !== null && (reply as { ok?: unknown }).ok === false;
+      const note = opts?.note === false || refused ? null : describeCommand(useSim.getState().world, cmd);
+      if (note !== null) {
+        useSim.setState((s) => ({
+          events: [...s.events, { seq: userSeq(), tick: Number(s.snap?.tick ?? 0), ...note }],
+        }));
+      }
+      return reply;
+    },
     fetchVehicle: (index) => serial(() => backend.vehicle(id, index)),
     fetchSeries: (kind, refId) => serial(() => backend.series(id, kind, refId)),
     selectedVehicleDetail: null,

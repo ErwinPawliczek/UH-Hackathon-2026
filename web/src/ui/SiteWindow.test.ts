@@ -5,7 +5,7 @@ import fixture from './__fixtures__/flowsheetSites.json';
 import type { Snapshot } from '../engine/snapshot';
 import type { WorldSpec } from '../engine/world';
 import { buildFlowsheet, type FlowUnitNode } from './flowsheet';
-import { stateWords } from './SiteWindow';
+import { scrollToFirstAlarm, stateWords } from './SiteWindow';
 
 const world = { ...(fixture as unknown as WorldSpec), pipelines: [] } as WorldSpec;
 const siteIdx = world.sites.findIndex((s) => s.key === 'REFINERY');
@@ -44,5 +44,25 @@ describe('stateWords', () => {
     const h = snap();
     h.procStatus[procOf('RF-DHT').procIndex] = 1;
     expect(stateWords(sheet, world, h, siteIdx)).toEqual({ text: 'Holding at minimum rate: Diesel hydrotreating', alarm: false });
+  });
+});
+
+describe('scrollToFirstAlarm', () => {
+  it('centres the first unit that is down, within what can be scrolled', () => {
+    if (sheet === null) throw new Error('fixture has no refinery flowsheet');
+    expect(scrollToFirstAlarm(sheet, snap(), 600)).toBeNull(); // nothing down: start at the feed end
+    const s = snap();
+    const fcc = procOf('RF-FCC');
+    s.unitTrains[fcc.unitIndex] = 0;
+    const left = scrollToFirstAlarm(sheet, s, 600) as number;
+    expect(left).toBeGreaterThan(0);
+    // the unit's middle is at the middle of the view
+    expect(left + 300).toBeCloseTo(fcc.x + fcc.w / 2, 6);
+    // the first unit down wins when several are, and the scroll never runs past either end
+    const cdu = procOf('RF-CDU');
+    s.procStatus[cdu.procIndex] = 2;
+    expect(cdu.x).toBeLessThan(fcc.x); // the CDU is further left, so it is the one shown
+    expect(scrollToFirstAlarm(sheet, s, 600)).toBeCloseTo(Math.max(0, cdu.x + cdu.w / 2 - 300), 6);
+    expect(scrollToFirstAlarm(sheet, s, 5000)).toBe(0); // a view wider than the diagram does not scroll
   });
 });

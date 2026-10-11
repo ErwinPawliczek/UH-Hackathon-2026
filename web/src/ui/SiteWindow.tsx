@@ -1,6 +1,7 @@
 // The site window: click a plant and see what is going on inside it.
 //
-//   1. Header — the plant's icon, name and state in words.
+//   1. Header — the plant's icon, name and state in words. It is the window's
+//      title bar: there is no separate title strip above it.
 //   2. Process flow diagram — tanks, units and the streams between them, with
 //      live numbers on every one (Flowsheet.tsx); it scrolls sideways for a
 //      big site and can be widened with the expand button.
@@ -28,6 +29,7 @@ import { LineChart } from './charts/LineChart';
 import { Sparkline } from './charts/Sparkline';
 import { TICKS_PER_DAY } from './charts/scale';
 import { DraggableWindow } from './DraggableWindow';
+import { openSupplyOptions } from './economyView';
 import { FlowsheetView } from './Flowsheet';
 import { SiteBadge } from './SiteIcon';
 import {
@@ -63,6 +65,19 @@ export function stateWords(sheet: Flowsheet | null, world: WorldSpec, snap: Snap
   if (holding.length > 0) return { text: `Holding at minimum rate: ${holding.join(', ')}${tail}`, alarm: hurt > 0 };
   if (sheet === null) return { text: 'Running', alarm: false };
   return { text: `Running at ${Math.round(headline(sheet, world, snap).throughput * 100)}% of design${tail}`, alarm: hurt > 0 };
+}
+
+/**
+ * Where to scroll a diagram `viewWidth` px wide so the first unit that is
+ * down sits in the middle of the view; null when no unit is down.
+ */
+export function scrollToFirstAlarm(sheet: Flowsheet, snap: Snapshot, viewWidth: number): number | null {
+  const down = sheet.nodes
+    .filter((n): n is FlowUnitNode => n.kind === 'unit')
+    .filter((u) => unitLive(snap, u).alarm)
+    .sort((a, b) => a.x - b.x)[0];
+  if (down === undefined) return null;
+  return Math.max(0, Math.min(sheet.width - viewWidth, down.x + down.w / 2 - viewWidth / 2));
 }
 
 /** The hourly histories a site's analytics need, kept fresh while its window is open. */
@@ -311,6 +326,20 @@ export function SiteWindow() {
   const hist = useHistories(sheet, siteIdx);
   useEffect(() => setFailure(null), [siteIdx]);
 
+  // When the window opens on a plant with a unit down, the diagram starts
+  // scrolled to that unit (a big site's diagram is wider than the window);
+  // otherwise it starts at the feed end. Only on opening: after that the
+  // scroll position is the visitor's.
+  const pfdScroll = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = pfdScroll.current;
+    const now = useSim.getState().snap;
+    if (el === null || sheet === null || now === null) return;
+    const left = scrollToFirstAlarm(sheet, now, el.clientWidth);
+    el.scrollLeft = left ?? 0;
+    // `sheet` is rebuilt only when the site changes, so this runs once per site opened
+  }, [sheet]);
+
   const site = world === null || siteIdx === null ? undefined : world.sites[siteIdx];
   if (world === null || snap === null || siteIdx === null || site === undefined) return null;
 
@@ -332,8 +361,18 @@ export function SiteWindow() {
   return (
     <DraggableWindow
       id={SITE_WINDOW_ID}
-      title={presetLabel(site.preset)}
+      title={`${site.name} (${presetLabel(site.preset)})`}
       width={width}
+      // the title bar is the header: icon, name and state — and still the drag handle
+      header={(
+        <div className="flex items-center gap-2.5" data-testid="site-header">
+          <SiteBadge preset={site.preset} icon={22} down={snap.siteStatus[siteIdx] === 3} />
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-base font-bold leading-tight text-ink">{site.name}</h2>
+            <p className="truncate text-xs leading-tight" style={{ color: state.alarm ? 'var(--alarm)' : 'var(--muted)' }} data-testid="site-state">{state.text}</p>
+          </div>
+        </div>
+      )}
       maxHeight="calc(100vh - 80px)"
       open
       onClose={() => select(null)}
@@ -345,14 +384,6 @@ export function SiteWindow() {
       ) : undefined}
     >
       <div className="flex flex-col gap-3 p-3 text-xs" data-testid="site-window">
-        <header className="flex items-center gap-2.5">
-          <SiteBadge preset={site.preset} icon={22} down={snap.siteStatus[siteIdx] === 3} />
-          <div className="min-w-0 flex-1">
-            <h2 className="truncate font-body text-base font-semibold leading-tight text-ink">{site.name}</h2>
-            <p className="truncate" style={{ color: state.alarm ? 'var(--alarm)' : 'var(--muted)' }} data-testid="site-state">{state.text}</p>
-          </div>
-        </header>
-
         {sheet === null ? (
           <p className="text-muted">This engine does not describe the process flows for this site, so there is no diagram to draw.</p>
         ) : (
@@ -366,13 +397,41 @@ export function SiteWindow() {
                 className="chamfer chamfer-sm"
                 style={{ '--chamfer-fill': 'var(--panel)', '--chamfer-line': 'var(--line)' } as React.CSSProperties}
               >
-                <div className="chamfer-body overflow-x-auto" data-testid="pfd-scroll">
-                  {/* TODO(supply options): pass onSupplyOptions={(tank) => …} to open the Economy
-                      window's "Supply options" tab on that tank, once its store call exists; the
-                      link then appears on every tank this site buys by vehicle (FlowTankNode.buys). */}
-                  <FlowsheetView sheet={sheet} world={world} snap={snap} onFailUnit={failUnit} />
+                <div ref={pfdScroll} className="chamfer-body overflow-x-auto" data-testid="pfd-scroll">
+                  <FlowsheetView
+                    sheet={sheet}
+                    world={world}
+                    snap={snap}
+                    onFailUnit={failUnit}
+                    // a tank this site buys by vehicle links to "who else can supply it"
+                    onSupplyOptions={(tank) => {
+                      const material = world.tanks[tank]?.material;
+                      if (material !== undefined) openSupplyOptions(siteIdx, material);
+                    }}
+                  />
                 </div>
               </div>
+              {/* how to read the diagram's colours */}
+              <p className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[11px] text-muted" data-testid="pfd-legend">
+                <span className="inline-flex items-center gap-1.5">
+                  <span aria-hidden="true" className="inline-block h-2.5 w-3.5 border" style={{ borderColor: 'var(--alarm)', backgroundColor: '#fbeceb' }} />
+                  unit down (trains out, or its process shut)
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span aria-hidden="true" className="inline-block h-0.5 w-5" style={{ backgroundColor: 'var(--line-2)' }} />
+                  not flowing
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span aria-hidden="true" className="inline-block h-0.5 w-5" style={{ backgroundColor: 'var(--muted)' }} />
+                  flowing
+                </span>
+                {sheet.edges.some((e) => e.recycle) && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <span aria-hidden="true" className="inline-block w-5 border-t border-dashed" style={{ borderColor: 'var(--muted)' }} />
+                    recycle
+                  </span>
+                )}
+              </p>
               {failure !== null && <p className="mt-1 text-alarm" role="alert">{failure}</p>}
             </section>
             <Analytics sheet={sheet} world={world} snap={snap} hist={hist} />
