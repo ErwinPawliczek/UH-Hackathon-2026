@@ -49,6 +49,11 @@ const VEH_TO_DROPOFF = 4;
 /** Screen pixels within which a click picks a moving vehicle, and one standing at a site. */
 const PICK_MOVING_PX = 18;
 const PICK_STANDING_PX = 9;
+/** Vehicles on one route within this many km of each other, heading the same way, are one convoy. */
+const CONVOY_SAME_KM = 1;
+/** Spacing between the members of a convoy, in km: enough to tell them apart and pick each at the default view. */
+const CONVOY_GAP_ROAD_KM = 5;
+const CONVOY_GAP_WATER_KM = 10;
 /** Right on a vehicle: within this many pixels it wins even over a site. */
 const PICK_EXACT_PX = 8;
 /** Seconds a vehicle takes to appear or fade out. */
@@ -458,6 +463,7 @@ export class MapScene {
     const world = this.world;
     const targets: DrawTarget[] = [];
     const stoodAt: number[] = [];
+    const convoy = new Map<string, number>();
     for (let v = 0; v < snap.nVeh; v++) {
       const x = snap.vehPos[5 * v];
       const y = snap.vehPos[5 * v + 1];
@@ -487,7 +493,17 @@ export class MapScene {
       const routeId = snap.vehRoute?.[v];
       const progress = snap.vehProgress?.[v];
       if (routeId !== undefined && progress !== undefined && routeId < world.routes.length) {
-        const s = this.clampToWater(routeId, progress) * this.net.routes[routeId].length;
+        const length = this.net.routes[routeId].length;
+        const lead = this.clampToWater(routeId, progress) * length;
+        // Vehicles sent out together share a position: line them up behind the first.
+        const a = this.net.pointAt(routeId, Math.max(0, lead - 0.5));
+        const b = this.net.pointAt(routeId, Math.min(length, lead + 0.5));
+        const forward = (b.x - a.x) * dir[0] + (b.y - a.y) * dir[1] >= 0 ? 1 : -1;
+        const key = `${routeId}:${forward}:${Math.round(lead / CONVOY_SAME_KM)}`;
+        const rank = convoy.get(key) ?? 0;
+        convoy.set(key, rank + 1);
+        const gap = mode === 'road' ? CONVOY_GAP_ROAD_KM : CONVOY_GAP_WATER_KM;
+        const s = this.clampToWater(routeId, Math.min(length, Math.max(0, lead - forward * rank * gap)) / Math.max(length, 1e-6)) * length;
         const at = this.net.pointAt(routeId, s);
         targets.push({ x: at.x, y: at.y, net: { kind: 'route', route: routeId, s }, dir, restDir: null, standoffKm: 0 });
         continue;
