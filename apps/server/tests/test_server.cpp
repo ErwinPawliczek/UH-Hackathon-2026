@@ -1558,3 +1558,120 @@ TEST_CASE("R9 room: a player blocks a partner, the moves feed names them, the ho
   // The forecast counts blocks and the two weather scenarios as disruptions.
   CHECK(postJson(cli, base + "/forecast", {{"days", 2}}).at("disruptions") == 4);
 }
+
+TEST_CASE("R10 room: the summary sets the run beside an untouched baseline and says who broke what") {
+  RoomServer ts(false);
+  auto cli = client(ts.port);
+  // Two rooms stepped alike: one is played, one is left alone.
+  const json madeA = postJson(cli, "/api/room", json::object());
+  const json madeB = postJson(cli, "/api/room", json::object());
+  const std::string a = "/api/room/" + madeA.at("code").get<std::string>();
+  const std::string b = "/api/room/" + madeB.at("code").get<std::string>();
+  const auto roomA = ts.rooms.find(madeA.at("code").get<std::string>());
+  const auto roomB = ts.rooms.find(madeB.at("code").get<std::string>());
+  REQUIRE(roomA);
+  REQUIRE(roomB);
+  const json world = getJson(cli, a + "/world");
+  int refinery = -1, pp = -1;
+  std::vector<uint32_t> units;
+  for (size_t i = 0; i < world.at("sites").size(); ++i) {
+    const json& s = world.at("sites").at(i);
+    if (s.at("key") == "POLYPROPYLENE") pp = static_cast<int>(i);
+    if (s.at("key") == "REFINERY") {
+      refinery = static_cast<int>(i);
+      for (const json& p : s.at("processes"))
+        for (const json& u : p.at("units")) units.push_back(u.at("index").get<uint32_t>());
+    }
+  }
+  REQUIRE(refinery >= 0);
+  REQUIRE(pp >= 0);
+  const json ann = postJson(cli, a + "/join", {{"name", "Ann"}});
+  const json bob = postJson(cli, a + "/join", {{"name", "Bob"}});
+  postJson(cli, a + "/claim", {{"token", ann.at("token")}, {"site", refinery}});
+  postJson(cli, a + "/claim", {{"token", bob.at("token")}, {"site", pp}});
+
+  // Before the start the summary answers, with the run as its own baseline.
+  CHECK(getJson(cli, a + "/summary").at("economy").at("damageUsd") == 0.0);
+  postJson(cli, a + "/host", {{"hostToken", madeA.at("hostToken")}, {"action", "start"}});
+  postJson(cli, b + "/host", {{"hostToken", madeB.at("hostToken")}, {"action", "start"}});
+  const auto days = [&](int n) {
+    for (int i = 0; i < n; ++i) {
+      roomA->beat(3.0);  // 3 s at speed 8 = one day
+      roomB->beat(3.0);
+    }
+  };
+  days(2);
+  for (const uint32_t unit : units)
+    REQUIRE(postJson(cli, a + "/play", {{"token", ann.at("token")}, {"action", "unit"}, {"unit_index", unit}, {"down", true}}).at("ok") == true);
+  days(20);
+
+  const json sum = getJson(cli, a + "/summary");
+  const json quiet = getJson(cli, b + "/summary");
+  CHECK(sum.at("tick") == quiet.at("tick"));
+  CHECK(sum.at("tick") == getJson(cli, a).at("tick"));
+
+  // The untouched room: no damage, nothing broken, baseline == actual.
+  CHECK(quiet.at("economy").at("damageUsd") == 0.0);
+  CHECK(quiet.at("economy").at("actual") == quiet.at("economy").at("baseline"));
+  for (const json& s : quiet.at("sites")) CHECK(s.at("broken") == false);
+  for (const json& p : quiet.at("pipelines")) CHECK(p.at("broken") == false);
+  CHECK(quiet.at("players").empty());
+
+  // The played room's baseline is that untouched room, figure for figure.
+  CHECK(sum.at("economy").at("baseline") == quiet.at("economy").at("actual"));
+  REQUIRE(sum.at("sites").size() == quiet.at("sites").size());
+  for (size_t i = 0; i < sum.at("sites").size(); ++i) {
+    const json& s = sum.at("sites").at(i);
+    const json& q = quiet.at("sites").at(i);
+    CHECK(s.at("baselineStoppedHours") == q.at("stoppedHours"));
+    CHECK(s.at("baselineOutputT") == q.at("outputT"));
+    CHECK(s.at("baselineLostSalesUsd") == q.at("lostSalesUsd"));
+    CHECK(s.at("baselineStatus") == q.at("status"));
+  }
+  for (size_t i = 0; i < sum.at("pipelines").size(); ++i)
+    CHECK(sum.at("pipelines").at(i).at("baselineMovedT") == quiet.at("pipelines").at(i).at("movedT"));
+
+  CHECK(sum.at("economy").at("damageUsd").get<double>() > 0.0);
+  CHECK(sum.at("economy").at("damageUsd").get<double>() ==
+        doctest::Approx(sum.at("economy").at("actual").at("lostSalesUsd").get<double>() -
+                        sum.at("economy").at("baseline").at("lostSalesUsd").get<double>()));
+  const json& ref = sum.at("sites").at(static_cast<size_t>(refinery));
+  CHECK(ref.at("broken") == true);
+  CHECK(ref.at("status") == 3);
+  CHECK(ref.at("owner") == ann.at("playerId"));
+  CHECK(ref.at("ownerName") == "Ann");
+  CHECK(ref.at("stoppedHours").get<double>() > ref.at("baselineStoppedHours").get<double>() + 400.0);
+  CHECK(ref.at("outputT").get<double>() < ref.at("baselineOutputT").get<double>());
+  int others = 0, customersHurt = 0;
+  for (const json& s : sum.at("sites")) {
+    if (s.at("site") == refinery || !s.at("broken").get<bool>()) continue;
+    ++others;
+    customersHurt += s.at("customer").get<bool>() && s.at("lostSalesUsd").get<double>() > s.at("baselineLostSalesUsd").get<double>() ? 1 : 0;
+  }
+  CHECK(others >= 1);
+  CHECK(customersHurt >= 1);
+  CHECK(sum.at("economy").at("actual").at("plantsStoppedNow").get<int>() >= 1);
+
+  // Ann did it; Bob did nothing.
+  REQUIRE(sum.at("players").size() == 2);
+  const json& pa = sum.at("players").at(0);
+  const json& pb = sum.at("players").at(1);
+  CHECK(pa.at("name") == "Ann");
+  CHECK(pa.at("moves") == units.size());
+  CHECK(pa.at("site") == refinery);
+  CHECK(!pa.at("tookDown").empty());
+  bool own = false;
+  for (const json& i : pa.at("tookDown")) own = own || i == refinery;
+  CHECK(own);
+  CHECK(pa.at("damageUsd").get<double>() > 0.0);
+  CHECK(pa.at("damageUsd") == getJson(cli, a + "/scores").at("scores").at(static_cast<size_t>(refinery)).at("damageUsd"));
+  // Ann is the only one who acted, so her shadow is the baseline.
+  CHECK(pa.at("damageUsd") == sum.at("economy").at("damageUsd"));
+  CHECK(pb.at("moves") == 0);
+  CHECK(pb.at("tookDown").empty());
+  CHECK(pb.at("damageUsd") == 0.0);
+
+  // Still answers after the end.
+  postJson(cli, a + "/host", {{"hostToken", madeA.at("hostToken")}, {"action", "end"}});
+  CHECK(getJson(cli, a + "/summary").at("tick") == sum.at("tick"));
+}

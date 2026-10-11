@@ -140,6 +140,11 @@ struct SiteTrade {
   double sold_t = 0;
   double pipe_revenue = 0;
   double pipe_feed_cost = 0;
+  // For the before/after summary: hours the site was stopped (a process shut
+  // down or restarting, or nothing at the site running at all), and the
+  // customer sales it lost, at base prices.
+  double stopped_h = 0;
+  double unmet_usd = 0;
 };
 
 struct State {
@@ -169,6 +174,7 @@ struct State {
   // The cap itself lives in rate_override; this is kept for the scores view.
   std::vector<double> site_rate_share;
   std::vector<SiteTrade> site_trade;   // per site, cumulative (not hashed)
+  std::vector<double> pipe_moved_t;    // per pipeline, cumulative tonnes (not hashed)
   // trade_block: pairs that do not trade, as seller site << 32 | buyer site,
   // kept sorted. Empty unless a player set one; hashed only when not empty.
   std::vector<uint64_t> trade_blocks;

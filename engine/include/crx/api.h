@@ -62,6 +62,13 @@ const char* crx_step_report(crx_sim* sim, uint32_t ticks);
    kept only for their totals. */
 void crx_mute(crx_sim* sim);
 
+/* The run so far in the cumulative figures a before/after comparison needs:
+   {"tick","economy":{"lostSalesUsd","deliveredT","plantsStoppedNow"},
+   "sites":[{"site","key","name","customer","status","stoppedHours",
+   "outputT","lostSalesUsd"}],"pipelines":[{"index","name","from","to",
+   "movedT"}]}. Works on a muted run. Reply valid until the next call. */
+const char* crx_summary(const crx_sim* sim);
+
 /* One site's trading partners as JSON: {"site","name","buyers":[{"site",
    "key","name","materials":[..],"blocked"}],"suppliers":[same]}: who can buy
    its products, who can supply its feeds, and which the trade_block command

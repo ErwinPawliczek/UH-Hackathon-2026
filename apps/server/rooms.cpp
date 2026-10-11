@@ -147,6 +147,7 @@ Room::~Room() {
   stop_.store(true);
   if (clock_.joinable()) clock_.join();
   for (const auto& shadow : shadows) crx_destroy(shadow.second);
+  if (baseline != nullptr) crx_destroy(baseline);
   crx_destroy(sim);
 }
 
@@ -167,6 +168,7 @@ void Room::beat(double elapsedSeconds) {
   const uint32_t ticks = static_cast<uint32_t>(std::min<double>(whole, kMaxTicksPerBeat));
   crx_step(sim, ticks);
   for (const auto& shadow : shadows) crx_step(shadow.second, ticks);
+  if (baseline != nullptr) crx_step(baseline, ticks);
   refreshSnapshotLocked();
 }
 
@@ -393,6 +395,8 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
       if (room->phase != Room::Phase::Lobby) return sendJson(res, 200, no("The simulation has already started"));
       room->phase = Room::Phase::Running;
       room->tickDebt = 0;
+      room->baseline = crx_fork(room->sim);
+      if (room->baseline != nullptr) crx_mute(room->baseline);
       return ok();
     }
     if (action == "pause") {
@@ -483,7 +487,10 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
     // The engine names the player in the log line the action writes.
     command["player"] = me->id;
     command["player_name"] = me->name;
-    sendJson(res, 200, issue(*room, command, me->id));
+    const std::string reply = issue(*room, command, me->id);
+    const json::json r = json::json::parse(reply, nullptr, false);
+    if (r.is_object() && r.value("ok", false)) ++me->moves;
+    sendJson(res, 200, reply);
   });
 
   svr.Get("/api/room/" + code + "/snapshot", [&rooms, room404](const Req& req, Res& res) {
@@ -621,6 +628,80 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
       const char* text = crx_partners(r.sim, site);
       if (text == nullptr) return sendJson(out, 400, no("There is no such site"));
       sendJson(out, 200, text);
+    });
+  });
+  // Before and after: the room against its untouched baseline, site by
+  // site, and against each player's shadow for who broke what.
+  svr.Get("/api/room/" + code + "/summary", [view](const Req& req, Res& res) {
+    view(req, res, [](Room& r, Res& out) {
+      const json::json actual = json::json::parse(crx_summary(r.sim), nullptr, false);
+      const json::json base =
+          r.baseline != nullptr ? json::json::parse(crx_summary(r.baseline), nullptr, false) : actual;
+      if (!actual.is_object() || !base.is_object()) return sendJson(out, 500, no("no summary"));
+      // Clearly worse in `a` than in `b`: stopped six hours longer, a tenth
+      // less through, or (a customer) $5,000 more in lost sales.
+      const auto broken = [](const json::json& a, const json::json& b) {
+        const double out_a = a.value("outputT", 0.0), out_b = b.value("outputT", 0.0);
+        return a.value("stoppedHours", 0.0) - b.value("stoppedHours", 0.0) >= 6.0 ||
+               (out_b > 1.0 && out_a < 0.9 * out_b) ||
+               a.value("lostSalesUsd", 0.0) - b.value("lostSalesUsd", 0.0) > 5000.0;
+      };
+      json::json sites = json::json::array();
+      for (size_t i = 0; i < actual["sites"].size(); ++i) {
+        const json::json& a = actual["sites"][i];
+        const json::json& b = base["sites"][i];
+        json::json row = {{"site", a["site"]}, {"key", a["key"]}, {"name", a["name"]},
+                          {"owner", nullptr}, {"ownerName", nullptr},
+                          {"customer", a["customer"]},
+                          {"status", a["status"]}, {"baselineStatus", b["status"]},
+                          {"stoppedHours", a["stoppedHours"]}, {"baselineStoppedHours", b["stoppedHours"]},
+                          {"outputT", a["outputT"]}, {"baselineOutputT", b["outputT"]},
+                          {"lostSalesUsd", a["lostSalesUsd"]}, {"baselineLostSalesUsd", b["lostSalesUsd"]},
+                          {"broken", broken(a, b)}};
+        for (const RoomPlayer& p : r.players)
+          if (p.site == static_cast<int>(i)) {
+            row["owner"] = p.id;
+            row["ownerName"] = p.name;
+          }
+        sites.push_back(std::move(row));
+      }
+      json::json pipes = json::json::array();
+      for (size_t i = 0; i < actual["pipelines"].size(); ++i) {
+        json::json row = actual["pipelines"][i];
+        const double moved = row.value("movedT", 0.0);
+        const double before = base["pipelines"][i].value("movedT", 0.0);
+        row["baselineMovedT"] = before;
+        row["broken"] = before > 1.0 && moved < 0.9 * before;
+        pipes.push_back(std::move(row));
+      }
+      const double lost = actual["economy"].value("lostSalesUsd", 0.0);
+      json::json players = json::json::array();
+      for (const RoomPlayer& p : r.players) {
+        json::json took = json::json::array();
+        double damage = 0.0;
+        const auto shadow = r.shadows.find(p.id);
+        if (shadow != r.shadows.end()) {
+          const json::json without = json::json::parse(crx_summary(shadow->second), nullptr, false);
+          if (without.is_object()) {
+            damage = lost - without["economy"].value("lostSalesUsd", 0.0);
+            for (size_t i = 0; i < actual["sites"].size(); ++i)
+              if (broken(actual["sites"][i], without["sites"][i])) took.push_back(i);
+          }
+        }
+        players.push_back({{"id", p.id}, {"name", p.name},
+                           {"site", p.site >= 0 ? json::json(p.site) : json::json(nullptr)},
+                           {"damageUsd", damage}, {"tookDown", took}, {"moves", p.moves}});
+      }
+      sendJson(out, 200,
+               json::json{{"tick", actual["tick"]},
+                          {"economy",
+                           {{"actual", actual["economy"]},
+                            {"baseline", base["economy"]},
+                            {"damageUsd", lost - base["economy"].value("lostSalesUsd", 0.0)}}},
+                          {"sites", sites},
+                          {"pipelines", pipes},
+                          {"players", players}}
+                   .dump());
     });
   });
   svr.Get("/api/room/" + code + "/scores", [view](const Req& req, Res& res) {

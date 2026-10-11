@@ -820,6 +820,13 @@ const char* crx_partners(const crx_sim* sim, uint32_t site) {
   return api->reply.empty() ? nullptr : api->reply.c_str();
 }
 
+const char* crx_summary(const crx_sim* sim) {
+  const ApiSim* api = asApi(sim);
+  if (api == nullptr) return "{}";
+  api->reply = crx::sim::summaryJson(api->sim->world(), api->sim->state());
+  return api->reply.c_str();
+}
+
 void crx_mute(crx_sim* sim) {
   ApiSim* api = asApi(sim);
   if (api == nullptr) return;

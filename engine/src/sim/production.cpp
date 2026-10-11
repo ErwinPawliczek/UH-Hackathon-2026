@@ -73,6 +73,7 @@ void stepProduction(const World& world, State& state, const std::vector<ControlD
         state.cum_demand_t += demand_dt;
         state.cum_unmet_t += demand_dt;
         state.cum_unmet_usd += demand_dt * feedPrice(world, proc);
+        state.site_trade[proc.site.v].unmet_usd += demand_dt * feedPrice(world, proc);
         state.ledger[proc.site.v].unmet_t += demand_dt;
         if (state.sink_starved[p] == 0) {
           state.stockouts += 1;
@@ -179,6 +180,7 @@ void stepProduction(const World& world, State& state, const std::vector<ControlD
       if (unmet > 1e-9) {
         state.cum_unmet_t += unmet;
         state.cum_unmet_usd += unmet * feedPrice(world, proc);
+        state.site_trade[proc.site.v].unmet_usd += unmet * feedPrice(world, proc);
         state.ledger[proc.site.v].unmet_t += unmet;
       }
       // Stockout logging on the falling edge of service (§7.2).

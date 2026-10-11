@@ -29,6 +29,7 @@ namespace server {
 struct RoomPlayer {
   std::string id, name, token;
   int site = -1;  // world site index, -1 = none claimed
+  uint32_t moves = 0;  // accepted play actions
   std::chrono::steady_clock::time_point seen;
 };
 
@@ -72,6 +73,9 @@ class Room {
   // other command and stepped in lockstep with the room. The gap in lost
   // customer sales between the room and a shadow is that player's damage.
   std::map<std::string, crx_sim*> shadows;
+  // The room with no changes at all: forked when the host starts, never
+  // given a command, stepped with the room. The summary compares against it.
+  crx_sim* baseline = nullptr;
   std::atomic<std::chrono::steady_clock::rep> lastUsed;
 
   // Advances the run by what `elapsed` real seconds are worth at the

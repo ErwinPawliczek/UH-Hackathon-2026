@@ -79,6 +79,7 @@ std::unique_ptr<Sim> Sim::createOn(std::shared_ptr<World> world, uint64_t seed) 
   sim->state_.site_markup.assign(w.sites.size(), 0.0);
   sim->state_.site_rate_share.assign(w.sites.size(), 1.0);
   sim->state_.site_trade.assign(w.sites.size(), SiteTrade{});
+  sim->state_.pipe_moved_t.assign(w.pipelines.size(), 0.0);
   // M2 logistics (§4.4): all edges open, market index at par, the fleet at
   // its home sites, no orders.
   sim->state_.edge_open.assign(w.edges.size(), 1);
@@ -191,6 +192,18 @@ void Sim::step(uint32_t ticks) {
       if (w.catalog.process_types[w.processes[p].type].boundary != Boundary::None) continue;
       state_.cum_shutdown_h += kTickHours;
       state_.proc_totals[p].down_h += kTickHours;
+    }
+    // Per-site stopped hours (summary view; not hashed).
+    for (size_t s = 0; s < w.sites.size(); ++s) {
+      bool any = false, down = false, running = false;
+      for (size_t p = 0; p < w.processes.size(); ++p) {
+        if (w.processes[p].site.v != s) continue;
+        any = true;
+        const ProcStatus st = state_.proc[p].status;
+        down = down || st == ProcStatus::Shutdown || st == ProcStatus::Restarting;
+        running = running || state_.proc[p].rate_t_h > 1e-9;
+      }
+      if (any && (down || !running)) state_.site_trade[s].stopped_h += kTickHours;
     }
     stepPipelines(w, state_);
     stepProduction(w, state_, control, production, rec_);
