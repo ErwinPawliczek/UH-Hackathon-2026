@@ -14,6 +14,7 @@
 
 #include "sim/routes.h"
 #include "sim/sim.h"
+#include "sim/world.h"
 
 #include "crx/rng.h"
 
@@ -69,7 +70,7 @@ struct ApiSim {
     std::string error;
     sim = Sim::create(seed, error);
     if (sim == nullptr) throw std::runtime_error(error);
-    buildTerrain(seed, terrain);
+    buildTerrain(*sim, terrain);
     buildWorldJson(*sim, terrain, world_json, edge_route);
   }
 
@@ -86,7 +87,7 @@ struct ApiSim {
 
   static void buildWorldJson(const Sim& s, const std::vector<float>& terrain,
                              std::string& out, std::vector<uint32_t>& edge_route);
-  static void buildTerrain(uint64_t seed, std::vector<float>& out);
+  static void buildTerrain(const Sim& sim, std::vector<float>& out);
 };
 
 ApiSim* asApi(crx_sim* s) { return reinterpret_cast<ApiSim*>(s); }
@@ -239,10 +240,10 @@ void ApiSim::buildWorldJson(const Sim& s, const std::vector<float>& terrain,
 // stub's generator (world.ts makeTerrain) so the engine-owned world renders
 // with the same island character — value-noise meadows, sea in the NE,
 // highlands toward the west, heights in metres on a 61×41 / 10 km grid.
-void ApiSim::buildTerrain(uint64_t seed, std::vector<float>& out) {
+void ApiSim::buildTerrain(const Sim& sim, std::vector<float>& out) {
   constexpr int kCols = 61, kRows = 41;
   constexpr double kCellKm = 10.0;
-  uint32_t rng = static_cast<uint32_t>(seed) ^ 0x9e3779b9u;
+  uint32_t rng = static_cast<uint32_t>(sim.world().seed) ^ 0x9e3779b9u;
   auto next = [&rng]() {
     rng += 0x6D2B79F5u;
     uint32_t t = rng ^ (rng >> 15);
@@ -264,7 +265,7 @@ void ApiSim::buildTerrain(uint64_t seed, std::vector<float>& out) {
       const int x0 = static_cast<int>(std::floor(fx));
       const int y0 = static_cast<int>(std::floor(fy));
       const double tx = fx - x0, ty = fy - y0;
-      const auto g = [&](int gx, int gy) { return lattice[gy * gw + gx]; };
+      auto g = [&](int gx, int gy) { return lattice[gy * gw + gx]; };
       const double sx = tx * tx * (3 - 2 * tx);
       const double sy = ty * ty * (3 - 2 * ty);
       const double top = g(x0, y0) * (1 - sx) + g(x0 + 1, y0) * sx;
@@ -275,15 +276,51 @@ void ApiSim::buildTerrain(uint64_t seed, std::vector<float>& out) {
   const auto base = octave(90);
   const auto detail = octave(30);
 
+  // Terrain frame from the world (§6.1): the sea is everything beyond the
+  // frame's coast edge, the river is a channel along its polyline. Worldgen
+  // routes water on exactly these features, so painted water and route
+  // geometry agree by construction.
+  const auto& w = sim.world();
+  const auto coastDist = [&](double x, double y) {
+    switch (w.sea_edge) {
+      case 0: return w.map_h_km - y;  // sea north of the top edge
+      case 1: return y;               // sea south of the bottom edge
+      case 2: return w.map_w_km - x;  // sea east of the right edge
+      default: return x;              // sea west of the left edge
+    }
+  };
+  // Point → segment distance over the river polyline (x,y pairs).
+  const auto riverDist = [&](double x, double y) {
+    const auto& r = w.river_xy;
+    if (r.size() < 4) return 1e18;
+    double best = 1e18;
+    const size_t n = r.size() / 2;
+    for (size_t i = 1; i < n; ++i) {
+      const double ax = r[2 * i - 2], ay = r[2 * i - 1];
+      const double bx = r[2 * i], by = r[2 * i + 1];
+      const double abx = bx - ax, aby = by - ay;
+      const double ab2 = abx * abx + aby * aby;
+      double t = ab2 > 0.0 ? ((x - ax) * abx + (y - ay) * aby) / ab2 : 0.0;
+      t = std::clamp(t, 0.0, 1.0);
+      const double dx = x - (ax + abx * t), dy = y - (ay + aby * t);
+      best = std::min(best, std::sqrt(dx * dx + dy * dy));
+    }
+    return best;
+  };
+
   out.assign(static_cast<size_t>(kCols) * kRows, 0.f);
-  for (int r = 0; r < kRows; ++r) {
+  for (int row = 0; row < kRows; ++row) {
     for (int c = 0; c < kCols; ++c) {
-      const double x = c * kCellKm, y = r * kCellKm;
-      const double land = 1 - smooth(x + 0.9 * y, 560, 680);
-      const double highlands = std::pow(1 - x / 600.0, 2);
+      const double x = c * kCellKm, y = row * kCellKm;
+      const double d = coastDist(x, y);
+      const double land = 1 - smooth(d, 0.0, 40.0);  // shore band: 0 km water → 40 km inland
+      const double highlands = std::pow(1 - std::min(x / std::max(w.map_w_km, 1.0), 1.0), 2);
       const double n = 0.65 * base(x, y) + 0.35 * detail(x, y);
-      out[static_cast<size_t>(r) * kCols + c] =
-          static_cast<float>(-6 + land * (5 + 26 * n + 12 * highlands));
+      double h = -6 + land * (5 + 26 * n + 12 * highlands);
+      // River channel: water within 2.5 km, banks rising to land by 7 km.
+      const double rd = riverDist(x, y);
+      if (rd < 7.0) h = std::min(h, -6 + smooth(rd, 2.5, 7.0) * (5 + 26 * n + 12 * highlands));
+      out[static_cast<size_t>(row) * kCols + c] = static_cast<float>(h);
     }
   }
 }
@@ -489,7 +526,7 @@ crx_sim* crx_create(const char* config_json) {
     }
     auto* api = new ApiSim();
     api->sim = std::move(sim);
-    ApiSim::buildTerrain(api->sim->world().seed, api->terrain);
+    ApiSim::buildTerrain(*api->sim, api->terrain);
     ApiSim::buildWorldJson(*api->sim, api->terrain, api->world_json, api->edge_route);
     return reinterpret_cast<crx_sim*>(api);
   } catch (const std::exception& e) {

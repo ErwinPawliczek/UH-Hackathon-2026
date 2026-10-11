@@ -36,6 +36,7 @@ add_library(crx_engine STATIC
   # sim, so the two halves cannot stay separate link targets.
   engine/src/world/worldgen/CatalogData.cpp
   engine/src/world/worldgen/Feasibility.cpp
+  engine/src/world/worldgen/Freeze.cpp
   engine/src/world/worldgen/Geo.cpp
   engine/src/world/worldgen/Layout.cpp
   engine/src/world/worldgen/NamedWorlds.cpp
@@ -92,6 +93,13 @@ target_link_libraries(crx_catalog_tests PRIVATE crx_engine doctest::doctest)
 target_compile_definitions(crx_catalog_tests PRIVATE
   CRX_CATALOG_DIR="${CMAKE_SOURCE_DIR}/engine/data/catalog")
 add_test(NAME catalog COMMAND crx_catalog_tests)
+
+# ---- default-world acceptance: the frozen gulf-basin file, re-validated ----
+add_executable(crx_default_world_tests engine/tests/test_default_world.cpp)
+target_link_libraries(crx_default_world_tests PRIVATE crx_engine doctest::doctest)
+target_compile_definitions(crx_default_world_tests PRIVATE
+  CRX_CATALOG_DIR="${CMAKE_SOURCE_DIR}/engine/data/catalog")
+add_test(NAME default_world COMMAND crx_default_world_tests)
 
 # ---- worldgen tests (worldgen is part of crx_engine, §1) ----
 add_executable(crx_worldgen_tests engine/tests/test_worldgen.cpp)

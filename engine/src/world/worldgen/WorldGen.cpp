@@ -33,6 +33,15 @@ GeneratedWorld assemble(uint64_t seed, const GenParams& params, const Frame& fra
   w.seed = seed;
   w.params = params;
 
+  // Terrain frame: sea edge and the river feature polyline, serialized so a
+  // frozen world file rebuilds the renderer's height field (§6.1).
+  w.sea_edge = frame.sea_edge;
+  w.river_xy.reserve(ft.river.size() * 2);
+  for (const Vec2& p : ft.river) {
+    w.river_xy.push_back(static_cast<float>(p.x));
+    w.river_xy.push_back(static_cast<float>(p.y));
+  }
+
   // -- nodes and edges (polyline vertices appended in edge order).
   w.nodes.reserve(routes.nodes.size());
   for (const Routes::NodeRef& n : routes.nodes)

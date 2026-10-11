@@ -141,6 +141,14 @@ struct World {
   std::vector<RouteNode> nodes;
   std::vector<RouteEdge> edges;
   std::vector<double> polyline_xy;
+
+  // Terrain frame (§6.1): map extent, which edge is sea (0 N, 1 S, 2 E, 3 W)
+  // and the river feature polyline (x,y km pairs). ApiSim::buildTerrain reads
+  // these to raise the height field the web renderer classifies land/water
+  // with, so route geometry and painted water agree by construction.
+  double map_w_km = 600.0, map_h_km = 400.0;
+  int sea_edge = 0;
+  std::vector<double> river_xy;
   struct FleetEntry {
     uint16_t cls = 0;
     SiteId home{};

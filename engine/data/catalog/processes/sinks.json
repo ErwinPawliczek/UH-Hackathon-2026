@@ -1,288 +1,994 @@
 [
-  { "key": "FUEL_DEPOT_GASOLINE", "name": "City gasoline demand", "basis": "GASOLINE",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+  {
+    "key": "FUEL_DEPOT_GASOLINE",
+    "name": "City gasoline demand",
+    "basis": "GASOLINE",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
     "units": [
-      { "key": "FD-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
-        "recipes": [ { "in": { "GASOLINE": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
-    ]
-  },
-  { "key": "FUEL_DEPOT_DIESEL", "name": "City diesel demand", "basis": "DIESEL",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
-    "units": [
-      { "key": "FD-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
-        "recipes": [ { "in": { "DIESEL": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
-    ]
-  },
-  { "key": "FUEL_DEPOT_JET", "name": "City jet fuel demand", "basis": "JET",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
-    "units": [
-      { "key": "FD-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
-        "recipes": [ { "in": { "JET": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
-    ]
-  },
-  { "key": "FUEL_DEPOT_LPG", "name": "City LPG demand", "basis": "LPG",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
-    "units": [
-      { "key": "FD-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
-        "recipes": [ { "in": { "LPG": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
-    ]
-  },
-  { "key": "GAS_GRID_METHANE", "name": "Gas grid city demand", "basis": "METHANE",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
-    "units": [
-      { "key": "GG-OUT", "name": "Demand draw", "glyph": "pipe_rack", "trains": 1,
-        "recipes": [ { "in": { "METHANE": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
-    ]
-  },
-  { "key": "PACKAGING_PE", "name": "Packaging PE demand", "basis": "PE",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
-    "units": [
-      { "key": "PK-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
-        "recipes": [ { "in": { "PE": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
-    ]
-  },
-  { "key": "PACKAGING_PP", "name": "Packaging PP demand", "basis": "PP",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
-    "units": [
-      { "key": "PK-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
-        "recipes": [ { "in": { "PP": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
-    ]
-  },
-  { "key": "CONSTRUCTION_PVC", "name": "Construction PVC demand", "basis": "PVC",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
-    "units": [
-      { "key": "CN-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
-        "recipes": [ { "in": { "PVC": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
-    ]
-  },
-  { "key": "CONSUMER_GOODS_PS", "name": "Consumer goods PS demand", "basis": "PS",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
-    "units": [
-      { "key": "CG-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
-        "recipes": [ { "in": { "PS": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
-    ]
-  },
-  { "key": "CONSUMER_GOODS_PP", "name": "Consumer goods PP demand", "basis": "PP",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
-    "units": [
-      { "key": "CG-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
-        "recipes": [ { "in": { "PP": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
-    ]
-  },
-  { "key": "PAINTS_SOLVENT", "name": "Paints and coatings solvent demand", "basis": "SOLVENT",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
-    "units": [
-      { "key": "PC-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
-        "recipes": [ { "in": { "SOLVENT": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
-    ]
-  },
-  { "key": "PAINTS_STYRENE", "name": "Paints and coatings styrene demand", "basis": "STYRENE",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
-    "units": [
-      { "key": "PC-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
-        "recipes": [ { "in": { "STYRENE": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
-    ]
-  },
-  { "key": "PROCESS_INDUSTRIES_CAUSTIC", "name": "Process industries caustic demand", "basis": "CAUSTIC",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
-    "units": [
-      { "key": "PI-OUT", "name": "Demand draw", "glyph": "truck_rack", "trains": 1,
-        "recipes": [ { "in": { "CAUSTIC": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
-    ]
-  },
-  { "key": "PORT_BUNKER_FUEL_OIL", "name": "Port bunkering fuel oil demand", "basis": "FUEL_OIL",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
-    "units": [
-      { "key": "PT-BUNK", "name": "Bunkering draw", "glyph": "jetty", "trains": 1,
-        "recipes": [ { "in": { "FUEL_OIL": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+      {
+        "key": "FD-OUT",
+        "name": "Demand draw",
+        "glyph": "truck_rack",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "GASOLINE": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
     ]
   },
   {
-    "key": "PORT_EXPORT_LPG", "name": "Port export (LPG)", "basis": "LPG",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "key": "FUEL_DEPOT_DIESEL",
+    "name": "City diesel demand",
+    "basis": "DIESEL",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
     "units": [
-      { "key": "PT-EXP-LPG", "name": "Export draw", "glyph": "jetty", "trains": 1,
-        "recipes": [ { "in": { "LPG": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+      {
+        "key": "FD-OUT",
+        "name": "Demand draw",
+        "glyph": "truck_rack",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "DIESEL": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
     ]
   },
   {
-    "key": "PORT_EXPORT_NAPHTHA", "name": "Port export (naphtha)", "basis": "NAPHTHA",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "key": "FUEL_DEPOT_JET",
+    "name": "City jet fuel demand",
+    "basis": "JET",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
     "units": [
-      { "key": "PT-EXP-NAPHTHA", "name": "Export draw", "glyph": "jetty", "trains": 1,
-        "recipes": [ { "in": { "NAPHTHA": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+      {
+        "key": "FD-OUT",
+        "name": "Demand draw",
+        "glyph": "truck_rack",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "JET": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
     ]
   },
   {
-    "key": "PORT_EXPORT_GASOLINE", "name": "Port export (gasoline)", "basis": "GASOLINE",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "key": "FUEL_DEPOT_LPG",
+    "name": "City LPG demand",
+    "basis": "LPG",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
     "units": [
-      { "key": "PT-EXP-GASOLINE", "name": "Export draw", "glyph": "jetty", "trains": 1,
-        "recipes": [ { "in": { "GASOLINE": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+      {
+        "key": "FD-OUT",
+        "name": "Demand draw",
+        "glyph": "truck_rack",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "LPG": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
     ]
   },
   {
-    "key": "PORT_EXPORT_JET", "name": "Port export (jet fuel)", "basis": "JET",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "key": "GAS_GRID_METHANE",
+    "name": "Gas grid city demand",
+    "basis": "METHANE",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
     "units": [
-      { "key": "PT-EXP-JET", "name": "Export draw", "glyph": "jetty", "trains": 1,
-        "recipes": [ { "in": { "JET": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+      {
+        "key": "GG-OUT",
+        "name": "Demand draw",
+        "glyph": "pipe_rack",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "METHANE": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
     ]
   },
   {
-    "key": "PORT_EXPORT_DIESEL", "name": "Port export (diesel)", "basis": "DIESEL",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "key": "PACKAGING_PE",
+    "name": "Packaging PE demand",
+    "basis": "PE",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
     "units": [
-      { "key": "PT-EXP-DIESEL", "name": "Export draw", "glyph": "jetty", "trains": 1,
-        "recipes": [ { "in": { "DIESEL": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+      {
+        "key": "PK-OUT",
+        "name": "Demand draw",
+        "glyph": "truck_rack",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "PE": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
     ]
   },
   {
-    "key": "PORT_EXPORT_PROPYLENE", "name": "Port export (propylene)", "basis": "PROPYLENE",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "key": "PACKAGING_PP",
+    "name": "Packaging PP demand",
+    "basis": "PP",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
     "units": [
-      { "key": "PT-EXP-PROPYLENE", "name": "Export draw", "glyph": "jetty", "trains": 1,
-        "recipes": [ { "in": { "PROPYLENE": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+      {
+        "key": "PK-OUT",
+        "name": "Demand draw",
+        "glyph": "truck_rack",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "PP": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
     ]
   },
   {
-    "key": "PORT_EXPORT_ETHANE", "name": "Port export (ethane)", "basis": "ETHANE",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "key": "CONSTRUCTION_PVC",
+    "name": "Construction PVC demand",
+    "basis": "PVC",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
     "units": [
-      { "key": "PT-EXP-ETHANE", "name": "Export draw", "glyph": "jetty", "trains": 1,
-        "recipes": [ { "in": { "ETHANE": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+      {
+        "key": "CN-OUT",
+        "name": "Demand draw",
+        "glyph": "truck_rack",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "PVC": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
     ]
   },
   {
-    "key": "PORT_EXPORT_ETHYLENE", "name": "Port export (ethylene)", "basis": "ETHYLENE",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "key": "CONSUMER_GOODS_PS",
+    "name": "Consumer goods PS demand",
+    "basis": "PS",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
     "units": [
-      { "key": "PT-EXP-ETHYLENE", "name": "Export draw", "glyph": "jetty", "trains": 1,
-        "recipes": [ { "in": { "ETHYLENE": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+      {
+        "key": "CG-OUT",
+        "name": "Demand draw",
+        "glyph": "truck_rack",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "PS": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
     ]
   },
   {
-    "key": "PORT_EXPORT_BENZENE", "name": "Port export (benzene)", "basis": "BENZENE",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "key": "CONSUMER_GOODS_PP",
+    "name": "Consumer goods PP demand",
+    "basis": "PP",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
     "units": [
-      { "key": "PT-EXP-BENZENE", "name": "Export draw", "glyph": "jetty", "trains": 1,
-        "recipes": [ { "in": { "BENZENE": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+      {
+        "key": "CG-OUT",
+        "name": "Demand draw",
+        "glyph": "truck_rack",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "PP": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
     ]
   },
   {
-    "key": "PORT_EXPORT_SOLVENT", "name": "Port export (solvent)", "basis": "SOLVENT",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "key": "PAINTS_SOLVENT",
+    "name": "Paints and coatings solvent demand",
+    "basis": "SOLVENT",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
     "units": [
-      { "key": "PT-EXP-SOLVENT", "name": "Export draw", "glyph": "jetty", "trains": 1,
-        "recipes": [ { "in": { "SOLVENT": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+      {
+        "key": "PC-OUT",
+        "name": "Demand draw",
+        "glyph": "truck_rack",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "SOLVENT": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
     ]
   },
   {
-    "key": "PORT_EXPORT_STYRENE", "name": "Port export (styrene)", "basis": "STYRENE",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "key": "PAINTS_STYRENE",
+    "name": "Paints and coatings styrene demand",
+    "basis": "STYRENE",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
     "units": [
-      { "key": "PT-EXP-STYRENE", "name": "Export draw", "glyph": "jetty", "trains": 1,
-        "recipes": [ { "in": { "STYRENE": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+      {
+        "key": "PC-OUT",
+        "name": "Demand draw",
+        "glyph": "truck_rack",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "STYRENE": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
     ]
   },
   {
-    "key": "PORT_EXPORT_CAUSTIC", "name": "Port export (caustic)", "basis": "CAUSTIC",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "key": "PROCESS_INDUSTRIES_CAUSTIC",
+    "name": "Process industries caustic demand",
+    "basis": "CAUSTIC",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
     "units": [
-      { "key": "PT-EXP-CAUSTIC", "name": "Export draw", "glyph": "jetty", "trains": 1,
-        "recipes": [ { "in": { "CAUSTIC": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+      {
+        "key": "PI-OUT",
+        "name": "Demand draw",
+        "glyph": "truck_rack",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "CAUSTIC": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
     ]
   },
   {
-    "key": "PORT_EXPORT_PE", "name": "Port export (polyethylene)", "basis": "PE",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "key": "PORT_BUNKER_FUEL_OIL",
+    "name": "Port bunkering fuel oil demand",
+    "basis": "FUEL_OIL",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
     "units": [
-      { "key": "PT-EXP-PE", "name": "Export draw", "glyph": "jetty", "trains": 1,
-        "recipes": [ { "in": { "PE": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+      {
+        "key": "PT-BUNK",
+        "name": "Bunkering draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "FUEL_OIL": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
     ]
   },
   {
-    "key": "PORT_EXPORT_PP", "name": "Port export (polypropylene)", "basis": "PP",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "key": "PORT_EXPORT_LPG",
+    "name": "Port export (LPG)",
+    "basis": "LPG",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
     "units": [
-      { "key": "PT-EXP-PP", "name": "Export draw", "glyph": "jetty", "trains": 1,
-        "recipes": [ { "in": { "PP": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+      {
+        "key": "PT-EXP-LPG",
+        "name": "Export draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "LPG": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
     ]
   },
   {
-    "key": "PORT_EXPORT_PVC", "name": "Port export (PVC)", "basis": "PVC",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "key": "PORT_EXPORT_NAPHTHA",
+    "name": "Port export (naphtha)",
+    "basis": "NAPHTHA",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
     "units": [
-      { "key": "PT-EXP-PVC", "name": "Export draw", "glyph": "jetty", "trains": 1,
-        "recipes": [ { "in": { "PVC": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+      {
+        "key": "PT-EXP-NAPHTHA",
+        "name": "Export draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "NAPHTHA": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
     ]
   },
   {
-    "key": "PORT_EXPORT_PS", "name": "Port export (polystyrene)", "basis": "PS",
-    "modes": ["DEFAULT"], "internal": [], "boundary": "sink", "rations": false,
-    "turndown": 0.0, "ramp_per_h": 1.0, "restart_h": 0,
+    "key": "PORT_EXPORT_GASOLINE",
+    "name": "Port export (gasoline)",
+    "basis": "GASOLINE",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
     "units": [
-      { "key": "PT-EXP-PS", "name": "Export draw", "glyph": "jetty", "trains": 1,
-        "recipes": [ { "in": { "PS": 1.000 }, "out": {},
-                       "heat_gj": 0.0, "power_mwh": 0.0 } ] }
+      {
+        "key": "PT-EXP-GASOLINE",
+        "name": "Export draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "GASOLINE": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_JET",
+    "name": "Port export (jet fuel)",
+    "basis": "JET",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
+    "units": [
+      {
+        "key": "PT-EXP-JET",
+        "name": "Export draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "JET": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_DIESEL",
+    "name": "Port export (diesel)",
+    "basis": "DIESEL",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
+    "units": [
+      {
+        "key": "PT-EXP-DIESEL",
+        "name": "Export draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "DIESEL": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_PROPYLENE",
+    "name": "Port export (propylene)",
+    "basis": "PROPYLENE",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
+    "units": [
+      {
+        "key": "PT-EXP-PROPYLENE",
+        "name": "Export draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "PROPYLENE": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_ETHANE",
+    "name": "Port export (ethane)",
+    "basis": "ETHANE",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
+    "units": [
+      {
+        "key": "PT-EXP-ETHANE",
+        "name": "Export draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "ETHANE": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_ETHYLENE",
+    "name": "Port export (ethylene)",
+    "basis": "ETHYLENE",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
+    "units": [
+      {
+        "key": "PT-EXP-ETHYLENE",
+        "name": "Export draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "ETHYLENE": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_BENZENE",
+    "name": "Port export (benzene)",
+    "basis": "BENZENE",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
+    "units": [
+      {
+        "key": "PT-EXP-BENZENE",
+        "name": "Export draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "BENZENE": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_SOLVENT",
+    "name": "Port export (solvent)",
+    "basis": "SOLVENT",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
+    "units": [
+      {
+        "key": "PT-EXP-SOLVENT",
+        "name": "Export draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "SOLVENT": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_STYRENE",
+    "name": "Port export (styrene)",
+    "basis": "STYRENE",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
+    "units": [
+      {
+        "key": "PT-EXP-STYRENE",
+        "name": "Export draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "STYRENE": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_CAUSTIC",
+    "name": "Port export (caustic)",
+    "basis": "CAUSTIC",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
+    "units": [
+      {
+        "key": "PT-EXP-CAUSTIC",
+        "name": "Export draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "CAUSTIC": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_PE",
+    "name": "Port export (polyethylene)",
+    "basis": "PE",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
+    "units": [
+      {
+        "key": "PT-EXP-PE",
+        "name": "Export draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "PE": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_PP",
+    "name": "Port export (polypropylene)",
+    "basis": "PP",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
+    "units": [
+      {
+        "key": "PT-EXP-PP",
+        "name": "Export draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "PP": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_PVC",
+    "name": "Port export (PVC)",
+    "basis": "PVC",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
+    "units": [
+      {
+        "key": "PT-EXP-PVC",
+        "name": "Export draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "PVC": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_PS",
+    "name": "Port export (polystyrene)",
+    "basis": "PS",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
+    "units": [
+      {
+        "key": "PT-EXP-PS",
+        "name": "Export draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "PS": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "PORT_EXPORT_FUEL_OIL",
+    "name": "Port export (fuel oil)",
+    "basis": "FUEL_OIL",
+    "modes": [
+      "DEFAULT"
+    ],
+    "internal": [],
+    "boundary": "sink",
+    "rations": false,
+    "turndown": 0.0,
+    "ramp_per_h": 1.0,
+    "restart_h": 0,
+    "units": [
+      {
+        "key": "PT-EXP-FUELOIL",
+        "name": "Export draw",
+        "glyph": "jetty",
+        "trains": 1,
+        "recipes": [
+          {
+            "in": {
+              "FUEL_OIL": 1.0
+            },
+            "out": {},
+            "heat_gj": 0.0,
+            "power_mwh": 0.0
+          }
+        ]
+      }
     ]
   }
 ]

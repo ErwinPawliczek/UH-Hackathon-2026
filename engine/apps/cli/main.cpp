@@ -9,6 +9,7 @@
 #include "crx/api.h"
 #include "crx/catalog.h"
 #include "world/worldgen/CatalogView.h"
+#include "world/worldgen/Freeze.h"
 #include "world/worldgen/WorldGen.h"
 #include "world/worldgen/WorldJson.h"
 
@@ -222,6 +223,37 @@ int main(int argc, char** argv) {
                 r.world.nTanks(), r.world.nProcesses(), r.world.units.size(),
                 r.world.edges.size(), r.world.nPipelines(), r.world.nVehicles(),
                 r.world.contracts.size(), out);
+    return 0;
+  }
+
+  if (cmd == "freeze-world") {
+    crx::Catalog catalog;
+    crx::worldgen::CatalogView view;
+    std::string cat_err;
+    if (!crx::loadCatalogFromDir(CRX_DATA_DIR, catalog, cat_err)) {
+      std::fprintf(stderr, "freeze-world: %s\n", cat_err.c_str());
+      return 1;
+    }
+    view = crx::worldgen::makeCatalogView(catalog);
+    crx::worldgen::GeneratedWorld frozen;
+    std::string err;
+    if (!crx::worldgen::freezeGulfBasin(seed, view, frozen, err)) {
+      std::fprintf(stderr, "freeze-world: %s\n", err.c_str());
+      return 1;
+    }
+    const std::string json = crx::worldgen::toWorldJson(frozen).dump(2);
+    std::FILE* f = std::fopen(out, "wb");
+    if (f == nullptr) {
+      std::fprintf(stderr, "cannot open %s for writing\n", out);
+      return 1;
+    }
+    std::fwrite(json.data(), 1, json.size(), f);
+    std::fclose(f);
+    std::printf("frozen world (base seed %llu): sites %zu, tanks %zu, processes %zu, units %zu, "
+                "edges %zu, pipelines %zu, vehicles %zu, contracts %zu -> %s\n",
+                static_cast<unsigned long long>(seed), frozen.nSites(), frozen.nTanks(),
+                frozen.nProcesses(), frozen.units.size(), frozen.edges.size(),
+                frozen.nPipelines(), frozen.nVehicles(), frozen.contracts.size(), out);
     return 0;
   }
 

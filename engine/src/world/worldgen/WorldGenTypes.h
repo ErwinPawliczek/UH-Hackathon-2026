@@ -131,6 +131,12 @@ struct GeneratedWorld {
 
   NodeId overseas_node;  // the OVERSEAS berth in the sea subgraph (imports)
 
+  // Terrain frame (§6.1): which map edge is sea, and the river feature
+  // polyline (x,y pairs). Serialized so a frozen world file rebuilds the
+  // exact height field the web renderer classifies land/water with.
+  int sea_edge = 0;             // 0 north (y=h), 1 south (y=0), 2 east (x=w), 3 west (x=0)
+  std::vector<float> river_xy;  // highlands → sea mouth, x,y pairs
+
   std::vector<WNode> nodes;
   std::vector<WEdge> edges;
   std::vector<float> polyline_xy;

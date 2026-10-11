@@ -52,6 +52,15 @@ bool buildGeneratedWorld(const Catalog& catalog, const worldgen::GeneratedWorld&
   }
   out.polyline_xy.reserve(gen.polyline_xy.size());
   for (const float v : gen.polyline_xy) out.polyline_xy.push_back(static_cast<double>(v));
+
+  // Terrain frame: map extent, sea edge and river feature, for ApiSim's
+  // height field — route geometry and painted water agree by construction.
+  out.map_w_km = gen.params.map_w_km;
+  out.map_h_km = gen.params.map_h_km;
+  out.sea_edge = gen.sea_edge;
+  out.river_xy.reserve(gen.river_xy.size());
+  for (const float v : gen.river_xy) out.river_xy.push_back(static_cast<double>(v));
+
   out.edges.reserve(gen.edges.size());
   for (const worldgen::WEdge& e : gen.edges) {
     RouteEdge re;

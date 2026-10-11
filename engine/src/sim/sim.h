@@ -56,12 +56,19 @@ class Sim {
   // paths and by the warm-up gate (which bridges a generated world itself).
   static std::unique_ptr<Sim> fromWorld(std::shared_ptr<const World> world, std::string& error);
 
+  // Loads the frozen default world (gulf-basin.json from the engine data dir)
+  // and initialises state — the sixsite pattern for the showcase world.
+  static std::unique_ptr<Sim> createFrozen(std::string& error);
+
   // Config JSON: {"seed": N, "adaptation": b, "world": "default"|"sixsite",
-  // "preset": "<named world>", "gen": {…overrides…}}. Seed-only configs build
-  // the generated world (the §6 default); "world":"sixsite" keeps the M1
-  // test world reachable; "preset" selects a named, warm-up-validated seed;
-  // "gen" overrides generation parameters. Unknown keys are rejected so
-  // typos do not silently default.
+  // "preset": "<named world>", "gen": {…overrides…}}. The default world (no
+  // keys, or world "default" with no seed) is the FROZEN gulf-basin file — no
+  // generation at runtime. "preset" also loads the frozen world (--seed never
+  // applies to a preset); a seed-only config builds a generated world, which
+  // is the development path for arbitrary seeds (unsupported for demos by
+  // design); "world":"sixsite" keeps the M1 test world reachable; "gen"
+  // overrides generation parameters. Unknown keys are rejected so typos do
+  // not silently default.
   static std::unique_ptr<Sim> createFromConfig(const char* config_json, std::string& error);
 
   // Deep copy: World shared, State and Recorder copied. Forks the run.

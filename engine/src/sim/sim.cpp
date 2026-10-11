@@ -2,11 +2,14 @@
 #include "sim/sim.h"
 
 #include "sim/sixsite.h"
+#include "world/worldgen/WorldJson.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <sstream>
 
 using json = nlohmann::json;
 
@@ -40,6 +43,28 @@ std::unique_ptr<Sim> Sim::createGenerated(uint64_t seed, const worldgen::GenPara
   auto world = std::make_shared<World>();
   if (!buildGeneratedWorld(catalog, r.world, *world, error)) return nullptr;
   world->seed = r.world.seed;
+  return fromWorld(world, error);
+}
+
+// The default session world: the frozen gulf-basin file (engine/data/catalog/
+// gulf-basin.json), frozen from generator seed 709 and hand-balanced. No
+// generation at runtime — the file is the world (sixsite pattern).
+std::unique_ptr<Sim> Sim::createFrozen(std::string& error) {
+  crx::Catalog catalog;
+  if (!loadCatalogFromDir(CRX_DATA_DIR, catalog, error)) return nullptr;
+  const std::string path = std::string(CRX_DATA_DIR) + "/gulf-basin.json";
+  std::ifstream in(path);
+  if (!in) {
+    error = "cannot open the frozen default world at " + path;
+    return nullptr;
+  }
+  std::stringstream buf;
+  buf << in.rdbuf();
+  worldgen::GeneratedWorld w;
+  if (!worldgen::fromWorldJson(buf.str(), w, error)) return nullptr;
+  auto world = std::make_shared<World>();
+  if (!buildGeneratedWorld(catalog, w, *world, error)) return nullptr;
+  world->seed = w.seed;
   return fromWorld(world, error);
 }
 
@@ -222,12 +247,14 @@ std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string&
   if (world_kind == "sixsite") {
     sim = create(seed, error);
   } else if (have_preset) {
-    sim = createGenerated(seed, error);  // named preset
+    sim = createFrozen(error);  // named presets load frozen worlds; --seed never applies
   } else if (have_seed) {
+    // Seed-only configs build a generated world: the development path for
+    // arbitrary seeds (unsupported for demos by design — README).
     sim = have_gen ? createGenerated(seed, params, error) : createGenerated(seed, error);
   } else {
-    // No seed and no preset: the default world is a named preset (§6.7).
-    sim = createGenerated(worldgen::namedWorlds().front().seed, error);
+    // No seed, no preset: the default world is the frozen gulf-basin file.
+    sim = createFrozen(error);
   }
   if (sim) sim->state().adaptation = adaptation_override;
   return sim;
