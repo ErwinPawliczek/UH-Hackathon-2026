@@ -130,6 +130,25 @@ export function weighedWords(o: Pick<SourcingOption, 'time_usd_t' | 'switch_usd_
   return `When choosing, this plant counts an extra ${parts.join(' and ')} (not money paid).`;
 }
 
+/**
+ * Where a seller's site and the process that makes this product are in
+ * different states, both in plain words: "Refinery: partly shut down, still
+ * supplying diesel". Null when they agree, or the engine does not send the
+ * site's own state.
+ */
+export function sellerSplitWords(o: Pick<SourcingOption, 'seller_name' | 'seller_state' | 'seller_site_state'>, material: string): string | null {
+  const site = o.seller_site_state;
+  if (site === undefined || site === null || site === o.seller_state) return null;
+  const what = materialName(material);
+  if (supplierDown(site) && !supplierDown(o.seller_state)) {
+    return `${o.seller_name}: ${site === 'restarting' ? 'partly restarting' : 'partly shut down'}, still supplying ${what}`;
+  }
+  if (supplierDown(o.seller_state) && !supplierDown(site)) {
+    return `${o.seller_name}: still running, but the unit that makes ${what} is ${stateWords(o.seller_state)}; it sells what is in the tank`;
+  }
+  return `${o.seller_name}: the site is ${stateWords(site)}, the unit that makes ${what} is ${stateWords(o.seller_state)}`;
+}
+
 /** "Styrenics has 3.0 days of benzene; its usual supplier, Steam cracker (flex), is shut down." */
 export function tankHeadline(d: SourcingDetail): string {
   const t = d.tank;

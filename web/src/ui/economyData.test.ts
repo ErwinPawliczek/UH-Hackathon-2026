@@ -189,3 +189,22 @@ describe('production', () => {
     expect(charts[1].low).toEqual([false, false, false]);
   });
 });
+
+describe('roundCeil and rejectedPart', () => {
+  it('gives axis tops whose quarter marks are round', async () => {
+    const { roundCeil } = await import('./economyData');
+    expect(roundCeil(24, 24)).toBe(24);
+    expect(roundCeil(25, 24)).toBe(48);
+    expect(roundCeil(0, 24)).toBe(24);
+    expect(roundCeil(1000)).toBe(1000);
+    expect(roundCeil(14.4e6)).toBe(16e6);
+    expect(roundCeil(41)).toBe(60);
+  });
+  it('reports rejected product only when the engine sends some', async () => {
+    const { rejectedPart } = await import('./economyData');
+    const f = (delta: object) => ({ delta } as never);
+    expect(rejectedPart(f({}))).toBeNull();
+    expect(rejectedPart(f({ rejected_usd: 0, rejected_t: 0 }))).toBeNull();
+    expect(rejectedPart(f({ rejected_usd: 1200, rejected_t: 3 }))).toEqual({ usd: 1200, tonnes: 3 });
+  });
+});

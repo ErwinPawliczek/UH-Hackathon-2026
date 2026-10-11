@@ -11,8 +11,7 @@ import { useMemo } from 'react';
 import type { EconomyReply } from '../engine/api';
 import { useSim } from '../store/sim';
 import { LineChart } from './charts/LineChart';
-import { bucketDays, fmtAxisMoney, plantCharts, type PlantChart } from './economyData';
-import { niceCeil } from './charts/scale';
+import { bucketDays, fmtAxisMoney, plantCharts, roundCeil, type PlantChart } from './economyData';
 
 const SMALL = { width: 222, height: 104 };
 /** LineChart's left and right margins, which the low-day strip lines up with. */
@@ -81,8 +80,8 @@ export function ProductionView({ reply }: { reply: EconomyReply }) {
         <div className="grid grid-cols-3 gap-x-2">
           <LineChart xUnit="days" title="Customers served" unit="% of demand" x={x} series={[{ label: 'Served', values: t.service.map((s) => s * 100) }]} {...SMALL} yMax={100} format={whole} testId="economy-network-service" />
           {/* a quiet run still gets a real axis: $0 to $1 K, not five marks all reading $0 */}
-          <LineChart xUnit="days" title="Sales lost" unit="per day" x={x} series={[{ label: 'Lost', values: t.unmetUsd }]} {...SMALL} yMax={niceCeil(Math.max(1000, ...t.unmetUsd))} format={fmtAxisMoney} area />
-          <LineChart xUnit="days" title="Plant time stopped" unit="hours per day" x={x} series={[{ label: 'Stopped', values: t.shutdownH }]} {...SMALL} yMax={niceCeil(Math.max(24, ...t.shutdownH))} format={whole} area />
+          <LineChart xUnit="days" title="Sales lost" unit="per day" x={x} series={[{ label: 'Lost', values: t.unmetUsd }]} {...SMALL} yMax={roundCeil(Math.max(1000, ...t.unmetUsd))} format={fmtAxisMoney} area />
+          <LineChart xUnit="days" title="Plant time stopped" unit="hours per day" x={x} series={[{ label: 'Stopped', values: t.shutdownH }]} {...SMALL} yMax={roundCeil(Math.max(24, ...t.shutdownH), 24)} format={whole} area />
         </div>
       </div>
       <div>

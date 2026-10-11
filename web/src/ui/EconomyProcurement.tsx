@@ -17,7 +17,7 @@ import { Sparkline } from './charts/Sparkline';
 import { CHART_COLORS, CHART_OTHER } from './charts/palette';
 import {
   SLOT_COUNT, bucketDays, classSeries, defaultSlots, fmtAxisMoney, fmtAxisTonnes, fmtMoney, fmtTonnes,
-  elapsedDaysWords, fullBuckets, materialRows, procurementSeries, sum, toggleSlot, type Measure, type Span,
+  elapsedDaysWords, fullBuckets, materialRows, procurementSeries, roundCeil, sum, toggleSlot, type Measure, type Span,
 } from './economyData';
 
 const CHART_WIDTH = 688;
@@ -54,11 +54,11 @@ function Card({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-/** Price against par as "+8%" / "-12%" / "par". */
+/** Latest price against the list price as "+8%" / "-12%" / "unchanged". */
 function priceWords(index: number | null): string {
   if (index === null) return '—';
   const pct = Math.round((index - 1) * 100);
-  return pct === 0 ? 'par' : `${pct > 0 ? '+' : ''}${pct}%`;
+  return pct === 0 ? 'unchanged' : `${pct > 0 ? '+' : ''}${pct}%`;
 }
 
 export function ProcurementView({ reply }: { reply: EconomyReply }) {
@@ -130,6 +130,7 @@ export function ProcurementView({ reply }: { reply: EconomyReply }) {
         series={lines}
         width={CHART_WIDTH}
         height={210}
+        yMax={roundCeil(Math.max(1e-9, ...lines.flatMap((l) => l.values)))}
         format={format}
         testId="economy-procurement-chart"
       />
@@ -209,6 +210,7 @@ export function ProcurementView({ reply }: { reply: EconomyReply }) {
         series={freight}
         width={CHART_WIDTH}
         height={180}
+        yMax={roundCeil(Math.max(1e-9, ...freight.flatMap((l) => l.values)))}
         format={format}
         testId="economy-freight-chart"
       />
