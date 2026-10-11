@@ -340,16 +340,6 @@ export function classSeries(reply: EconomyReply, measure: Measure, span: Span): 
   });
 }
 
-/**
- * Lowest rate each process can hold, as a share of design (the engine
- * catalog's turndown). Used when the reply does not carry it.
- */
-const TURNDOWN: Record<string, number> = {
-  NGL_RECOVERY: 0.4, CRUDE_DISTILLATION: 0.6, REFORMING: 0.5, FCC: 0.6, DIESEL_HDT: 0.5,
-  OLEFINS_GAS: 0.65, OLEFINS_FLEX: 0.65, ELECTROLYSIS: 0.3, PE_POLYMERISATION: 0.5, PP_POLYMERISATION: 0.5,
-  VCM: 0.6, PVC: 0.3, STYRENE: 0.6, PS: 0.5,
-};
-
 export interface PlantChart {
   key: string;
   title: string;
@@ -373,7 +363,7 @@ export function plantCharts(reply: EconomyReply): PlantChart[] {
   return [...reply.plants]
     .sort((a, b) => a.site_index - b.site_index || a.index - b.index)
     .map((p) => {
-      const turndown = p.turndown ?? TURNDOWN[p.process] ?? 0;
+      const turndown = p.turndown ?? 0;
       const stopped = p.rateMean.map((r) => r <= 0.005);
       const below = p.rateMean.map((r, i) => !stopped[i] && turndown > 0 && r < turndown - 1e-6);
       return {

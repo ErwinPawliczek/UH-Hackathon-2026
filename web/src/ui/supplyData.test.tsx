@@ -6,8 +6,8 @@ import type { SourcingDetail, SourcingOption, SourcingTank } from '../engine/api
 import { SupplyDetail } from './EconomySupply';
 import { ECONOMY_WINDOW_ID, openSupplyOptions, useEconomyView } from './economyView';
 import {
-  blockedWords, fmtCover, fmtTrip, inTime, nextPassWords, priceParts, sortByCover, stateWords, supplierDown,
-  tankHeadline, vehicleWords,
+  blockedWords, fmtCover, fmtTrip, inTime, nextPassWords, orderBookedWords, orderCommand, orderRefusedWords,
+  priceParts, sortByCover, stateWords, supplierDown, tankHeadline, vehicleWords,
 } from './supplyData';
 import { useWindows } from './windows';
 
@@ -122,6 +122,35 @@ describe('SupplyDetail', () => {
     expect(text).toMatch(/Steam cracker \(flex\) usual shut down/);
     expect(text).toContain('too late by 7.4 h');
     expect(text).toContain('Cannot be used now: not enough in its tank for one tank truck load.');
+  });
+});
+
+describe('ordering by hand', () => {
+  const order = { id: 1342, tonnes: 25, requestedTonnes: 400, material: 'BENZENE', seller: 'REFINERY', site: 'STYRENICS', cls: 'TRUCK_TANK', priceUsdT: 975.87, freightUsd: 1351.02, km: 540.41, etaTick: 991 };
+
+  it('sends one vehicle load of the option as a place_order command', () => {
+    expect(orderCommand({ site: 'STYRENICS', material: 'BENZENE' }, option({}))).toEqual({
+      type: 'place_order', site: 'STYRENICS', material: 'BENZENE', seller: 'REFINERY', cls: 'TRUCK_TANK', tonnes: 25,
+    });
+  });
+
+  it('says what was booked, or why it was not', () => {
+    expect(orderBookedWords(order, 'Refinery', (t) => `tick ${t}`)).toBe('25 t of benzene from Refinery by tank truck, $976/t, due tick 991');
+    expect(orderRefusedWords({ ok: false, error: 'place_order: the seller has only 12 t free', blocked: 'seller_short' })).toBe('The seller has only 12 t free.');
+    expect(orderRefusedWords({ ok: false, blocked: 'no_room' })).toBe('The tank has no room for another load.');
+    expect(orderRefusedWords({ ok: false })).toBe('The order was not accepted.');
+  });
+
+  it('offers the order on options that can be used now, and shows the outcome', () => {
+    const html = renderToStaticMarkup(
+      <SupplyDetail detail={detail} presetOf={() => 'REFINERY'} onSupplier={() => undefined} onOrder={() => undefined} note={{ ok: true, text: 'Booked 25 t of benzene.' }} />,
+    );
+    // two of the three options are feasible; the third is short of stock
+    expect(html.match(/data-testid="supply-order"/g)).toHaveLength(2);
+    expect(html).toContain('data-testid="supply-order-note"');
+    expect(html).toContain('Booked 25 t of benzene.');
+    // without a live session there is nothing to order through
+    expect(renderToStaticMarkup(<SupplyDetail detail={detail} presetOf={() => ''} onSupplier={() => undefined} />)).not.toContain('supply-order"');
   });
 });
 
