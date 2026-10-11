@@ -1211,3 +1211,158 @@ TEST_CASE("R4 room: four at once, the idle one makes way, and old rooms expire")
   CHECK(ts.rooms.size() == 0);
   CHECK(cli.Get("/api/room/" + c)->status == 404);
 }
+
+TEST_CASE("R5 room: a player acts on their own plant only, and only once the game runs") {
+  RoomServer ts(false);
+  auto cli = client(ts.port);
+  const json made = postJson(cli, "/api/room", json::object());
+  const std::string base = "/api/room/" + made.at("code").get<std::string>();
+  const std::shared_ptr<crx::server::Room> room = ts.rooms.find(made.at("code").get<std::string>());
+  REQUIRE(room);
+  const json world = getJson(cli, base + "/world");
+  // Two plants and one unit at each.
+  int siteA = -1, siteB = -1;
+  uint32_t unitA = 0, unitB = 0;
+  for (size_t i = 0; i < world.at("sites").size(); ++i) {
+    const json& s = world.at("sites").at(i);
+    if (s.at("key") == "POLYETHYLENE") {
+      siteA = static_cast<int>(i);
+      unitA = s.at("processes").at(0).at("units").at(0).at("index").get<uint32_t>();
+    }
+    if (s.at("key") == "POLYPROPYLENE") {
+      siteB = static_cast<int>(i);
+      unitB = s.at("processes").at(0).at("units").at(0).at("index").get<uint32_t>();
+    }
+  }
+  REQUIRE(siteA >= 0);
+  REQUIRE(siteB >= 0);
+  const json ann = postJson(cli, base + "/join", {{"name", "Ann"}});
+  const json bob = postJson(cli, base + "/join", {{"name", "Bob"}});
+  const json cat = postJson(cli, base + "/join", {{"name", "Cat"}});  // never picks a plant
+  const auto play = [&](const json& who, json action) {
+    action["token"] = who.at("token");
+    return postJson(cli, base + "/play", action);
+  };
+  REQUIRE(postJson(cli, base + "/claim", {{"token", ann.at("token")}, {"site", siteA}}).at("ok") == true);
+  REQUIRE(postJson(cli, base + "/claim", {{"token", bob.at("token")}, {"site", siteB}}).at("ok") == true);
+
+  // Before the start nothing can be done.
+  CHECK(play(ann, {{"action", "price"}, {"markup", 0.1}}).at("error") == "The game has not started yet");
+  postJson(cli, base + "/host", {{"hostToken", made.at("hostToken")}, {"action", "start"}});
+  room->beat(24.0);
+
+  CHECK(play({{"token", "forged"}}, {{"action", "price"}, {"markup", 0.1}}).at("error") == "Join the room first");
+  CHECK(play(cat, {{"action", "price"}, {"markup", 0.1}}).at("error") == "Pick a plant first");
+  CHECK(play(ann, {{"action", "dance"}}).at("ok") == false);
+  CHECK(play(ann, {{"action", "price"}}).at("ok") == false);
+
+  // Price and rate land on the player's own site; out-of-range values are clamped.
+  CHECK(play(ann, {{"action", "price"}, {"markup", 0.1}}).at("markup") == 0.1);
+  CHECK(play(bob, {{"action", "price"}, {"markup", -5}}).at("markup") == -0.2);
+  CHECK(play(ann, {{"action", "rate"}, {"share", 0.9}}).at("share") == 0.9);
+  // A site named in the body is ignored: the token decides whose plant it is.
+  CHECK(play(ann, {{"action", "price"}, {"markup", 0.2}, {"site", siteB}}).at("ok") == true);
+
+  // The ownership check: Ann cannot touch Bob's unit, nor Bob hers.
+  const json theft = play(ann, {{"action", "unit"}, {"unit_index", unitB}, {"down", true}});
+  CHECK(theft.at("ok") == false);
+  CHECK(theft.at("error") == "That unit is not at Polyethylene, your plant");
+  CHECK(play(bob, {{"action", "unit"}, {"unit_index", unitA}, {"down", true}}).at("ok") == false);
+  CHECK(play(ann, {{"action", "unit"}, {"unit_index", 4000000}, {"down", true}}).at("ok") == false);
+  CHECK(play(ann, {{"action", "unit"}, {"unit_index", unitA}}).at("ok") == false);
+  CHECK(play(ann, {{"action", "unit"}, {"unit_index", unitA}, {"down", true}}).at("ok") == true);
+  CHECK(play(ann, {{"action", "unit"}, {"unit_index", unitA}, {"down", true}}).at("error") ==
+        "That unit is already down");
+
+  // Scores carry the owners and what each set.
+  room->beat(24.0 * 3);
+  const json scores = getJson(cli, base + "/scores");
+  CHECK(scores.at("tick") == getJson(cli, base).at("tick"));
+  const json& a = scores.at("scores").at(static_cast<size_t>(siteA));
+  const json& b = scores.at("scores").at(static_cast<size_t>(siteB));
+  CHECK(a.at("owner") == ann.at("playerId"));
+  CHECK(a.at("ownerName") == "Ann");
+  CHECK(a.at("markup") == 0.2);  // Ann's second price, on her own site
+  CHECK(a.at("rateShare") == 0.9);
+  CHECK(b.at("ownerName") == "Bob");
+  CHECK(b.at("markup") == -0.2);
+  CHECK(b.at("rateShare") == 1.0);
+  CHECK(scores.at("scores").at(0).at("owner").is_null());
+  for (const char* key : {"profitUsd", "revenueUsd", "feedUsd", "freightUsd", "energyUsd", "soldT", "rank", "name", "site"})
+    CHECK(a.contains(key));
+
+  // The actions are in the log with their ticks, as any command.
+  const json events = getJson(cli, base + "/events?since=0");
+  bool priced = false, down = false;
+  const json& list = events.is_array() ? events : events.at("events");
+  for (const json& e : list) {
+    priced = priced || e.at("type") == "price_set";
+    down = down || (e.at("type") == "unit_failed" &&
+                    e.at("text").get<std::string>().find("taken down by the operator") != std::string::npos);
+  }
+  CHECK(priced);
+  CHECK(down);
+
+  // The other read-only views answer on a room.
+  CHECK(getJson(cli, base + "/economy?bucket_h=24").contains("materials"));
+  CHECK(cli.Get(base + "/vehicle?index=0")->status == 200);
+  CHECK(cli.Get(base + "/vehicle?index=999999")->status == 400);
+  CHECK(cli.Get(base + "/sourcing?site=POLYETHYLENE&material=ETHYLENE")->status == 200);
+  const auto series = cli.Get(base + "/series?kind=0&id=0");
+  REQUIRE(series);
+  CHECK(series->status == 200);
+  CHECK(series->body.size() % 4 == 0);
+
+  // After the end nothing more is taken.
+  postJson(cli, base + "/host", {{"hostToken", made.at("hostToken")}, {"action", "end"}});
+  CHECK(play(ann, {{"action", "price"}, {"markup", 0.0}}).at("error") == "This game has ended");
+}
+
+TEST_CASE("R6 room: the forecast leaves out disruptions but keeps the players' prices and rates") {
+  RoomServer ts(false);
+  auto cli = client(ts.port);
+  const json made = postJson(cli, "/api/room", json::object());
+  const std::string base = "/api/room/" + made.at("code").get<std::string>();
+  const std::shared_ptr<crx::server::Room> room = ts.rooms.find(made.at("code").get<std::string>());
+  REQUIRE(room);
+  const json state = getJson(cli, base);
+  int pe = -1;
+  for (const json& s : state.at("sites"))
+    if (s.at("key") == "POLYETHYLENE") pe = s.at("index").get<int>();
+  REQUIRE(pe >= 0);
+  const json ann = postJson(cli, base + "/join", {{"name", "Ann"}});
+  postJson(cli, base + "/claim", {{"token", ann.at("token")}, {"site", pe}});
+  const json host = {{"hostToken", made.at("hostToken")}};
+  json start = host;
+  start["action"] = "start";
+  postJson(cli, base + "/host", start);
+  room->beat(48.0);
+
+  // Only prices and rates so far: nothing was broken, both futures agree.
+  CHECK(postJson(cli, base + "/play", {{"token", ann.at("token")}, {"action", "price"}, {"markup", 0.15}}).at("ok") == true);
+  CHECK(postJson(cli, base + "/play", {{"token", ann.at("token")}, {"action", "rate"}, {"share", 0.9}}).at("ok") == true);
+  room->beat(24.0);
+  json f = postJson(cli, base + "/forecast", {{"days", 5}});
+  CHECK(f.at("disruptions") == 0);
+  CHECK(f.at("tick") == getJson(cli, base).at("tick"));
+  CHECK(f.at("delta").at("cost_usd") == 0.0);
+  CHECK(f.at("with") == f.at("without"));
+
+  // The host shuts the refinery: now there is something to cost.
+  json shut = host;
+  shut["action"] = "scenario";
+  shut["command"] = {{"type", "site_shutdown"}, {"site", "REFINERY"}, {"duration_h", 240}};
+  REQUIRE(postJson(cli, base + "/host", shut).at("ok") == true);
+  room->beat(1.0);
+  f = postJson(cli, base + "/forecast", {{"days", 5}});
+  CHECK(f.at("disruptions") == 1);
+  CHECK(f.at("with") != f.at("without"));
+  CHECK(f.at("delta").at("shutdown_h").get<double>() > 0.0);
+  // Asking never moves the room.
+  CHECK(f.at("tick") == getJson(cli, base).at("tick"));
+  CHECK(room->commands.size() == 3);
+
+  const auto bad = cli.Post(base + "/forecast", R"({"days":500})", "application/json");
+  REQUIRE(bad);
+  CHECK(bad->status == 400);
+}

@@ -154,6 +154,13 @@ uint64_t hashState(const World& world, const State& state) {
   h.mixF64(state.last_production_index);
   h.mix(&state.random_failures, sizeof state.random_failures);
   for (const double r : state.rate_override) h.mixF64(r);
+  // Only sites with a markup enter the hash, so a run nobody priced hashes
+  // exactly as it did before markups existed.
+  for (size_t s = 0; s < state.site_markup.size(); ++s)
+    if (state.site_markup[s] != 0.0) {
+      h.mixU32(static_cast<uint32_t>(s));
+      h.mixF64(state.site_markup[s]);
+    }
   // M2 logistics: edge availability, market indices, vehicles and orders
   // are all mutable state that must fork exactly (determinism rules 4 and 6).
   h.mix(state.edge_open.data(), state.edge_open.size());

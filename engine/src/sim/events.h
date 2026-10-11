@@ -21,6 +21,13 @@ namespace sim {
 // time so the API stays tolerant of stale names (§7.2 note).
 bool queueEvent(const World& world, const std::string& body, State& state, std::string& error);
 
+// Takes one unit (by global index) down until it is told to come back, or
+// brings it back: an operator's switch, with no repair time. False with a
+// plain sentence in `error` when the unit does not exist, is already in the
+// asked state, or is held down by a running outage.
+bool setUnitHeld(const World& world, State& state, Recorder& rec, uint32_t unit, bool down,
+                 std::string& error);
+
 // Start-of-tick event pass: applies due pending events, expires finished
 // ones, and runs the optional random-failure draw (§5.9).
 void stepEvents(const World& world, State& state, Recorder& rec);

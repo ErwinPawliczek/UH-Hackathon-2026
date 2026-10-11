@@ -132,6 +132,15 @@ struct ProcTotals {
   double down_h = 0;    // plants: hours in Shutdown or Restarting
 };
 
+// Per-site trade the ledger does not carry: tonnes sold by vehicle, and the
+// pipeline flows between sites valued at the base price (a pipeline books no
+// order). Read by the scores view only, so it stays out of the state hash.
+struct SiteTrade {
+  double sold_t = 0;
+  double pipe_revenue = 0;
+  double pipe_feed_cost = 0;
+};
+
 struct State {
   uint64_t tick = 0;
   Rng rng;
@@ -152,6 +161,13 @@ struct State {
   std::vector<uint8_t> sink_starved;   // per process: edge state for stockouts
   std::vector<double> rate_override;   // per process: §7.2 R_max cap, <0 = none
   std::vector<ProcTotals> proc_totals; // per process, cumulative (not hashed)
+  // A site's own markup on its asking price (set_price): ask = rule x (1 +
+  // markup). Zero unless a player set it; hashed only where non-zero.
+  std::vector<double> site_markup;
+  // The share of design a site was told to run at (site_rate), 1 = no cap.
+  // The cap itself lives in rate_override; this is kept for the scores view.
+  std::vector<double> site_rate_share;
+  std::vector<SiteTrade> site_trade;   // per site, cumulative (not hashed)
 
   // Accounting accumulators (§5.4, §5.10). Real material only: pseudo
   // streams (FUEL_GAS, LOSS, WATER, AIR_O2) never enter tanks, so their

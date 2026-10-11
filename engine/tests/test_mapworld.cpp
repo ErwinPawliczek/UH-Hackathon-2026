@@ -2218,3 +2218,164 @@ TEST_CASE("M26: a layout that cannot work says why, in plain words") {
                               error) == nullptr);
   CHECK(error == "Port terminal B (site 22) is missing from the layout");
 }
+
+// --- Multiplayer levers: price, site rate, unit switches, scores ------------
+
+TEST_CASE("M27: a site's markup raises what it asks, and a markup of zero changes nothing") {
+  auto plain = makeMapSim();
+  auto zero = makeMapSim();
+  auto dear = makeMapSim();
+  REQUIRE(plain);
+  const auto ok = [](Sim& sim, const json& cmd) { return json::parse(sim.command(cmd.dump())); };
+  CHECK(ok(*zero, {{"type", "set_price"}, {"site", "POLYPROPYLENE"}, {"markup", 0.0}}).at("ok") == true);
+  // Clamped to -0.2 .. 0.3; a site may be named by key or index.
+  const int pp = dear->world().findSite("POLYPROPYLENE");
+  REQUIRE(pp >= 0);
+  CHECK(ok(*dear, {{"type", "set_price"}, {"site", pp}, {"markup", 0.9}}).at("markup") == 0.3);
+  CHECK(ok(*dear, {{"type", "set_price"}, {"site", "NOWHERE"}, {"markup", 0.1}}).at("ok") == false);
+  CHECK(ok(*dear, {{"type", "set_price"}, {"site", pp}}).at("ok") == false);
+  CHECK(dear->stateHash() != plain->stateHash());  // a markup is state
+  CHECK(zero->stateHash() == plain->stateHash());
+
+  plain->step(96 * 30);
+  zero->step(96 * 30);
+  dear->step(96 * 30);
+  CHECK(zero->stateHash() == plain->stateHash());
+  CHECK(dear->stateHash() != plain->stateHash());
+
+  // The plant with the markup earns more per tonne it sells.
+  const auto perTonne = [&](Sim& sim) {
+    const SiteTrade& t = sim.state().site_trade[static_cast<size_t>(pp)];
+    REQUIRE(t.sold_t > 0.0);
+    return sim.state().ledger[static_cast<size_t>(pp)].revenue / t.sold_t;
+  };
+  CHECK(perTonne(*dear) > perTonne(*plain) * 1.05);
+  bool logged = false;
+  for (const LogEntry& e : dear->recorder().log)
+    logged = logged || e.text == "Polypropylene: asking price set 30% above the market rule";
+  CHECK(logged);
+}
+
+TEST_CASE("M28: a site's rate share caps all its processes, never below turndown") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  const World& w = sim->world();
+  const int site = w.findSite("REFINERY");
+  REQUIRE(site >= 0);
+  sim->step(96 * 5);
+  const auto cmd = [&](const json& c) { return json::parse(sim->command(c.dump())); };
+  const json set = cmd({{"type", "site_rate"}, {"site", "REFINERY"}, {"share", 0.8}});
+  REQUIRE(set.at("ok") == true);
+  CHECK(set.at("share") == 0.8);
+  sim->step(96 * 3);
+  size_t procs = 0;
+  for (size_t p = 0; p < w.processes.size(); ++p) {
+    if (w.processes[p].site.v != static_cast<uint32_t>(site)) continue;
+    ++procs;
+    CHECK(sim->state().proc[p].rate_t_h <= 0.8 * w.processes[p].design_rate_t_h + 1e-6);
+  }
+  CHECK(procs > 0);
+  CHECK(sim->state().site_rate_share[static_cast<size_t>(site)] == 0.8);
+
+  // Asked for less than the plant can hold: it stops at the turndown floor
+  // and says where that is, so the plant does not trip.
+  const json low = cmd({{"type", "site_rate"}, {"site", site}, {"share", 0.01}});
+  CHECK(low.at("ok") == true);
+  const double floor = low.at("min_share").get<double>();
+  CHECK(floor > 0.01);
+  CHECK(low.at("share") == floor);
+  // Back to full clears the cap.
+  CHECK(cmd({{"type", "site_rate"}, {"site", site}, {"share", 5.0}}).at("share") == 1.0);
+  for (size_t p = 0; p < w.processes.size(); ++p)
+    if (w.processes[p].site.v == static_cast<uint32_t>(site)) CHECK(sim->state().rate_override[p] < 0.0);
+  CHECK(cmd({{"type", "site_rate"}, {"site", site}}).at("ok") == false);
+
+  // A source obeys its share too.
+  const int field = w.findSite("GAS_FIELD");
+  REQUIRE(field >= 0);
+  const json half = cmd({{"type", "site_rate"}, {"site", "GAS_FIELD"}, {"share", 0.5}});
+  REQUIRE(half.at("ok") == true);
+  const double share = half.at("share").get<double>();
+  sim->step(96 * 2);
+  for (size_t p = 0; p < w.processes.size(); ++p)
+    if (w.processes[p].site.v == static_cast<uint32_t>(field))
+      CHECK(sim->state().proc[p].rate_t_h <= share * w.processes[p].design_rate_t_h + 1e-6);
+}
+
+TEST_CASE("M29: a unit switched off stays off until it is switched back on") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  const World& w = sim->world();
+  const int site = w.findSite("POLYETHYLENE");
+  REQUIRE(site >= 0);
+  uint32_t unit = UINT32_MAX;
+  for (uint32_t u = 0; u < w.units.size() && unit == UINT32_MAX; ++u)
+    if (w.processes[w.units[u].process.v].site.v == static_cast<uint32_t>(site)) unit = u;
+  REQUIRE(unit != UINT32_MAX);
+  const auto cmd = [&](const json& c) { return json::parse(sim->command(c.dump())); };
+  sim->step(96);
+  CHECK(cmd({{"type", "unit_state"}, {"unit_index", unit}, {"down", false}}).at("error") ==
+        "That unit is already running");
+  CHECK(cmd({{"type", "unit_state"}, {"unit_index", 999999}, {"down", true}}).at("ok") == false);
+  CHECK(cmd({{"type", "unit_state"}, {"unit_index", unit}}).at("ok") == false);
+  REQUIRE(cmd({{"type", "unit_state"}, {"unit_index", unit}, {"down", true}}).at("ok") == true);
+  CHECK(cmd({{"type", "unit_state"}, {"unit_index", unit}, {"down", true}}).at("error") ==
+        "That unit is already down");
+  sim->step(96 * 20);  // no repair comes by itself
+  CHECK(sim->state().unit[unit].trains_down > 0);
+  const size_t proc = w.units[unit].process.v;
+  CHECK(sim->state().proc[proc].rate_t_h < 1e-6);
+  REQUIRE(cmd({{"type", "unit_state"}, {"unit_index", unit}, {"down", false}}).at("ok") == true);
+  CHECK(sim->state().unit[unit].trains_down == 0);
+  sim->step(96 * 5);
+  CHECK(sim->state().proc[proc].rate_t_h > 0.0);
+
+  // While a scheduled outage holds the unit, the switch cannot bring it back.
+  REQUIRE(cmd({{"type", "unit_outage"}, {"unit_index", unit}, {"trains", 1}, {"duration_h", 48}}).at("ok") == true);
+  sim->step(4);
+  CHECK(cmd({{"type", "unit_state"}, {"unit_index", unit}, {"down", false}}).at("error") ==
+        "That unit is out of service until the outage is over");
+}
+
+TEST_CASE("M30: scores add up per site, pipelines included, ranked by profit") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  sim->step(96 * 30);
+  const json doc = json::parse(scoresJson(sim->world(), sim->state()));
+  CHECK(doc.at("tick") == 96 * 30);
+  const json& rows = doc.at("scores");
+  REQUIRE(rows.size() == sim->world().sites.size());
+  std::vector<int> ranks;
+  double revenue = 0, feed = 0;
+  for (const json& r : rows) {
+    const double profit = r.at("revenueUsd").get<double>() - r.at("feedUsd").get<double>() -
+                          r.at("freightUsd").get<double>() - r.at("energyUsd").get<double>();
+    CHECK(r.at("profitUsd").get<double>() == doctest::Approx(profit));
+    CHECK(r.at("markup") == 0.0);
+    CHECK(r.at("rateShare") == 1.0);
+    ranks.push_back(r.at("rank").get<int>());
+    revenue += r.at("revenueUsd").get<double>();
+    feed += r.at("feedUsd").get<double>();
+  }
+  // Every dollar one site earned another paid, bar the lots still on the
+  // road (booked on delivery, both sides at once).
+  CHECK(revenue == doctest::Approx(feed));
+  std::sort(ranks.begin(), ranks.end());
+  for (size_t i = 0; i < ranks.size(); ++i) CHECK(ranks[i] == static_cast<int>(i) + 1);
+  // Rank follows profit.
+  for (const json& a : rows)
+    for (const json& b : rows)
+      if (a.at("rank").get<int>() < b.at("rank").get<int>())
+        CHECK(a.at("profitUsd").get<double>() >= b.at("profitUsd").get<double>());
+  // Sites fed and emptied by pipeline are scored: the gas field sells, the
+  // gas plant both buys and sells.
+  const auto row = [&](const char* key) {
+    for (const json& r : rows)
+      if (r.at("key") == key) return r;
+    return json();
+  };
+  CHECK(row("GAS_FIELD").at("revenueUsd").get<double>() > 0.0);
+  CHECK(row("GAS_FIELD").at("soldT").get<double>() > 0.0);
+  CHECK(row("GAS_PLANT").at("feedUsd").get<double>() > 0.0);
+  CHECK(row("GAS_PLANT").at("revenueUsd").get<double>() > 0.0);
+}

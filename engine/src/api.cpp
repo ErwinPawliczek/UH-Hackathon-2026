@@ -837,6 +837,13 @@ const char* crx_economy(const crx_sim* sim, uint32_t bucket_h) {
   return api->reply.c_str();
 }
 
+const char* crx_scores(const crx_sim* sim) {
+  const ApiSim* api = asApi(sim);
+  if (api == nullptr) return "{\"error\":\"null\"}";
+  api->reply = crx::sim::scoresJson(api->sim->world(), api->sim->state());
+  return api->reply.c_str();
+}
+
 const char* crx_sourcing(const crx_sim* sim, const char* site, const char* material) {
   const ApiSim* api = asApi(sim);
   if (api == nullptr) return "{\"error\":\"null\"}";
