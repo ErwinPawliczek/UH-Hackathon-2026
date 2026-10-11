@@ -67,6 +67,13 @@ const char* crx_vehicle(const crx_sim* sim, uint32_t index);
    NULL when bucket_h is out of range. Reply valid until the next call. */
 const char* crx_economy(const crx_sim* sim, uint32_t bucket_h);
 
+/* Per-site money since tick 0 as JSON: {"tick","scores":[{"site","key",
+   "name","profitUsd","revenueUsd","feedUsd","freightUsd","energyUsd",
+   "markup","rateShare","soldT","rank"}]}. Vehicle trades come from the site
+   ledgers, pipeline flows are valued at the base price; rank 1 is the most
+   profit. Reply valid until the next call. */
+const char* crx_scores(const crx_sim* sim);
+
 /* Sourcing. With site (key or index) and material: the buying tank and every
    way of supplying it, priced as procurement prices it. With both NULL or
    empty: the list of tanks that buy by vehicle. A bad query returns

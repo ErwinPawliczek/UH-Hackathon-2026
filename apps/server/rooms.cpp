@@ -1,6 +1,8 @@
 // PetroGrid server — multiplayer rooms: implementation.
 #include "rooms.h"
 
+#include "crx_server.h"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -70,6 +72,17 @@ std::string trimmed(std::string s) {
   while (!s.empty() && space(static_cast<unsigned char>(s.front()))) s.erase(s.begin());
   while (!s.empty() && space(static_cast<unsigned char>(s.back()))) s.pop_back();
   return s;
+}
+
+// Sends one command to the room's engine (room locked) and logs it with its
+// tick when the engine took it.
+std::string issue(Room& room, const json::json& command) {
+  const std::string text = command.dump();
+  const std::string reply = crx_command(room.sim, text.c_str());
+  const json::json r = json::json::parse(reply, nullptr, false);
+  if (r.is_object() && r.value("ok", false)) room.commands.emplace_back(crx_tick(room.sim), text);
+  room.refreshSnapshotLocked();
+  return reply;
 }
 
 RoomPlayer* playerByToken(Room& room, const std::string& token) {
@@ -361,9 +374,7 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
         return sendJson(res, 200, no("Start the game before triggering a scenario"));
       if (!b.contains("command") || !b["command"].is_object())
         return sendJson(res, 200, no("A scenario needs a command"));
-      const std::string reply = crx_command(room->sim, b["command"].dump().c_str());
-      room->refreshSnapshotLocked();
-      return sendJson(res, 200, reply);
+      return sendJson(res, 200, issue(*room, b["command"]));
     }
     sendJson(res, 200, no("Unknown host action"));
   });
@@ -403,9 +414,7 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
     } else {
       return sendJson(res, 200, no("Unknown action"));
     }
-    const std::string reply = crx_command(room->sim, command.dump().c_str());
-    room->refreshSnapshotLocked();
-    sendJson(res, 200, reply);
+    sendJson(res, 200, issue(*room, command));
   });
 
   svr.Get("/api/room/" + code + "/snapshot", [&rooms, room404](const Req& req, Res& res) {
@@ -433,6 +442,33 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
     const auto room = rooms.find(req.matches[1].str());
     if (!room) return room404(res);
     sendJson(res, 200, room->worldJson);  // never changes after the room is made
+  });
+
+  // What the disruptions so far will cost over the next days: {"days": N}.
+  // Computed on a fork outside the room lock, so the clock keeps running.
+  svr.Post("/api/room/" + code + "/forecast", [&rooms, body, room404](const Req& req, Res& res) {
+    const auto room = rooms.find(req.matches[1].str());
+    if (!room) return room404(res);
+    const json::json b = body(req);
+    uint64_t days = 30;
+    if (b.contains("days")) {
+      if (!b["days"].is_number_unsigned() || b["days"].get<uint64_t>() < 1 || b["days"].get<uint64_t>() > 120)
+        return sendJson(res, 400, no("days must be from 1 to 120"));
+      days = b["days"].get<uint64_t>();
+    }
+    crx_sim* with = nullptr;
+    std::vector<std::pair<uint64_t, std::string>> commands;
+    uint64_t now = 0;
+    {
+      std::lock_guard<std::mutex> lock(room->mutex);
+      with = crx_fork(room->sim);
+      commands = room->commands;
+      now = room->tick;
+    }
+    std::string doc;
+    if (with == nullptr || !forecastJson(with, kRoomWorld, commands, now, static_cast<uint32_t>(days), doc))
+      return sendJson(res, 500, no("The forecast could not be computed"));
+    sendJson(res, 200, doc);
   });
 
   // The read-only views a single-player session has, on the room's run.
@@ -503,6 +539,23 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
       out.status = 200;
       out.set_content(std::string(reinterpret_cast<const char*>(data), n * sizeof(float)),
                       "application/octet-stream");
+    });
+  });
+  svr.Get("/api/room/" + code + "/scores", [view](const Req& req, Res& res) {
+    view(req, res, [](Room& r, Res& out) {
+      json::json doc = json::json::parse(crx_scores(r.sim), nullptr, false);
+      if (!doc.is_object() || !doc.contains("scores")) return sendJson(out, 500, no("no scores"));
+      for (json::json& row : doc["scores"]) {
+        row["owner"] = nullptr;
+        row["ownerName"] = nullptr;
+        const int site = row.value("site", -1);
+        for (const RoomPlayer& p : r.players)
+          if (p.site == site) {
+            row["owner"] = p.id;
+            row["ownerName"] = p.name;
+          }
+      }
+      sendJson(out, 200, doc.dump());
     });
   });
 }

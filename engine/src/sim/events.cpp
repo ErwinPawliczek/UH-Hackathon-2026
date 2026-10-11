@@ -438,5 +438,49 @@ double shockFactor(const State& state, uint32_t site, EventDef::Type kind) {
   return f;
 }
 
+bool setUnitHeld(const World& world, State& state, Recorder& rec, uint32_t u, bool down,
+                 std::string& error) {
+  if (u >= world.units.size()) {
+    error = "There is no such unit";
+    return false;
+  }
+  UnitState& us = state.unit[u];
+  const Unit& unit = world.units[u];
+  const Process& proc = world.processes[unit.process.v];
+  const ProcessType& type = world.catalog.process_types[proc.type];
+  const Site& site = world.sites[proc.site.v];
+  const std::string what =
+      site.name + ": " + processWithin(site.name, type.name) + ", " + type.units[unit.slot].name;
+  if (down) {
+    if (us.trains_down >= type.units[unit.slot].trains) {
+      error = "That unit is already down";
+      return false;
+    }
+    // No repair tick: the sweep never brings it back by itself.
+    us.trains_down = static_cast<uint8_t>(type.units[unit.slot].trains);
+    us.back_at_tick = UINT64_MAX;
+    logEvent(rec, state.tick, "unit_failed", site.key, type.units[unit.slot].key,
+             what + " taken down by the operator");
+    return true;
+  }
+  if (us.trains_down == 0) {
+    error = "That unit is already running";
+    return false;
+  }
+  for (const EventDef& d : state.active) {
+    const bool holds = (d.type == EventDef::Type::UnitOutage && d.unit == static_cast<int>(u)) ||
+                       (d.type == EventDef::Type::SiteShutdown && proc.site.v == d.site);
+    if (holds) {
+      error = "That unit is out of service until the outage is over";
+      return false;
+    }
+  }
+  us.trains_down = 0;
+  us.back_at_tick = 0;
+  logEvent(rec, state.tick, "unit_repaired", site.key, type.units[unit.slot].key,
+           what + " brought back by the operator");
+  return true;
+}
+
 }  // namespace sim
 }  // namespace crx

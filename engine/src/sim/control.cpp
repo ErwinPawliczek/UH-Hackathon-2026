@@ -113,8 +113,10 @@ void stepControl(const World& world, State& state, const std::vector<TankSignals
       // Source path: supply curve × shock, throttled by product-room signal.
       const double shock = shockFactor(state, proc.site.v, EventDef::Type::SupplyShock);
       double target = proc.design_rate_t_h * scheduleFactor(world, proc, state.tick) * shock;
-      const double source_max = computeRMax(world, proc, state);
+      double source_max = computeRMax(world, proc, state);
+      if (state.rate_override[p] >= 0.0) source_max = std::min(source_max, state.rate_override[p]);
       if (source_max <= kRateEps) target = 0.0;  // units down
+      target = std::min(target, source_max);
       for (const TankId t : views[p].products) target *= signals[t.v].h;
       ps.status = ProcStatus::Running;
       ps.rate_t_h = rampToward(ps.rate_t_h, target, proc.design_rate_t_h, type.ramp_per_h, dt_h);

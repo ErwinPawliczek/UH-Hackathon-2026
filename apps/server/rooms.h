@@ -61,6 +61,9 @@ class Room {
   std::vector<RoomPlayer> players;
   std::vector<RoomSite> sites;
   uint32_t nextPlayer = 1;
+  // Every command the engine accepted, with its tick: host scenarios and
+  // players' actions alike. The forecast rebuilds the run from it.
+  std::vector<std::pair<uint64_t, std::string>> commands;
   std::atomic<std::chrono::steady_clock::rep> lastUsed;
 
   // Advances the run by what `elapsed` real seconds are worth at the

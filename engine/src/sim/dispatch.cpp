@@ -315,6 +315,7 @@ void stepTransport(const World& world, State& state, PathCache& paths, Recorder&
       Ledger& buyer_led = state.ledger[world.tanks[o.to].site.v];
       seller_led.revenue += o.qty_t * o.price;
       seller_led.freight += o.freight_usd;
+      state.site_trade[world.tanks[o.from].site.v].sold_t += o.qty_t;
       buyer_led.feed_cost += o.qty_t * o.price;
       state.cum_freight_usd += o.freight_usd;
       const double lead_h = static_cast<double>(state.tick - o.created_tick) * kTickHours;

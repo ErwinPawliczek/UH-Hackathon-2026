@@ -230,7 +230,7 @@ bool isDisruption(const std::string& command) {
   if (!j.is_object() || !j.contains("type") || !j["type"].is_string()) return false;
   const std::string type = j["type"].get<std::string>();
   return type == "unit_outage" || type == "site_shutdown" || type == "supply_shock" ||
-         type == "demand_shock" || type == "route_break";
+         type == "demand_shock" || type == "route_break" || type == "unit_state";
 }
 
 void stepSimTo(crx_sim* sim, uint64_t target) {
@@ -266,7 +266,13 @@ SessionRegistry::ForecastStatus SessionRegistry::forecast(const std::string& id,
     now = crx_tick(s->sim);
   }
   if (with == nullptr) return ForecastStatus::kFailed;
+  return forecastJson(with, config, commands, now, days, out) ? ForecastStatus::kOk
+                                                              : ForecastStatus::kFailed;
+}
 
+bool forecastJson(crx_sim* with, const std::string& config,
+                  const std::vector<std::pair<uint64_t, std::string>>& commands, uint64_t now,
+                  uint32_t days, std::string& out) {
   const uint32_t ticks = days * 96u;  // 0.25 h ticks
   json::json futureWith = json::json::parse(crx_step_report(with, ticks), nullptr, false);
   crx_destroy(with);
@@ -278,7 +284,7 @@ SessionRegistry::ForecastStatus SessionRegistry::forecast(const std::string& id,
   json::json futureWithout = futureWith;
   if (disruptions > 0) {
     crx_sim* without = crx_create(config.empty() ? nullptr : config.c_str());
-    if (without == nullptr) return ForecastStatus::kFailed;
+    if (without == nullptr) return false;
     for (const auto& entry : commands) {
       if (isDisruption(entry.second)) continue;
       stepSimTo(without, entry.first);
@@ -288,7 +294,7 @@ SessionRegistry::ForecastStatus SessionRegistry::forecast(const std::string& id,
     futureWithout = json::json::parse(crx_step_report(without, ticks), nullptr, false);
     crx_destroy(without);
   }
-  if (!futureWith.is_object() || !futureWithout.is_object()) return ForecastStatus::kFailed;
+  if (!futureWith.is_object() || !futureWithout.is_object()) return false;
 
   const json::json& tw = futureWith.at("totals");
   const json::json& to = futureWithout.at("totals");
@@ -352,7 +358,7 @@ SessionRegistry::ForecastStatus SessionRegistry::forecast(const std::string& id,
                    {"delta", delta},
                    {"countdown", countdown}}
             .dump();
-  return ForecastStatus::kOk;
+  return true;
 }
 
 void SessionRegistry::reapExpired() {

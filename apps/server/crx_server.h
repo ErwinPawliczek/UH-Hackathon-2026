@@ -145,6 +145,14 @@ class SessionRegistry {
   std::function<Clock::time_point()> nowFn_ = [] { return Clock::now(); };
 };
 
+// The impact forecast behind SessionRegistry::forecast, for any run: `with`
+// is a fork of the run at tick `now` (destroyed here); "without" is rebuilt
+// from `config` and the logged commands, leaving the disruptions out
+// (outages, shutdowns, shocks, route breaks and units switched off by hand).
+bool forecastJson(crx_sim* with, const std::string& config,
+                  const std::vector<std::pair<uint64_t, std::string>>& commands, uint64_t now,
+                  uint32_t days, std::string& out);
+
 // Registers every §7.4 route on svr. When webDir contains an index.html it is
 // served at "/" (the built front end, same origin); otherwise "/" serves a
 // minimal placeholder page pointing at the build command.

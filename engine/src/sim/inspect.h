@@ -45,6 +45,12 @@ std::string buyTanksJson(const Sim& sim);
 // vehicle class what it moved; per bucket the money and service totals; per
 // plant the band its rate moved in. Built from the order book and the
 // recorder's hourly history.
+// Per-site money since tick 0 for the multiplayer scores: revenue, feed
+// cost, freight, energy and profit (vehicle trades from the ledger plus
+// pipeline flows at the base price), tonnes sold, the site's markup and rate
+// share, and a rank by profit (1 = best) among sites that run processes.
+std::string scoresJson(const World& world, const State& state);
+
 std::string economyJson(const World& world, const State& state, const Recorder& rec,
                         uint32_t bucket_h);
 
