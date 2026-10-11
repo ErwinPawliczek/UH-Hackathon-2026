@@ -9,7 +9,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Snapshot } from '../engine/snapshot';
-import type { SimEvent, BackendKind } from '../engine/api';
+import type { SimEvent, BackendKind, VehicleDetail } from '../engine/api';
 import type { WorldSpec } from '../engine/world';
 import { scenarioSite, type EngineScenario } from '../engine/scenarios';
 import { DEFAULT_WORLD, STORAGE_KEY, dropLegacyPersistedState, backendOverride, worldFromParams } from './bootstrap';
@@ -107,6 +107,18 @@ export interface SimState {
   error: string | null;
   /** Live backend command dispatcher, wired by useSimEngine; null between sessions. */
   sendCommand: ((cmd: Record<string, unknown>) => Promise<unknown>) | null;
+  /**
+   * Fetch what one vehicle is doing (cargo, order, route) from the live
+   * session; wired by the engine session, null between sessions.
+   */
+  fetchVehicle: ((index: number) => Promise<VehicleDetail>) | null;
+  /**
+   * The selected vehicle's trip as last fetched — cargo, order, where from
+   * and to, and `path`, the rest of its planned route in map km — or null
+   * when no vehicle is selected or nothing has arrived yet. Kept fresh by
+   * the vehicle window; the map reads `path` to highlight the route.
+   */
+  selectedVehicleDetail: VehicleDetail | null;
   /** Keys of the engine scenarios already triggered in this session (each runs once). */
   triggered: string[];
   /** Tick the run was at when each scenario was triggered — going back to that tick or earlier undoes it. */
@@ -168,6 +180,8 @@ export const useSim = create<SimState>()(
       selected: null,
       error: null,
       sendCommand: null,
+      fetchVehicle: null,
+      selectedVehicleDetail: null,
       triggered: [],
       triggeredAt: {},
       rewindTo: null,
@@ -180,7 +194,8 @@ export const useSim = create<SimState>()(
         if (speed !== null) set({ speed, stepIntervalMs: stepIntervalFor(speed) });
       },
       togglePlay: () => set((s) => ({ playing: !s.playing, started: true })),
-      select: (selected) => set({ selected }),
+      // a new selection never shows the previous vehicle's trip
+      select: (selected) => set({ selected, selectedVehicleDetail: null }),
       setWorld: (world) => set({ world }),
       pushSnapshot: (snap) =>
         set((s) => ({ prevSnap: s.snap, snap, snapAt: performance.now() })),
