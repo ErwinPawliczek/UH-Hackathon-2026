@@ -75,6 +75,133 @@ std::vector<Pt> roundCorners(const std::vector<Pt>& in, double radius) {
   return out;
 }
 
+// Junction rounding (worldfile.h roundJunctionCorner) on points: half of the
+// corner's curve for each of the two paths, and the node's new position.
+struct JunctionCurve {
+  Pt moved;
+  std::vector<Pt> toward_a, toward_b;  // from just past the node out to each path
+};
+
+bool junctionCurve(Pt node, Pt a, Pt b, double radius, JunctionCurve& out) {
+  const double la = dist(node, a), lb = dist(node, b);
+  if (!(radius > 0.0) || la < 1e-9 || lb < 1e-9) return false;
+  const Pt ua{(a.x - node.x) / la, (a.y - node.y) / la};
+  const Pt ub{(b.x - node.x) / lb, (b.y - node.y) / lb};
+  // Coming in along a and leaving along b: straight on is ua = -ub.
+  const double turn_cos = -(ua.x * ub.x + ua.y * ub.y);
+  const double rad = 3.14159265358979323846 / 180.0;
+  if (turn_cos > std::cos(8.0 * rad) || turn_cos < std::cos(80.0 * rad)) return false;
+  const double d = std::min({radius, 0.45 * la, 0.45 * lb});
+  if (d < 1e-6) return false;
+  const Pt pa{node.x + ua.x * d, node.y + ua.y * d}, pb{node.x + ub.x * d, node.y + ub.y * d};
+  const auto at = [&](double t) {
+    const double s = 1.0 - t;
+    return Pt{s * s * pa.x + 2.0 * s * t * node.x + t * t * pb.x,
+              s * s * pa.y + 2.0 * s * t * node.y + t * t * pb.y};
+  };
+  constexpr int kHalf = 3;  // the whole curve is 7 points, as for interior corners
+  out.moved = at(0.5);
+  out.toward_a.clear();
+  out.toward_b.clear();
+  for (int k = 1; k <= kHalf; ++k) {
+    out.toward_a.push_back(at(0.5 - 0.5 * k / kHalf));
+    out.toward_b.push_back(at(0.5 + 0.5 * k / kHalf));
+  }
+  return true;
+}
+
+// One route edge while its mode's graph is still being put together.
+struct EdgeDraft {
+  RouteEdge edge;
+  std::vector<Pt> pts;  // from node edge.a to node edge.b
+};
+
+// Rounds the turn through each junction: for every node from `first_node`
+// on that is not a site's node and has two or more edges, the pair of edges
+// that runs straightest through it gets a curve in place of the corner and
+// the node moves onto the curve; every other edge at the node is re-ended
+// on the moved position. Site nodes never move.
+void roundJunctions(World& world, uint32_t first_node, std::vector<EdgeDraft>& drafts,
+                    double radius) {
+  struct End {
+    size_t draft;
+    bool front;  // the node is the edge's a end (pts.front())
+  };
+  for (uint32_t n = first_node; n < world.nodes.size(); ++n) {
+    RouteNode& node = world.nodes[n];
+    if (node.site >= 0) continue;
+    std::vector<End> ends;
+    bool loop = false;
+    for (size_t i = 0; i < drafts.size(); ++i) {
+      const RouteEdge& e = drafts[i].edge;
+      if (e.a == n && e.b == n) loop = true;
+      if (drafts[i].pts.size() < 2) continue;
+      if (e.a == n) ends.push_back({i, true});
+      if (e.b == n) ends.push_back({i, false});
+    }
+    if (loop || ends.size() < 2) continue;
+    const Pt here{node.x_km, node.y_km};
+    const auto next = [&](const End& e) {
+      const std::vector<Pt>& p = drafts[e.draft].pts;
+      return e.front ? p[1] : p[p.size() - 2];
+    };
+    // The straightest way through: the two ends pointing most nearly
+    // opposite ways (ties: the first pair found, in edge order).
+    size_t bi = 0, bj = 0;
+    double best = 2.0;
+    for (size_t i = 0; i < ends.size(); ++i) {
+      const Pt qi = next(ends[i]);
+      const double li = dist(here, qi);
+      if (li < 1e-9) continue;
+      for (size_t j = i + 1; j < ends.size(); ++j) {
+        const Pt qj = next(ends[j]);
+        const double lj = dist(here, qj);
+        if (lj < 1e-9) continue;
+        const double dot = ((qi.x - here.x) * (qj.x - here.x) + (qi.y - here.y) * (qj.y - here.y)) /
+                           (li * lj);
+        if (dot < best) {
+          best = dot;
+          bi = i;
+          bj = j;
+        }
+      }
+    }
+    if (best > 1.5) continue;
+    JunctionCurve curve;
+    if (!junctionCurve(here, next(ends[bi]), next(ends[bj]), radius, curve)) continue;
+
+    // Each of the pair takes its half of the curve; everything at the node
+    // ends on the moved position.
+    const auto splice = [&](const End& e, const std::vector<Pt>& half) {
+      std::vector<Pt>& p = drafts[e.draft].pts;
+      if (e.front) {
+        std::vector<Pt> out;
+        out.reserve(p.size() + half.size());
+        out.push_back(curve.moved);
+        out.insert(out.end(), half.begin(), half.end());
+        out.insert(out.end(), p.begin() + 1, p.end());
+        p = std::move(out);
+      } else {
+        p.pop_back();
+        p.insert(p.end(), half.rbegin(), half.rend());
+        p.push_back(curve.moved);
+      }
+    };
+    for (size_t k = 0; k < ends.size(); ++k) {
+      if (k == bi) {
+        splice(ends[k], curve.toward_a);
+      } else if (k == bj) {
+        splice(ends[k], curve.toward_b);
+      } else {
+        std::vector<Pt>& p = drafts[ends[k].draft].pts;
+        (ends[k].front ? p.front() : p.back()) = curve.moved;
+      }
+    }
+    node.x_km = curve.moved.x;
+    node.y_km = curve.moved.y;
+  }
+}
+
 [[noreturn]] void bad(const std::string& msg) { throw std::runtime_error(msg); }
 
 // ---- JSON field access with messages that name the place ----
@@ -316,6 +443,7 @@ void buildModeGraph(World& world, crx::Mode mode, const std::vector<std::vector<
   }
 
   // 6. Emit nodes (ascending vertex order) and edges (walk order).
+  const uint32_t first_node = static_cast<uint32_t>(world.nodes.size());
   std::vector<uint32_t> node_of(ng, kNoNode);
   for (uint32_t g = 0; g < ng; ++g) {
     if (!keep[g]) continue;
@@ -328,26 +456,34 @@ void buildModeGraph(World& world, crx::Mode mode, const std::vector<std::vector<
     world.nodes.push_back(node);
     if (gsite[g] >= 0) world.sites[static_cast<size_t>(gsite[g])].node[static_cast<size_t>(m)] = node_of[g];
   }
+  // The drawn path between each pair of nodes. When the world asks for
+  // smoothing, corners inside a path are rounded first (the nodes at either
+  // end stay put), then the turn through each junction (the junction node
+  // moves a little; site nodes never do). An edge is as long as the path
+  // that is drawn and driven.
+  std::vector<EdgeDraft> drafts;
+  drafts.reserve(chains.size());
   for (const std::vector<uint32_t>& path : chains) {
-    RouteEdge e;
-    e.a = node_of[path.front()];
-    e.b = node_of[path.back()];
-    e.mode = mode;
-    e.speed_kmh = kSpeedKmh[m];
-    // The drawn path between the two nodes, its corners rounded when the
-    // world asks for it (the nodes at either end stay where they are). The
-    // edge is as long as the path that is drawn and driven.
-    std::vector<Pt> pts;
-    pts.reserve(path.size());
-    for (const uint32_t g : path) pts.push_back(gpos[g]);
-    if (smooth_km > 0.0) pts = roundCorners(pts, smooth_km);
+    EdgeDraft d;
+    d.edge.a = node_of[path.front()];
+    d.edge.b = node_of[path.back()];
+    d.edge.mode = mode;
+    d.edge.speed_kmh = kSpeedKmh[m];
+    d.pts.reserve(path.size());
+    for (const uint32_t g : path) d.pts.push_back(gpos[g]);
+    if (smooth_km > 0.0) d.pts = roundCorners(d.pts, smooth_km);
+    drafts.push_back(std::move(d));
+  }
+  if (smooth_km > 0.0) roundJunctions(world, first_node, drafts, smooth_km);
+  for (EdgeDraft& d : drafts) {
+    RouteEdge e = d.edge;
     e.polyline = Range<uint32_t>{static_cast<uint32_t>(world.polyline_xy.size() / 2),
-                                 static_cast<uint32_t>(pts.size())};
+                                 static_cast<uint32_t>(d.pts.size())};
     double length = 0;
-    for (size_t i = 0; i < pts.size(); ++i) {
-      world.polyline_xy.push_back(pts[i].x);
-      world.polyline_xy.push_back(pts[i].y);
-      if (i > 0) length += dist(pts[i - 1], pts[i]);
+    for (size_t i = 0; i < d.pts.size(); ++i) {
+      world.polyline_xy.push_back(d.pts[i].x);
+      world.polyline_xy.push_back(d.pts[i].y);
+      if (i > 0) length += dist(d.pts[i - 1], d.pts[i]);
     }
     e.length_km = std::max(length, kMinEdgeKm);
     world.edges.push_back(e);
@@ -612,6 +748,26 @@ bool loadWorld(const std::string& name, const std::string& text, uint64_t seed, 
 }
 
 }  // namespace
+
+bool roundJunctionCorner(double node_x, double node_y, double ax, double ay, double bx, double by,
+                         double radius_km, std::vector<double>& moved,
+                         std::vector<double>& toward_a, std::vector<double>& toward_b) {
+  moved.clear();
+  toward_a.clear();
+  toward_b.clear();
+  JunctionCurve curve;
+  if (!junctionCurve({node_x, node_y}, {ax, ay}, {bx, by}, radius_km, curve)) return false;
+  moved = {curve.moved.x, curve.moved.y};
+  for (const Pt& p : curve.toward_a) {
+    toward_a.push_back(p.x);
+    toward_a.push_back(p.y);
+  }
+  for (const Pt& p : curve.toward_b) {
+    toward_b.push_back(p.x);
+    toward_b.push_back(p.y);
+  }
+  return true;
+}
 
 std::vector<double> roundPolylineCorners(const std::vector<double>& xy, double radius_km) {
   std::vector<Pt> pts;

@@ -47,6 +47,21 @@ bool buildWorldFromJson(const std::string& name, const std::string& json_text, u
 // than three points, returns the input unchanged.
 std::vector<double> roundPolylineCorners(const std::vector<double>& xy, double radius_km);
 
+// Rounds the corner two paths make where they meet at `node`, given the next
+// point of each path away from it (`a` and `b`). When the turn from one path
+// into the other is between about 8 and 80 degrees, the corner becomes the
+// same quadratic curve as above (from a point d out along one path to a
+// point d out along the other, d = min(radius, 0.45 x either distance), the
+// old node as control point) and the node moves to the curve's midpoint.
+// Returns false, leaving the outputs empty, when the turn is outside that
+// range or there is nothing to round with. On true, `moved` is the new node
+// position and `toward_a` / `toward_b` are the curve's points from just past
+// the new node out to where the curve meets each path (that last point lies
+// on the original straight line from the old node), all as flat x,y lists.
+bool roundJunctionCorner(double node_x, double node_y, double ax, double ay, double bx, double by,
+                         double radius_km, std::vector<double>& moved,
+                         std::vector<double>& toward_a, std::vector<double>& toward_b);
+
 }  // namespace sim
 }  // namespace crx
 

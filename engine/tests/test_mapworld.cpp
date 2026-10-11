@@ -1133,6 +1133,49 @@ TEST_CASE("M15: place_order books a buyer's own lot exactly as the hourly pass w
   CHECK(again->stateHash() == third->stateHash());
 }
 
+namespace {
+
+// A sim on a world file the test wrote itself, loaded through the worlds
+// directory like any named world.
+std::unique_ptr<Sim> simFromFile(const std::string& name, const json& file) {
+  const std::string dir = std::string(CRX_WORLDS_DIR) + "/../../../build/native-release/test-worlds";
+  std::error_code ec;
+  std::filesystem::create_directories(dir, ec);
+  std::ofstream(dir + "/" + name + ".json") << file.dump();
+  setenv("CRX_WORLDS_DIR", dir.c_str(), 1);
+  std::string error;
+  auto sim = Sim::createFromConfig(json{{"seed", 42}, {"world", name}}.dump().c_str(), error);
+  unsetenv("CRX_WORLDS_DIR");
+  REQUIRE_MESSAGE(sim != nullptr, error);
+  return sim;
+}
+
+// A sim on a copy of the map world file with one tank's fields changed (a
+// null value removes the field), loaded through the worlds directory like
+// any named world.
+std::unique_ptr<Sim> makeVariantSim(const std::string& name, const std::string& site,
+                                    const std::string& material, const json& tank_fields) {
+  json file = json::parse(readWorldFile());
+  file["name"] = name;
+  bool found = false;
+  for (json& s : file["sites"])
+    if (s.at("key") == site)
+      for (json& t : s["tanks"])
+        if (t.at("material") == material) {
+          for (const auto& item : tank_fields.items()) {
+            if (item.value().is_null())
+              t.erase(item.key());
+            else
+              t[item.key()] = item.value();
+          }
+          found = true;
+        }
+  REQUIRE(found);
+  return simFromFile(name, file);
+}
+
+}  // namespace
+
 TEST_CASE("M16: smooth_km rounds interior corners and leaves the ends where they are") {
   const auto lengthOf = [](const std::vector<double>& xy) {
     double len = 0;
@@ -1208,10 +1251,25 @@ TEST_CASE("M16: smooth_km rounds interior corners and leaves the ends where they
   REQUIRE(buildWorldFromJson("erwin-world-v1", file.dump(), 42, smooth, error));
   REQUIRE(smooth.nodes.size() == plain.nodes.size());
   REQUIRE(smooth.edges.size() == plain.edges.size());
+  // Site nodes never move. A junction may: onto the curve that replaces its
+  // corner, which for an 8 km radius is at most 0.5 x 8 x sin(40 deg) away.
+  const double max_move = 0.5 * 8.0 * std::sin(40.0 * 3.14159265358979323846 / 180.0) + 1e-9;
+  size_t moved_nodes = 0;
   for (size_t n = 0; n < plain.nodes.size(); ++n) {
-    CHECK(smooth.nodes[n].x_km == plain.nodes[n].x_km);
-    CHECK(smooth.nodes[n].y_km == plain.nodes[n].y_km);
+    const double move = std::hypot(smooth.nodes[n].x_km - plain.nodes[n].x_km,
+                                   smooth.nodes[n].y_km - plain.nodes[n].y_km);
+    CHECK(smooth.nodes[n].site == plain.nodes[n].site);
+    if (plain.nodes[n].site >= 0) {
+      CHECK(move == 0.0);
+    } else {
+      CHECK(move <= max_move);
+      if (move > 0.0) ++moved_nodes;
+    }
   }
+  CHECK(moved_nodes >= 10);  // 21 on the map as drawn today
+  for (size_t s = 0; s < plain.sites.size(); ++s)
+    for (int m = 0; m < kModeCount; ++m)
+      CHECK(smooth.sites[s].node[static_cast<size_t>(m)] == plain.sites[s].node[static_cast<size_t>(m)]);
   size_t rounded_edges = 0;
   double plain_km = 0, smooth_km = 0;
   for (size_t e = 0; e < plain.edges.size(); ++e) {
@@ -1219,15 +1277,18 @@ TEST_CASE("M16: smooth_km rounds interior corners and leaves the ends where they
     const RouteEdge& b = smooth.edges[e];
     CHECK(b.a == a.a);
     CHECK(b.b == a.b);
-    const size_t a0 = 2 * a.polyline.begin, a1 = 2 * (a.polyline.begin + a.polyline.count - 1);
     const size_t b0 = 2 * b.polyline.begin, b1 = 2 * (b.polyline.begin + b.polyline.count - 1);
-    CHECK(smooth.polyline_xy[b0] == plain.polyline_xy[a0]);
-    CHECK(smooth.polyline_xy[b0 + 1] == plain.polyline_xy[a0 + 1]);
-    CHECK(smooth.polyline_xy[b1] == plain.polyline_xy[a1]);
-    CHECK(smooth.polyline_xy[b1 + 1] == plain.polyline_xy[a1 + 1]);
-    CHECK(b.length_km <= a.length_km + 1e-9);
-    const double chord = std::hypot(plain.polyline_xy[a1] - plain.polyline_xy[a0],
-                                    plain.polyline_xy[a1 + 1] - plain.polyline_xy[a0 + 1]);
+    // Every edge still starts and ends exactly on its two nodes, wherever
+    // they are now.
+    CHECK(smooth.polyline_xy[b0] == smooth.nodes[b.a].x_km);
+    CHECK(smooth.polyline_xy[b0 + 1] == smooth.nodes[b.a].y_km);
+    CHECK(smooth.polyline_xy[b1] == smooth.nodes[b.b].x_km);
+    CHECK(smooth.polyline_xy[b1 + 1] == smooth.nodes[b.b].y_km);
+    // Rounding shortens a path; an edge re-ended on a moved junction can
+    // gain at most the two moves.
+    CHECK(b.length_km <= a.length_km + 2.0 * max_move);
+    const double chord = std::hypot(smooth.polyline_xy[b1] - smooth.polyline_xy[b0],
+                                    smooth.polyline_xy[b1 + 1] - smooth.polyline_xy[b0 + 1]);
     CHECK(b.length_km >= chord - 1e-9);
     // The edge is exactly as long as the path it carries.
     std::vector<double> xy(smooth.polyline_xy.begin() + static_cast<long>(b0),
@@ -1249,50 +1310,89 @@ TEST_CASE("M16: smooth_km rounds interior corners and leaves the ends where they
     CHECK(smooth.polyline_xy[2 * (b.begin + b.count - 1) + 1] ==
           plain.polyline_xy[2 * (a.begin + a.count - 1) + 1]);
   }
+  // The turn through a junction, on its own: a road arriving from the west
+  // meets one leaving east-north-east (a 31 degree turn) at (50, 0).
+  std::vector<double> moved, toward_a, toward_b;
+  REQUIRE(roundJunctionCorner(50, 0, 0, 0, 100, 30, 8.0, moved, toward_a, toward_b));
+  const double ub_x = 50.0 / std::hypot(50.0, 30.0), ub_y = 30.0 / std::hypot(50.0, 30.0);
+  REQUIRE(toward_a.size() == 6);
+  REQUIRE(toward_b.size() == 6);
+  // The curve meets each road 8 km out, on the road's own line...
+  CHECK(toward_a[4] == doctest::Approx(42.0));
+  CHECK(toward_a[5] == doctest::Approx(0.0));
+  CHECK(toward_b[4] == doctest::Approx(50.0 + 8.0 * ub_x));
+  CHECK(toward_b[5] == doctest::Approx(8.0 * ub_y));
+  // ...and the junction moves to its midpoint, inside the corner.
+  CHECK(moved[0] == doctest::Approx(0.25 * 42.0 + 0.5 * 50.0 + 0.25 * (50.0 + 8.0 * ub_x)));
+  CHECK(moved[1] == doctest::Approx(0.25 * 8.0 * ub_y));
+  const double turn = std::acos(ub_x);  // from heading east to heading along ub
+  CHECK(std::hypot(moved[0] - 50.0, moved[1]) == doctest::Approx(0.5 * 8.0 * std::sin(turn / 2)));
+  CHECK(moved[1] > 0.0);
+  CHECK(moved[1] < 8.0 * ub_y);
+  // Each half runs from the junction outward without doubling back.
+  CHECK(toward_a[0] < moved[0]);
+  CHECK(toward_a[2] < toward_a[0]);
+  CHECK(toward_a[4] < toward_a[2]);
+  CHECK(toward_b[0] > moved[0]);
+  CHECK(toward_b[2] > toward_b[0]);
+  CHECK(toward_b[4] > toward_b[2]);
+  // Left alone: nearly straight on, a real T junction, no radius, no length.
+  CHECK(!roundJunctionCorner(50, 0, 0, 0, 100, 5, 8.0, moved, toward_a, toward_b));
+  CHECK(moved.empty());
+  CHECK(!roundJunctionCorner(50, 0, 0, 0, 50, 60, 8.0, moved, toward_a, toward_b));
+  CHECK(!roundJunctionCorner(50, 0, 0, 0, 100, 30, 0.0, moved, toward_a, toward_b));
+  CHECK(!roundJunctionCorner(50, 0, 50, 0, 100, 30, 8.0, moved, toward_a, toward_b));
+  // Short approaches limit it, as for interior corners.
+  REQUIRE(roundJunctionCorner(50, 0, 46, 0, 100, 30, 8.0, moved, toward_a, toward_b));
+  CHECK(toward_a[4] == doctest::Approx(50.0 - 0.45 * 4.0));
+
+  // Vehicles drive the moved geometry: every travelling vehicle sits on the
+  // drawn path of the edge it is on, and its reported path ends on the
+  // destination's node.
+  file["smooth_km"] = 8;
+  file["name"] = "smooth-on";
+  auto driving = simFromFile("smooth-on", file);
+  const World& sw = driving->world();
+  size_t on_edges = 0;
+  for (int hour = 0; hour < 72; ++hour) {
+    driving->step(4);
+    const State& st = driving->state();
+    for (size_t v = 0; v < st.vehicle.size(); ++v) {
+      const VehicleState& vs = st.vehicle[v];
+      if (vs.edge >= sw.edges.size()) continue;
+      if (vs.status != VehStatus::ToPickup && vs.status != VehStatus::ToDropoff) continue;
+      const Range<uint32_t> pl = sw.edges[vs.edge].polyline;
+      double nearest = 1e300;
+      for (uint32_t i = pl.begin; i + 1 < pl.begin + pl.count; ++i) {
+        const double ax = sw.polyline_xy[2 * i], ay = sw.polyline_xy[2 * i + 1];
+        const double bx = sw.polyline_xy[2 * i + 2], by = sw.polyline_xy[2 * i + 3];
+        const double len2 = (bx - ax) * (bx - ax) + (by - ay) * (by - ay);
+        double t = len2 > 0 ? ((vs.x_km - ax) * (bx - ax) + (vs.y_km - ay) * (by - ay)) / len2 : 0;
+        t = std::max(0.0, std::min(1.0, t));
+        nearest = std::min(nearest, std::hypot(vs.x_km - (ax + t * (bx - ax)), vs.y_km - (ay + t * (by - ay))));
+      }
+      CHECK(nearest < 1e-6);
+      ++on_edges;
+      if (hour % 12 == 0) {
+        const json doc = json::parse(vehicleJson(sw, st, static_cast<uint32_t>(v)));
+        const VehicleClass& vc = sw.catalog.vehicle_classes[sw.fleet[v].cls];
+        const RouteNode& dest =
+            sw.nodes[sw.sites[doc.at("legDestination").at("site").get<size_t>()].node[modeIndex(vc.mode)]];
+        CHECK(doc.at("path").back().at(0).get<double>() == doctest::Approx(dest.x_km));
+        CHECK(doc.at("path").back().at(1).get<double>() == doctest::Approx(dest.y_km));
+      }
+    }
+  }
+  CHECK(on_edges > 1000);
+
   // A bad radius is a load error.
+  file["name"] = "erwin-world-v1";
   file["smooth_km"] = -1;
   World bad_world;
   CHECK(!buildWorldFromJson("erwin-world-v1", file.dump(), 42, bad_world, error));
   file["smooth_km"] = "wide";
   CHECK(!buildWorldFromJson("erwin-world-v1", file.dump(), 42, bad_world, error));
 }
-
-namespace {
-
-// A sim on a copy of the map world file with one tank's fields changed (a
-// null value removes the field), loaded through the worlds directory like
-// any named world.
-std::unique_ptr<Sim> makeVariantSim(const std::string& name, const std::string& site,
-                                    const std::string& material, const json& tank_fields) {
-  json file = json::parse(readWorldFile());
-  file["name"] = name;
-  bool found = false;
-  for (json& s : file["sites"])
-    if (s.at("key") == site)
-      for (json& t : s["tanks"])
-        if (t.at("material") == material) {
-          for (const auto& item : tank_fields.items()) {
-            if (item.value().is_null())
-              t.erase(item.key());
-            else
-              t[item.key()] = item.value();
-          }
-          found = true;
-        }
-  REQUIRE(found);
-  const std::string dir = std::string(CRX_WORLDS_DIR) + "/../../../build/native-release/test-worlds";
-  std::error_code ec;
-  std::filesystem::create_directories(dir, ec);
-  std::ofstream(dir + "/" + name + ".json") << file.dump();
-  setenv("CRX_WORLDS_DIR", dir.c_str(), 1);
-  std::string error;
-  auto sim = Sim::createFromConfig(json{{"seed", 42}, {"world", name}}.dump().c_str(), error);
-  unsetenv("CRX_WORLDS_DIR");
-  REQUIRE_MESSAGE(sim != nullptr, error);
-  return sim;
-}
-
-}  // namespace
 
 TEST_CASE("M17: a product tank that rejects when full does not hold its plant back") {
   // Both runs set the ethane tank and the flag themselves, so the test does
