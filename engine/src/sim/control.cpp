@@ -65,7 +65,8 @@ double computeRMax(const World& world, const Process& proc, const State& state) 
     const UnitSlot& slot = type.units[unit.slot];
     const int online = static_cast<int>(slot.trains) - state.unit[u].trains_down;
     if (online <= 0) return 0.0;
-    r_max = std::min(r_max, unit.cap_per_train_t_h * online / unitThroughputPerBasis(slot));
+    r_max = std::min(r_max, unit.cap_per_train_t_h * online /
+                                unitThroughputPerBasis(slot, proc.mode_share));
   }
   // §3.2 sizes trains at 110% of nameplate so the process still reaches
   // nameplate with one train down; the process rate itself never exceeds it.

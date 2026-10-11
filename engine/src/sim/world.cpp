@@ -30,10 +30,14 @@ constexpr double kOverdesign = 1.10;  // §3.2: trains sized at 110 % of namepla
 
 }  // namespace
 
-double unitThroughputPerBasis(const UnitSlot& slot) {
+double unitThroughputPerBasis(const UnitSlot& slot, const std::vector<double>& mode_share) {
   double tput = 0.0;
-  if (!slot.by_mode.empty())
-    for (const Stream& s : slot.by_mode[0].in) tput += s.t_per_t;
+  for (size_t m = 0; m < slot.by_mode.size() && m < mode_share.size(); ++m) {
+    if (mode_share[m] <= 0.0) continue;
+    double in = 0.0;
+    for (const Stream& s : slot.by_mode[m].in) in += s.t_per_t;
+    tput += mode_share[m] * in;  // a single-mode process: 1.0 x its in-sum, exactly
+  }
   return tput > 0.0 ? tput : 1.0;
 }
 
@@ -189,7 +193,8 @@ bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, Wo
     for (uint32_t u = proc.units.begin; u < rangeEnd(proc.units); ++u) {
       const UnitSlot& slot = type.units[out.units[u].slot];
       out.units[u].cap_per_train_t_h =
-          kOverdesign * proc.design_rate_t_h * unitThroughputPerBasis(slot) / slot.trains;
+          kOverdesign * proc.design_rate_t_h * unitThroughputPerBasis(slot, proc.mode_share) /
+          slot.trains;
     }
   }
 

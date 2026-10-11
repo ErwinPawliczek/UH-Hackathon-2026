@@ -219,11 +219,8 @@ double rMax(const World& w, const Process& proc, const State& st) {
     const UnitSlot& slot = type.units[unit.slot];
     const int online = static_cast<int>(slot.trains) - st.unit[u].trains_down;
     if (online <= 0) return 0.0;
-    double tput = 0.0;
-    if (!slot.by_mode.empty())
-      for (const Stream& s : slot.by_mode[0].in) tput += s.t_per_t;
-    if (tput <= 0.0) tput = 1.0;
-    r_max = std::min(r_max, unit.cap_per_train_t_h * online / tput);
+    r_max = std::min(r_max, unit.cap_per_train_t_h * online /
+                                unitThroughputPerBasis(slot, proc.mode_share));
   }
   return std::min(proc.design_rate_t_h, std::isinf(r_max) ? proc.design_rate_t_h : r_max);
 }
