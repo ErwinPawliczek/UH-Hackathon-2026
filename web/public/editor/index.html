@@ -32,7 +32,7 @@ header .zig{position:absolute;left:0;right:0;top:100%;height:8px;pointer-events:
 .mark img{width:20px;height:20px}
 .wordmark{font-family:var(--f-display);font-stretch:125%;font-weight:700;font-size:16px;line-height:1}
 .wordmark b{color:var(--blue);font-weight:700}
-.title{font-family:var(--f-mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 10px 0 4px}
+.title{white-space:nowrap;font-family:var(--f-mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 10px 0 4px}
 .gap{flex:1}
 .sep{width:1px;height:22px;background:var(--line-2);margin:0 4px}
 
@@ -55,9 +55,13 @@ header .zig{position:absolute;left:0;right:0;top:100%;height:8px;pointer-events:
 main{position:relative;overflow:hidden;background:var(--white)}
 canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 #status{position:absolute;left:12px;bottom:10px;font:12px var(--f-mono);color:var(--muted);background:rgba(255,255,255,.88);padding:2px 6px}
-#hint{position:absolute;left:12px;top:16px;max-width:520px;font-size:12px;color:var(--muted);background:rgba(255,255,255,.88);padding:3px 7px;transition:opacity .8s;pointer-events:none}
+#hint{position:absolute;left:12px;bottom:34px;max-width:520px;font-size:12px;color:var(--muted);background:rgba(255,255,255,.88);padding:3px 7px;transition:opacity .8s;pointer-events:none}
 #hint.gone{opacity:0}
-#brushBox{position:absolute;right:12px;top:16px;display:none;align-items:center;gap:6px;font-size:12px;color:var(--muted);background:rgba(255,255,255,.88);padding:3px 7px}
+.group{position:relative;display:inline-flex}
+.strip.chamfer{position:absolute;left:0;top:calc(100% + 16px);z-index:8;display:flex;align-items:center;gap:6px;padding:7px 12px;white-space:nowrap}
+.strip[hidden]{display:none}
+.strip .label{margin:0 2px 0 0}
+.strip .brush{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-left:6px}
 
 aside{overflow:auto;padding:16px 12px 16px 6px;display:flex;flex-direction:column;gap:10px;background:var(--white)}
 /* Cut-corner panels: outline and fill as two clipped layers, as in the app. */
@@ -174,12 +178,26 @@ select{padding:3px 6px;border:1px solid var(--line-2);border-radius:4px;backgrou
   <button class="btn" id="maps" aria-expanded="false" title="Save this map, load another, or start a new one">Maps</button>
   <span id="mapName" title="The map you are working on"></span>
   <span class="sep"></span>
-  <button class="btn" data-tool="select" aria-pressed="true" title="Move a site, pick a line and drag its points (V)">Select</button>
-  <button class="btn" data-tool="road" title="Press, drag and release to lay a road (R)">Road</button>
-  <button class="btn" data-tool="river" title="Press, drag and release to lay a river lane for barges (B)">River lane</button>
-  <button class="btn" data-tool="sea" title="Press, drag and release to lay a sea lane for ships (S)">Sea lane</button>
-  <button class="btn" data-tool="water" title="Paint water (W)">Water</button>
-  <button class="btn" data-tool="land" title="Paint land back over water (E)">Land</button>
+  <button class="btn" data-tool="select" aria-pressed="true" title="Move a site, pick a line and drag its points (V)">Select<kbd>V</kbd></button>
+  <span class="group">
+    <button class="btn" data-group="routing" aria-expanded="false" title="Roads, pipelines, ship routes and barge routes">Routing ▾</button>
+    <span class="strip chamfer" id="strip-routing" hidden>
+      <span class="label">Place:</span>
+      <button class="btn" data-tool="road" title="Press, drag and release to lay a road">Road<kbd>R</kbd></button>
+      <button class="btn" data-tool="pipe" title="Drag from one site to another to redraw the pipeline between them">Pipeline<kbd>P</kbd></button>
+      <button class="btn" data-tool="sea" title="Press, drag and release to lay a route for ships, on water">Ship Route<kbd>S</kbd></button>
+      <button class="btn" data-tool="river" title="Press, drag and release to lay a route for barges, on water">Barge Route<kbd>B</kbd></button>
+    </span>
+  </span>
+  <span class="group">
+    <button class="btn" data-group="terrain" aria-expanded="false" title="Water and land">Terrain ▾</button>
+    <span class="strip chamfer" id="strip-terrain" hidden>
+      <span class="label">Place:</span>
+      <button class="btn" data-tool="water" title="Paint water">Water<kbd>W</kbd></button>
+      <button class="btn" data-tool="land" title="Paint land back over water">Land<kbd>E</kbd></button>
+      <span class="brush">Brush <select id="brush"><option value="0">Small (10 km)</option><option value="1" selected>Medium (30 km)</option><option value="2">Large (50 km)</option></select></span>
+    </span>
+  </span>
   <span class="gap"></span>
   <button class="btn" id="play" title="Watch this map being drawn, then stand up into the simulation">Play build</button>
   <button class="btn" id="check" title="Ask the engine whether this world can be built and whether it holds for 30 days">Check</button>
@@ -193,7 +211,6 @@ select{padding:3px 6px;border:1px solid var(--line-2);border-radius:4px;backgrou
 <main>
   <canvas id="cv"></canvas>
   <div id="hint"></div>
-  <div id="brushBox">Brush <select id="brush"><option value="0">Small (10 km)</option><option value="1" selected>Medium (30 km)</option><option value="2">Large (50 km)</option></select></div>
   <div id="status"></div><div id="menu"></div>
   <section class="chamfer" id="mapsPanel" hidden>
     <h2 class="label">Maps</h2>
@@ -225,7 +242,7 @@ select{padding:3px 6px;border:1px solid var(--line-2);border-radius:4px;backgrou
     <h2 class="label">File</h2>
     <div class="row"><button class="btn" id="export">Export</button><button class="btn" id="import">Import</button></div>
     <input type="file" id="file" accept=".json,application/json" hidden>
-    <p class="hint">The layout is saved in this browser as you work. The 22 sites and 9 pipelines are fixed: move and rename sites, re-bend pipelines, and draw roads, lanes and water freely.</p>
+    <p class="hint">The layout is saved in this browser as you work. The 22 sites and 9 pipelines are fixed: move and rename sites, re-bend or redraw pipelines, and draw roads, ship routes, barge routes and water freely.</p>
   </section>
 </aside>
 
@@ -268,8 +285,8 @@ const MODES = {
   /* line styles and colours as on the app's map (web/src/scene/palette.ts) */
   pipeline:{label:'Pipeline',dash:[],w:2.6,col:'#1764d6'},
   road:{label:'Road',dash:[6,4],w:1.6,col:'#9aa0a6'},
-  river:{label:'River lane',dash:[14,5],w:2.2,col:'#9dc3ef'},
-  sea:{label:'Sea lane',dash:[2,5],w:2.2,col:'#79aef2'},
+  river:{label:'Barge route',dash:[14,5],w:2.2,col:'#9dc3ef'},
+  sea:{label:'Ship route',dash:[2,5],w:2.2,col:'#79aef2'},
 };
 /* pipelines take their material's flow colour: gas blue-light, olefins blue, crude and fuels ink */
 const PIPE_COLOR = {RAW_GAS:'#79aef2',METHANE:'#79aef2',ETHANE:'#79aef2',LPG:'#79aef2',CHLORINE:'#79aef2',ETHYLENE:'#1764d6',PROPYLENE:'#1764d6',CRUDE:'#0a0a0a',NAPHTHA:'#0a0a0a',GASOLINE:'#0a0a0a',JET:'#0a0a0a',DIESEL:'#0a0a0a'};
@@ -278,10 +295,11 @@ const EDGE = 60, SNAP = 12, W_KM = 600, H_KM = 400, CELL = 10, COLS = W_KM/CELL,
 const KEY = 'petrogrid-layout-v2', RUN_KEY = 'petrogrid-run-custom', SEEN_KEY = 'petrogrid-editor-seen';
 const MAPS_KEY = 'petrogrid-maps-v1', NAME_KEY = 'petrogrid-map-name';
 const HINTS = {
-  select:'Drag a site to move it. Click a road, lane or pipeline to pick it, then drag its points. Double-click a pipeline to add a bend. Right-click to erase or remove. Ctrl+Z undoes, Ctrl+Shift+Z redoes.',
+  select:'Drag a site to move it. Click a road, route or pipeline to pick it, then drag its points. Double-click a pipeline to add a bend. Right-click to erase or remove. Ctrl+Z undoes, Ctrl+Shift+Z redoes.',
   road:'Press, drag and release to lay one straight road. Lay them end to end for bends. Ends snap to sites, to other ends, and onto the middle of a road.',
-  river:'Press, drag and release to lay a river lane for barges, on water. Ends snap to sites within reach and to other river lanes.',
-  sea:'Press, drag and release to lay a sea lane for ships, on water. Ends snap to sites within reach and to other sea lanes.',
+  pipe:'Drag from one site to another to redraw the pipeline between them. The nine pipelines of this world are shown faintly; then bend the new one with Select.',
+  river:'Press, drag and release to lay a barge route, on water. Ends snap to sites within reach and to other barge routes.',
+  sea:'Press, drag and release to lay a ship route, on water. Ends snap to sites within reach and to other ship routes.',
   water:'Paint water with the brush. Right-click water to erase a whole body of it.',
   land:'Paint land back over water.',
 };
@@ -289,7 +307,7 @@ const HINTS = {
 /* ---------- state ---------- */
 const blank = () => ({version:2,wKm:W_KM,hKm:H_KM,cellKm:CELL,water:[],sites:[],network:[],connections:[]});
 let S = blank(), DEFAULT = null, DEFAULT_ACCESS = null;
-let tool = 'select', sel = null, netDraft = null, drag = null, mouse = [0,0], ring = null;
+let tool = 'select', sel = null, pipeDraft = null, netDraft = null, drag = null, mouse = [0,0], ring = null;
 let lastCheck = null, checkedText = '', checkTimer = null, checking = false;
 const $ = id => document.getElementById(id);
 const clone = o => JSON.parse(JSON.stringify(o));
@@ -374,6 +392,11 @@ function draw(){
   S.connections.forEach((c,i) => line(c.points, 'pipeline', sel && sel.t === 'conn' && sel.i === i, c.material));
   pipeNames();
   if (netDraft) line([netDraft.a, snap(mouse, netDraft.mode, false)], netDraft.mode, true);
+  if (tool === 'pipe'){/* what can be drawn: the nine pairs, faintly */
+    ctx.save(); ctx.strokeStyle = 'rgba(23,100,214,.22)'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+    for (const c of S.connections){const a = siteById(c.from), b = siteById(c.to); ctx.beginPath(); ctx.moveTo(X(a.x), Y(a.y)); ctx.lineTo(X(b.x), Y(b.y)); ctx.stroke();}
+    ctx.restore();
+    if (pipeDraft){const a = siteById(pipeDraft.from), t = nearSite(mouse, SNAP+6); line([[a.x, a.y], t && t.id !== a.id ? [t.x, t.y] : mouse], 'pipeline', true);}}
   const picked = selLine();
   if (picked) picked.points.forEach((q,i) => {const end = sel.t === 'conn' && (i === 0 || i === picked.points.length-1); if (end) return;
     ctx.beginPath(); ctx.arc(X(q[0]), Y(q[1]), 4.5, 0, 7); ctx.fillStyle = sel.h === i ? '#1764d6' : '#ffffff'; ctx.fill(); ctx.lineWidth = 1.6; ctx.strokeStyle = '#1764d6'; ctx.stroke();});
@@ -387,7 +410,7 @@ function draw(){
     badge(s.preset, x, y, on, bad);}
   if (ring){const s = siteById(ring.id); if (s){ctx.beginPath(); ctx.arc(X(s.x), Y(s.y), 24, 0, 7); ctx.lineWidth = 3; ctx.strokeStyle = '#d1372f'; ctx.stroke();}}
   let roadKm = 0; for (const n of S.network) if (n.mode === 'road') for (let i = 1; i < n.points.length; i++) roadKm += Math.hypot(n.points[i][0]-n.points[i-1][0], n.points[i][1]-n.points[i-1][1]);
-  $('status').textContent = `${Math.max(0,Math.min(W_KM,mouse[0])).toFixed(0)}, ${Math.max(0,Math.min(H_KM,mouse[1])).toFixed(0)} km · ${S.network.length} roads and lanes · ${Math.round(roadKm).toLocaleString('en-US')} km of road`;
+  $('status').textContent = `${Math.max(0,Math.min(W_KM,mouse[0])).toFixed(0)}, ${Math.max(0,Math.min(H_KM,mouse[1])).toFixed(0)} km · ${S.network.length} roads and routes · ${Math.round(roadKm).toLocaleString('en-US')} km of road`;
 }
 function line(pts, mode, on, mat){const M = MODES[mode]; ctx.save(); ctx.setLineDash(M.dash); ctx.lineWidth = on ? M.w+1.4 : M.w;
   ctx.strokeStyle = on ? '#1764d6' : mat ? PIPE_COLOR[mat] || '#b9bec4' : M.col; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
@@ -407,8 +430,15 @@ function pipeNames(){ctx.save(); ctx.font = '10.5px "Instrument Sans",system-ui,
 
 /* ---------- interaction ---------- */
 function showHint(text, ms){const el = $('hint'); el.textContent = text; el.classList.remove('gone'); clearTimeout(showHint.t); showHint.t = setTimeout(() => el.classList.add('gone'), ms);}
-function setTool(t){tool = t; netDraft = null; document.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === t));
-  cv.style.cursor = t === 'select' ? 'default' : 'crosshair'; showHint(HINTS[t], 9000); $('brushBox').style.display = t === 'water' || t === 'land' ? 'flex' : 'none'; draw();}
+const GROUPS = {routing:['road','pipe','sea','river'], terrain:['water','land']};
+const TOOL_WORDS = {road:'Road', pipe:'Pipeline', sea:'Ship Route', river:'Barge Route', water:'Water', land:'Land'};
+function openGroup(g){for (const k in GROUPS){const on = k === g; $('strip-'+k).hidden = !on; const b = document.querySelector(`[data-group="${k}"]`); b.setAttribute('aria-expanded', String(on));}}
+function setTool(t){tool = t; netDraft = null; pipeDraft = null; document.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === t));
+  /* a heading names its active tool and keeps its strip open while that tool is in hand */
+  let mine = null; for (const k in GROUPS){const on = GROUPS[k].includes(t); if (on) mine = k; const b = document.querySelector(`[data-group="${k}"]`); b.textContent = (on ? `${cap(k)}: ${TOOL_WORDS[t]}` : cap(k)) + ' ▾'; b.setAttribute('aria-pressed', String(on));}
+  openGroup(mine);
+  cv.style.cursor = t === 'select' ? 'default' : 'crosshair'; showHint(HINTS[t], 9000); draw();}
+document.querySelectorAll('[data-group]').forEach(b => b.onclick = () => {const k = b.dataset.group; openGroup($('strip-'+k).hidden ? k : (GROUPS[k].includes(tool) ? k : null));});
 document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
 function paint(p, on){const c0 = Math.floor(p[0]/CELL), r0 = Math.floor(p[1]/CELL), R = +$('brush').value, set = waterSet();
   for (let c = c0-R; c <= c0+R; c++) for (let r = r0-R; r <= r0+R; r++){if (c < 0 || r < 0 || c >= COLS || r >= ROWS) continue; const k = c+','+r;
@@ -418,6 +448,7 @@ function moveSite(s, nx, ny){for (const c of S.connections){if (c.from === s.id)
 cv.onmousedown = e => {if (e.button !== 0) return; const p = toKm(e); hideMenu();
   if (tool === 'water' || tool === 'land'){drag = {paint:tool === 'water'}; paint(p, drag.paint); draw(); return;}
   if (NET_MODES.includes(tool)){netDraft = {mode:tool, a:snap(p, tool, true)}; draw(); return;}
+  if (tool === 'pipe'){const from = nearSite(p, SNAP+6); pipeDraft = from ? {from:from.id} : null; draw(); return;}
   /* a site wins over a line's end that sits on it */
   const s = siteAt(p), h = s ? -1 : handleAt(p), c = selLine();
   if (h >= 0 && !(sel.t === 'conn' && (h === 0 || h === c.points.length-1))){sel.h = h; drag = {handle:h, mates:new Set([c.points[h]])};
@@ -432,7 +463,16 @@ cv.onmousemove = e => {mouse = toKm(e);
   else if (drag && drag.handle !== undefined){const c = selLine(); if (c){const to = sel.t === 'net' ? snap(mouse, c.mode, false, drag.mates) : [Math.max(0,Math.min(W_KM,Math.round(mouse[0]))), Math.max(0,Math.min(H_KM,Math.round(mouse[1])))]; for (const q of drag.mates){q[0] = to[0]; q[1] = to[1];}}}
   else if (drag && 'paint' in drag) paint(mouse, drag.paint);
   draw();};
+/* the Pipeline tool: a drag from site to site redraws the pipeline that joins them, if this world has one */
+function dropPipe(){const a = siteById(pipeDraft.from), b = nearSite(mouse, SNAP+6); pipeDraft = null;
+  if (!b || b.id === a.id){draw(); return;}
+  const i = S.connections.findIndex(c => (c.from === a.id && c.to === b.id) || (c.from === b.id && c.to === a.id));
+  if (i < 0){const others = [...new Set(S.connections.filter(c => c.from === a.id || c.to === a.id).map(c => siteById(c.from === a.id ? c.to : c.from).name))];
+    toast(`There is no pipeline between ${a.name} and ${b.name} in this world. ${others.length ? `${a.name} connects by pipeline to ${others.join(', ')}.` : `${a.name} has no pipeline.`}`); draw(); return;}
+  const c = S.connections[i], from = siteById(c.from), to = siteById(c.to), twin = S.connections.slice(0, i).filter(o => (o.from === c.from && o.to === c.to) || (o.from === c.to && o.to === c.from)).length;
+  c.points = bow([from.x, from.y], [to.x, to.y], twin); sel = {t:'conn', i}; refresh();}
 window.onmouseup = () => {
+  if (pipeDraft){dropPipe(); return;}
   if (netDraft){const b = snap(mouse, netDraft.mode, true), a = netDraft.a; if (Math.hypot(a[0]-b[0], a[1]-b[1]) >= 4){S.network.push({mode:netDraft.mode, points:[a,b]}); sel = {t:'net', i:S.network.length-1};} netDraft = null; refresh(); return;}
   if (drag){drag = null; refresh();}};
 function addBend(c, p){const h = segHit(c.points, p); if (!h) return; c.points.splice(h.k, 0, [h.pt[0], h.pt[1]]); sel.h = h.k; refresh();}
@@ -453,11 +493,11 @@ cv.oncontextmenu = e => {e.preventDefault(); netDraft = null; drag = null; const
   menu.innerHTML = ''; for (const [text, fn, plain] of items){const b = document.createElement('button'); if (!plain) b.className = 'x'; b.textContent = text; b.onclick = () => {fn(); hideMenu(); refresh();}; menu.appendChild(b);}
   const r = cv.getBoundingClientRect(); menu.style.display = 'block'; menu.style.left = Math.min(e.clientX-r.left, r.width-230)+'px'; menu.style.top = Math.min(e.clientY-r.top, r.height-items.length*34-10)+'px';};
 window.addEventListener('mousedown', e => {if (!menu.contains(e.target)) hideMenu();}, true);
-const KEYS = {v:'select', r:'road', b:'river', s:'sea', w:'water', e:'land'};
+const KEYS = {v:'select', r:'road', p:'pipe', b:'river', s:'sea', w:'water', e:'land'};
 window.onkeydown = e => {if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return; const k = e.key.toLowerCase();
   if ((e.metaKey || e.ctrlKey) && (k === 'z' || k === 'y')){if (e.shiftKey || k === 'y') redo(); else undo(); e.preventDefault(); return;}
   if (e.metaKey || e.ctrlKey) return;
-  if (k === 'escape'){netDraft = null; sel = null; ring = null; refresh(true);}
+  if (k === 'escape'){netDraft = null; pipeDraft = null; sel = null; ring = null; refresh(true);}
   else if (k === 'delete' || k === 'backspace'){const c = selLine();
     if (c && sel.h !== undefined) removeBend(c, sel.h);
     else if (sel && sel.t === 'net'){S.network.splice(sel.i, 1); sel = null; refresh();}
@@ -483,7 +523,7 @@ function localProblems(acc){const errors = [], set = waterSet();
     for (const mode of ['river','sea']) if (DEFAULT_ACCESS[mode].site[s.id] !== undefined && acc[mode].site[s.id] === undefined) errors.push({site:s.id, mode, text:`${s.name} needs a ${MODES[mode].label.toLowerCase()} within ${SNAP} km for its berth`});}
   if (acc.road.pieces > 1) errors.push({site:null, mode:'road', text:`The road network is in ${acc.road.pieces} pieces: join them`});
   const dry = S.network.filter(n => (n.mode === 'river' || n.mode === 'sea') && n.points.some(p => !onWater(p, set))).length;
-  const warnings = dry ? [{site:null, text:`${dry} river or sea lane${dry === 1 ? ' has' : 's have'} a point on land`}] : [];
+  const warnings = dry ? [{site:null, text:`${dry} ship or barge route${dry === 1 ? ' has' : 's have'} a point on land`}] : [];
   return {errors, warnings, dry};}
 
 /* ---------- panels ---------- */
@@ -498,7 +538,7 @@ function step(from, to, none){if (!from.length){toast(none); return;} to.push(hi
 const undo = () => step(history, future, 'Nothing to undo.'), redo = () => step(future, history, 'Nothing to redo.');
 function refresh(noEdit){if (!noEdit){tieSites(); save(); remember();} draw(); const acc = access(S);
   const el = $('sel');
-  if (!sel){el.innerHTML = '<p class="hint">Nothing selected. Click a site, a road, a lane or a pipeline.</p>';}
+  if (!sel){el.innerHTML = '<p class="hint">Nothing selected. Click a site, a road, a route or a pipeline.</p>';}
   else if (sel.t === 'site'){const s = siteById(sel.id), P = PRESETS[s.preset];
     const got = m => S.sites.some(o => o.id !== s.id && PRESETS[o.preset].makes.includes(m) && canMove(m, o.id, s.id, acc));
     const sent = m => S.sites.some(o => o.id !== s.id && (PRESETS[o.preset].anything || PRESETS[o.preset].needs.includes(m) || (PRESETS[o.preset].optional || []).includes(m)) && canMove(m, s.id, o.id, acc));
@@ -517,8 +557,8 @@ function refresh(noEdit){if (!noEdit){tieSites(); save(); remember();} draw(); c
   li.push([offRoad === 0, offRoad === 0 ? 'Every site on a road' : `Every site on a road (${offRoad} not)`]);
   li.push([acc.road.pieces <= 1, acc.road.pieces <= 1 ? 'Road network in one piece' : `Road network in one piece (now ${acc.road.pieces})`]);
   const lost = prob.errors.filter(e => (e.mode === 'river' || e.mode === 'sea') && e.site !== null).length;
-  li.push([lost === 0, lost === 0 ? 'Berths within reach of their lanes' : `Berths within reach of their lanes (${lost} not)`]);
-  li.push([prob.dry === 0 ? true : null, prob.dry === 0 ? 'River and sea lanes drawn on water' : `${prob.dry} river or sea lane${prob.dry === 1 ? ' has' : 's have'} a point on land (allowed)`]);
+  li.push([lost === 0, lost === 0 ? 'Berths within reach of their routes' : `Berths within reach of their routes (${lost} not)`]);
+  li.push([prob.dry === 0 ? true : null, prob.dry === 0 ? 'Ship and barge routes drawn on water' : `${prob.dry} ship or barge route${prob.dry === 1 ? ' has' : 's have'} a point on land (allowed)`]);
   const straight = S.connections.filter(c => c.points.length < 3).length;
   li.push([straight === 0 ? true : null, straight === 0 ? 'Every pipeline has a bend' : `${straight} pipeline${straight === 1 ? ' is' : 's are'} straight: double-click one to bend it`]);
   $('list').innerHTML = li.map(([ok,t]) => `<li class="${ok === null ? 'note' : ok ? 'ok' : 'no'}">${t}</li>`).join('');
@@ -639,7 +679,7 @@ $('file').onchange = async e => {const f = e.target.files[0]; e.target.value = '
   new ResizeObserver(fit).observe(cv.parentElement); fit();
   /* the first visit gets the whole idea in one line, a little longer */
   let seen = true; try {seen = localStorage.getItem(SEEN_KEY) === '1'; localStorage.setItem(SEEN_KEY, '1');} catch (e){}
-  if (!seen) showHint('This is the default world. Drag sites, redraw roads, lanes and water, re-bend pipelines; Check tells you whether it still works, and Run this world plays it. Ctrl+Z undoes.', 16000);
+  if (!seen) showHint('This is the default world. Drag sites, redraw roads, routes and water, re-bend pipelines; Check tells you whether it still works, and Run this world plays it. Ctrl+Z undoes.', 16000);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
 })();
 </script>
