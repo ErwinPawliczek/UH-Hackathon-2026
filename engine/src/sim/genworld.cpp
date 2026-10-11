@@ -240,7 +240,7 @@ std::vector<std::string> realSimWarmup(const worldgen::GeneratedWorld& gen,
     return errors;
   }
   constexpr uint32_t kTicksPerHour = 4;  // kTickHours = 0.25
-  sim->step(21 * 24 * kTicksPerHour);    // ramp-up: start-up transient excluded
+  sim->step(35 * 24 * kTicksPerHour);    // ramp-up: start-up transient excluded
   const crx::sim::World& w = sim->world();
   for (uint32_t day = 0; day < 7; ++day) {
     sim->step(24 * kTicksPerHour);
