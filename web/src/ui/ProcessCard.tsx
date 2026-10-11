@@ -4,7 +4,7 @@
 // (design/v3/simulation-style.md): light chrome, mono numerals, alarm red only
 // for down units.
 
-import { useState, type CSSProperties } from 'react';
+import { useState, type CSSProperties, useId } from 'react';
 import type { FlowMaterial } from '../catalog/processes';
 import { PROC_STATUS_LABELS } from '../scene/palette';
 import { fmtPct } from './format';
@@ -125,6 +125,7 @@ function FailControl({
 }) {
   const [trainsDown, setTrainsDown] = useState(1);
   const [hours, setHours] = useState(24);
+  const fieldId = useId(); // unit keys repeat across processes; ids must not
   const max = Math.max(1, unit.trains);
   return (
     <span
@@ -132,6 +133,8 @@ function FailControl({
       data-testid={`fail-control-${unit.key}`}
     >
       <input
+        id={`${fieldId}-trains`}
+        name={`fail-trains-${unit.key}`}
         aria-label={`Trains down for ${unit.key}`}
         type="number"
         min={1}
@@ -142,6 +145,8 @@ function FailControl({
       />
       <span style={label}>trains</span>
       <input
+        id={`${fieldId}-hours`}
+        name={`fail-hours-${unit.key}`}
         aria-label={`Hours for ${unit.key}`}
         type="number"
         min={1}

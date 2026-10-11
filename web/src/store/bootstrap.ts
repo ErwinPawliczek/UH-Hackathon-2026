@@ -1,7 +1,7 @@
-// App bootstrap inputs: the persisted-settings namespace and the one URL
-// parameter that can still pick a backend. Both are resolved before the
+// App bootstrap inputs: the persisted-settings namespace and the URL
+// parameters that pick a backend and a world. All are resolved before the
 // persist middleware hydrates, so a visitor's first paint already runs the
-// right engine.
+// right engine on the right map.
 
 import type { BackendKind } from '../engine/api';
 
@@ -42,4 +42,17 @@ export function dropLegacyPersistedState(
 export function backendOverride(params: URLSearchParams): BackendKind | null {
   const value = params.get('engine');
   return value === 'stub' || value === 'http' ? value : null;
+}
+
+/** The world a visitor gets by default: the hand-drawn 22-site map. */
+export const DEFAULT_WORLD = 'erwin-world-v1';
+
+/**
+ * World picked by the `?world=` URL parameter (e.g. `?world=sixsite` for the
+ * engine's built-in six-site world), or the default map when absent or not a
+ * valid world name (lower-case letters, digits and dashes).
+ */
+export function worldFromParams(params: URLSearchParams): string {
+  const value = params.get('world');
+  return value !== null && /^[a-z0-9-]+$/.test(value) ? value : DEFAULT_WORLD;
 }

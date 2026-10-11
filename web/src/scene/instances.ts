@@ -3,9 +3,9 @@
 // siteClusters.ts — they are drawn per-unit now.)
 
 import * as THREE from 'three';
-import { VEHICLE_CLASSES, type VehicleClassKey, type WorldSpec } from '../engine/world';
+import { VEHICLE_CLASSES, materialKeyAt, type VehicleClassKey, type WorldSpec } from '../engine/world';
 import type { Snapshot } from '../engine/snapshot';
-import { materialColor } from './palette';
+import { V3, materialColor } from './palette';
 import { SCALE, mapToWorld } from './terrainMesh';
 
 /** A vehicle pose in map km coordinates (from the snapshot arrays). */
@@ -18,15 +18,26 @@ export interface VehiclePose {
 
 export interface VehicleLayer {
   meshes: THREE.InstancedMesh[];
-  /** class mesh j owns global vehicle indices classStart[j]..classStart[j]+count[j]-1 */
-  classStart: number[];
+  /**
+   * Per class mesh: the global vehicle index of each instance slot. A fleet
+   * lists vehicles home by home, so one class's vehicles are not contiguous.
+   */
+  members: number[][];
 }
 
+/** Snapshot cargo byte of a vehicle carrying nothing (§7.3 array 7). */
+const NO_CARGO = 255;
+/** Body colour of an empty vehicle — the v3 lane grey. */
+const EMPTY_COLOR = new THREE.Color(V3.lane);
+
 function vehicleGeometry(cls: VehicleClassKey): THREE.BufferGeometry {
-  const spec = VEHICLE_CLASSES[cls];
-  const len = Math.max(0.6, spec.sceneLength * SCALE);
-  const wid = Math.max(0.3, spec.sceneWidth * SCALE);
-  const height = Math.max(0.28, wid * 0.6);
+  // An unknown class key (a newer engine catalog) still draws, as a truck.
+  const spec = VEHICLE_CLASSES[cls] ?? VEHICLE_CLASSES.TRUCK_TANK;
+  // Sized for visibility, not to scale — but a truck stays smaller than a
+  // unit pad, so a busy road does not bury the sites it serves.
+  const len = Math.max(0.45, spec.sceneLength * SCALE);
+  const wid = Math.max(0.22, spec.sceneWidth * SCALE);
+  const height = Math.max(0.2, wid * 0.6);
   const geo =
     cls.startsWith('SHIP')
       ? new THREE.CapsuleGeometry(wid / 2, Math.max(0.01, len - wid), 4, 8).rotateX(Math.PI / 2)
@@ -43,7 +54,7 @@ export function buildVehicleLayer(world: WorldSpec): VehicleLayer {
     byClass.set(v.cls, list);
   });
   const meshes: THREE.InstancedMesh[] = [];
-  const classStart: number[] = [];
+  const members: number[][] = [];
   for (const [cls, indices] of byClass) {
     const mesh = new THREE.InstancedMesh(
       vehicleGeometry(cls),
@@ -55,9 +66,9 @@ export function buildVehicleLayer(world: WorldSpec): VehicleLayer {
     });
     mesh.frustumCulled = false;
     meshes.push(mesh);
-    classStart.push(indices[0]);
+    members.push(indices);
   }
-  return { meshes, classStart };
+  return { meshes, members };
 }
 
 const m4 = new THREE.Matrix4();
@@ -73,9 +84,9 @@ export function updateVehicles(
   terrainY: (xKm: number, yKm: number) => number,
 ): void {
   layer.meshes.forEach((mesh, j) => {
-    const start = layer.classStart[j];
+    const members = layer.members[j];
     for (let k = 0; k < mesh.count; k++) {
-      const pose = poses[start + k];
+      const pose = poses[members[k]];
       if (pose === undefined) continue;
       const [x, z] = mapToWorld(pose.x, pose.y);
       p3.set(x, terrainY(pose.x, pose.y) + 0.2, z);
@@ -84,6 +95,29 @@ export function updateVehicles(
       mesh.setMatrixAt(k, m4);
     }
     mesh.instanceMatrix.needsUpdate = true;
+  });
+}
+
+/**
+ * Material key the vehicle is carrying right now, or null when it is empty.
+ * Read from the snapshot's cargo byte (array 7), which indexes the world's
+ * material list.
+ */
+export function liveCargo(world: WorldSpec, snap: Snapshot, v: number): string | null {
+  const byte = snap.vehStatus[2 * v + 1];
+  if (byte === undefined || byte === NO_CARGO) return null;
+  return materialKeyAt(world, byte);
+}
+
+/** Recolour vehicles from the cargo on board: material class colour, lane grey when empty. */
+export function updateVehicleCargo(layer: VehicleLayer, world: WorldSpec, snap: Snapshot): void {
+  layer.meshes.forEach((mesh, j) => {
+    const members = layer.members[j];
+    for (let k = 0; k < mesh.count; k++) {
+      const cargo = liveCargo(world, snap, members[k]);
+      mesh.setColorAt(k, cargo === null ? EMPTY_COLOR : materialColor(cargo));
+    }
+    if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
   });
 }
 

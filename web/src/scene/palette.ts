@@ -24,14 +24,21 @@ export const V3 = {
   land: 0xf1f3f5,
   river: 0x9dc3ef,
   lane: 0xb9bec4,
+  /** water tiles: the water token at about one third strength on white */
+  waterTile: 0xdde9f8,
 } as const;
 
 /** Process status labels, index = §4.3 ProcStatus enum — used by the inspector. */
 export const PROC_STATUS_LABELS = ['Running', 'Hold min', 'Hold max', 'Shutdown', 'Restarting'] as const;
 
-/** Board fill per terrain class — sea/background white, land #f1f3f5. */
+/**
+ * Board fill per terrain class — land #f1f3f5, water a light tint of the
+ * water token. (The v3 guide leaves the sea white like the page; on a
+ * hand-drawn map the sea and rivers sit inside the board, so untinted water
+ * reads as missing tiles.)
+ */
 export function terrainHexColor(cls: TerrainClass): number {
-  return cls === 'water' ? V3.white : V3.land;
+  return cls === 'water' ? V3.waterTile : V3.land;
 }
 
 /**
@@ -40,10 +47,11 @@ export function terrainHexColor(cls: TerrainClass): number {
  * solids dim; anything else (export/import lanes, unclassified) lane grey.
  */
 const FLOW_CLASS: Record<string, 'gas' | 'olefin' | 'fuel' | 'solid'> = {
-  RAW_GAS: 'gas', METHANE: 'gas', ETHANE: 'gas', LPG: 'gas',
-  ETHYLENE: 'olefin', PROPYLENE: 'olefin',
+  RAW_GAS: 'gas', METHANE: 'gas', ETHANE: 'gas', LPG: 'gas', CHLORINE: 'gas',
+  ETHYLENE: 'olefin', PROPYLENE: 'olefin', STYRENE: 'olefin', VCM: 'olefin',
   CRUDE: 'fuel', NAPHTHA: 'fuel', GASOLINE: 'fuel', JET: 'fuel', DIESEL: 'fuel', FUEL_OIL: 'fuel',
-  SALT: 'solid', PE: 'solid', PP: 'solid', PVC: 'solid', PS: 'solid',
+  HEAVY_NAPHTHA: 'fuel', GASOIL: 'fuel', VGO: 'fuel', BENZENE: 'fuel', SOLVENT: 'fuel',
+  SALT: 'solid', PE: 'solid', PP: 'solid', PVC: 'solid', PS: 'solid', CAUSTIC: 'solid',
 };
 
 export function flowColor(material: string): number {
@@ -60,24 +68,29 @@ export function flowColor(material: string): number {
  * Line style per transport mode (§ v3): pipeline solid and thin, barge long
  * dash, ship dotted, road short dash. Pipeline solid = gap 0, set by the caller.
  */
-export const MODE_LINE_STYLE: Record<RouteMode, { dash: number; gap: number }> = {
-  road: { dash: 0.5, gap: 0.35 },
-  river: { dash: 1.6, gap: 0.7 },
-  sea: { dash: 0.14, gap: 0.3 },
+export const MODE_LINE_STYLE: Record<RouteMode, { dash: number; gap: number; width: number }> = {
+  road: { dash: 0.5, gap: 0.3, width: 1.6 },
+  river: { dash: 1.6, gap: 0.6, width: 2.2 },
+  sea: { dash: 0.16, gap: 0.34, width: 2.2 },
 };
+
+/** Pipeline line width in screen pixels — solid, the heaviest line on the map. */
+export const PIPELINE_WIDTH = 2.6;
 
 /**
  * Route line colour: river routes are the river itself (hydrography token);
- * sea lanes are export/import lanes; road routes take the flow colour of the
- * first vehicle assigned to them, or lane grey when none.
+ * sea lanes a lighter blue, dotted; road routes take the flow colour of the
+ * first vehicle assigned to them (stub worlds), or road grey when none —
+ * on engine worlds every road is shared, so every road is grey.
  */
 export function routeLineColor(world: WorldSpec, routeIndex: number): number {
   const route = world.routes[routeIndex];
   if (route === undefined) return V3.lane;
   if (route.mode === 'river') return V3.river;
+  if (route.mode === 'sea') return V3.blueLight;
   const veh = world.vehicles.find((v) => v.route === routeIndex);
-  if (route.mode === 'road' && veh !== undefined) return flowColor(veh.cargo);
-  return V3.lane;
+  if (veh !== undefined) return flowColor(veh.cargo);
+  return V3.dim;
 }
 
 /** Fill / outline / glyph colours for one site marker state (§ v3 site states). */
