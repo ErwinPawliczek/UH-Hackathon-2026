@@ -35,26 +35,26 @@ export default function App() {
   }, []);
 
   return (
-    <div className="relative h-dvh w-full overflow-hidden bg-slate-950 text-slate-100">
+    <div className="relative h-dvh w-full overflow-hidden bg-white text-ink">
       <SceneCanvas />
       <TopBar />
       <InspectorPanel />
       <Timeline />
 
       {world === null && error === null && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center text-sm text-slate-400" data-testid="loading">
+        <div className="absolute inset-0 z-20 flex items-center justify-center text-sm text-muted" data-testid="loading">
           Building world…
         </div>
       )}
       {world === null && error !== null && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 text-sm" data-testid="fatal-error">
-          <p className="text-red-300" role="alert">{error}</p>
+          <p className="text-alarm" role="alert">{error}</p>
           <button className="btn" onClick={retry}>Retry</button>
         </div>
       )}
       {world !== null && snap === null && error !== null && (
         <div className="absolute inset-x-0 top-14 z-20 flex justify-center">
-          <span className="rounded border border-red-500/60 bg-red-950/80 px-3 py-1.5 text-xs text-red-300" role="alert">
+          <span className="rounded-sm border border-alarm/50 bg-alarm/10 px-4 py-2 text-xs font-medium text-alarm" role="alert">
             {error}
           </span>
         </div>

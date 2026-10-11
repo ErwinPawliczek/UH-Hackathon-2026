@@ -1,7 +1,49 @@
 @import "tailwindcss";
 
+/*
+ * PetroGrid v3 theme. Token block is the drop-in CSS from
+ * design/v3/simulation-style.md (the binding style contract): ink on white,
+ * one blue, alarm red only for bad states, no shadows or gradients.
+ */
 :root {
-  color-scheme: dark;
+  --blue:#1764d6; --blue-strong:#0f54ba; --blue-light:#79aef2; --blue-soft:#e8f0fc;
+  --ink:#0a0a0a; --muted:#5f656c; --dim:#9aa0a6; --white:#ffffff;
+  --panel:#f7f8f9; --panel-2:#f0f2f4; --line:#e4e7ea; --line-2:#cdd2d7; --alarm:#d1372f;
+  --land:#f1f3f5; --water:#9dc3ef; --lane:#b9bec4;
+  --f-display:"Archivo","Arial Narrow",Arial,sans-serif;
+  --f-body:"Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r-sm:4px; --r-md:8px; --r-full:999px;
+}
+
+:root {
+  color-scheme: light;
+}
+
+/* Tailwind utilities (bg-panel, text-muted, border-line, font-mono, rounded-*)
+   resolve to the v3 tokens above. */
+@theme inline {
+  --color-blue: var(--blue);
+  --color-blue-strong: var(--blue-strong);
+  --color-blue-light: var(--blue-light);
+  --color-blue-soft: var(--blue-soft);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-dim: var(--dim);
+  --color-white: var(--white);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-alarm: var(--alarm);
+  --color-land: var(--land);
+  --color-water: var(--water);
+  --color-lane: var(--lane);
+  --font-display: var(--f-display);
+  --font-body: var(--f-body);
+  --font-mono: var(--f-mono);
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
 }
 
 html,
@@ -9,24 +51,62 @@ body,
 #root {
   height: 100%;
   margin: 0;
-  background: #020617;
-  color: #e2e8f0;
-  font-family: ui-sans-serif, system-ui, sans-serif;
   overflow: hidden;
 }
 
+body {
+  background: var(--white);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+h1,
+h2 {
+  font-family: var(--f-display);
+  font-stretch: 125%;
+}
+
+/* Panels and inspectors: 8px radius, 1px hairline in line, flat. */
 .panel {
-  @apply rounded-lg border border-slate-700/80 bg-slate-900/80 backdrop-blur-sm shadow-lg;
+  @apply rounded-md border border-line bg-panel;
 }
 
+/* Controls: 4px radius, panel-2 fill, line-2 outline. */
 .btn {
-  @apply px-2 py-1 rounded border border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed;
+  @apply cursor-pointer rounded-sm border border-line-2 bg-panel-2 px-2 py-1 text-xs text-ink hover:bg-line disabled:cursor-not-allowed disabled:opacity-40;
 }
 
+/* Active control: the one blue; hover and pressed in blue-strong. */
 .btn-active {
-  @apply bg-cyan-700 border-cyan-500 text-white;
+  @apply border-blue bg-blue text-white hover:border-blue-strong hover:bg-blue-strong;
 }
 
 .field {
-  @apply bg-slate-800 border border-slate-600 rounded px-1.5 py-1 text-xs text-slate-100;
+  @apply rounded-sm border border-line-2 bg-panel-2 px-2 py-1 text-xs text-ink;
+}
+
+/* Labels: Mono 12px, uppercase, 0.14em tracking, muted. */
+.label {
+  font-family: var(--f-mono);
+  font-size: 12px;
+  line-height: 1.4;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+/* Data: Mono 13px with tabular numerals. */
+.data {
+  font-family: var(--f-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Wordmark: Archivo expanded 700. */
+.wordmark {
+  font-family: var(--f-display);
+  font-stretch: 125%;
+  font-weight: 700;
 }
