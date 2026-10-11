@@ -65,6 +65,10 @@ TEST_CASE("six-site world: seeded terrain, straight pipelines, site-to-site rout
   CHECK(doc["terrain"]["cellKm"].get<double>() == doctest::Approx(10.0));
   CHECK(doc["terrain"]["height"].size() == 61u * 41u);
 
+  // Sites carry their engine key: the client addresses commands by it.
+  REQUIRE(doc["sites"].size() == world.sites.size());
+  for (size_t s = 0; s < world.sites.size(); ++s) CHECK(doc["sites"][s]["key"] == world.sites[s].key);
+
   REQUIRE(doc["pipelines"].size() == world.pipelines.size());
   for (const auto& pipe : doc["pipelines"]) CHECK(pipe["points"].size() == 2);
   REQUIRE(doc["routes"].size() == world.edges.size());

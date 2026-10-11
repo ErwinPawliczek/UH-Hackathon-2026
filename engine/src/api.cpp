@@ -241,7 +241,8 @@ std::string buildWorldJson(const sim::World& w, const TerrainGrid& terrain,
         site.preset >= 0 && site.preset < static_cast<int>(cat.site_presets.size())
             ? cat.site_presets[site.preset].key
             : site.key;
-    sites.push_back({{"name", site.name},
+    sites.push_back({{"key", site.key},
+                     {"name", site.name},
                      {"preset", preset},
                      {"x", site.x_km},
                      {"y", site.y_km},

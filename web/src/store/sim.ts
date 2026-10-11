@@ -11,6 +11,7 @@ import { persist } from 'zustand/middleware';
 import type { Snapshot } from '../engine/snapshot';
 import type { SimEvent, BackendKind } from '../engine/api';
 import type { WorldSpec } from '../engine/world';
+import { scenarioSite, type EngineScenario } from '../engine/scenarios';
 import { DEFAULT_WORLD, STORAGE_KEY, dropLegacyPersistedState, backendOverride, worldFromParams } from './bootstrap';
 
 export type Selection = { kind: 'site' | 'vehicle'; index: number } | null;
@@ -44,6 +45,8 @@ export interface SimState {
   error: string | null;
   /** Live backend command dispatcher, wired by useSimEngine; null between sessions. */
   sendCommand: ((cmd: Record<string, unknown>) => Promise<unknown>) | null;
+  /** Keys of the engine scenarios already triggered in this session (each runs once). */
+  triggered: string[];
 
   setSeed: (seed: number) => void;
   setScenario: (scenario: string) => void;
@@ -54,6 +57,12 @@ export interface SimState {
   pushSnapshot: (snap: Snapshot) => void;
   addEvents: (events: SimEvent[]) => void;
   setError: (error: string | null) => void;
+  /**
+   * Send an engine scenario's command to the live session. On success it is
+   * marked triggered and noted on the timeline; a rejection surfaces as the
+   * error banner and leaves the scenario available.
+   */
+  triggerScenario: (scenario: EngineScenario) => Promise<void>;
   /** Bump to force a fresh backend session without changing settings. */
   retry: () => void;
   retryNonce: number;
@@ -68,7 +77,7 @@ if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined')
 
 export const useSim = create<SimState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       seed: 42,
       scenario: 'none',
       speed: 16,
@@ -85,6 +94,7 @@ export const useSim = create<SimState>()(
       selected: null,
       error: null,
       sendCommand: null,
+      triggered: [],
       retryNonce: 0,
 
       setSeed: (seed) => set({ seed: Math.max(0, Math.floor(seed)) }),
@@ -102,6 +112,38 @@ export const useSim = create<SimState>()(
           return { events: [...s.events, ...events], lastSeq };
         }),
       setError: (error) => set({ error }),
+      triggerScenario: async (scenario) => {
+        const { sendCommand, triggered } = get();
+        if (sendCommand === null || triggered.includes(scenario.key)) return;
+        let reply: unknown;
+        try {
+          reply = await sendCommand(scenario.command);
+        } catch (err) {
+          set({ error: err instanceof Error ? err.message : String(err) });
+          return;
+        }
+        const r = (typeof reply === 'object' && reply !== null ? reply : {}) as Record<string, unknown>;
+        if (r.ok === false) {
+          set({ error: `Scenario rejected: ${typeof r.error === 'string' ? r.error : 'unknown reason'}` });
+          return;
+        }
+        // Note it on the timeline at the current tick. Local entries take
+        // negative seqs so they never collide with the engine's log, and
+        // lastSeq (the engine cursor) is left alone.
+        set((s) => ({
+          triggered: [...s.triggered, scenario.key],
+          events: [
+            ...s.events,
+            {
+              seq: -1 - s.triggered.length,
+              tick: Number(s.snap?.tick ?? 0),
+              type: 'scenario',
+              site: s.world === null ? undefined : scenarioSite(s.world, scenario),
+              text: scenario.label,
+            },
+          ],
+        }));
+      },
       retry: () => set((s) => ({ retryNonce: s.retryNonce + 1 })),
     }),
     {
