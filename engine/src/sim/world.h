@@ -184,6 +184,9 @@ struct World {
     double min_lot_cap_frac = -1, min_lot_target_frac = -1;
     double max_lots_per_tank = -1;
     double dispatch_urgency_boost_h = -1;
+    double price_aware_buying = -1;
+    double price_cheap_ratio = -1, price_dear_ratio = -1, price_cheap_fill = -1,
+           price_dear_fill = -1, price_cheap_cover = -1, price_dear_cover = -1;
   };
   Market market;
 
