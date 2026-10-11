@@ -55,7 +55,8 @@ header .zig{position:absolute;left:0;right:0;top:100%;height:8px;pointer-events:
 main{position:relative;overflow:hidden;background:var(--white)}
 canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 #status{position:absolute;left:12px;bottom:10px;font:12px var(--f-mono);color:var(--muted);background:rgba(255,255,255,.88);padding:2px 6px}
-#hint{position:absolute;left:12px;top:16px;max-width:520px;font-size:12px;color:var(--muted);background:rgba(255,255,255,.88);padding:3px 7px}
+#hint{position:absolute;left:12px;top:16px;max-width:520px;font-size:12px;color:var(--muted);background:rgba(255,255,255,.88);padding:3px 7px;transition:opacity .8s;pointer-events:none}
+#hint.gone{opacity:0}
 #brushBox{position:absolute;right:12px;top:16px;display:none;align-items:center;gap:6px;font-size:12px;color:var(--muted);background:rgba(255,255,255,.88);padding:3px 7px}
 
 aside{overflow:auto;padding:16px 12px 16px 6px;display:flex;flex-direction:column;gap:10px;background:var(--white)}
@@ -77,6 +78,7 @@ li:first-child{border-top:0}
 li.ok::before{content:"✓ ";color:var(--blue)}
 li.no::before{content:"✕ ";color:var(--alarm)}
 li.no{color:var(--ink)}
+li.note{color:var(--muted)}li.note::before{content:"· ";color:var(--muted)}
 .err{display:block;width:100%;text-align:left;border:0;background:none;padding:0;cursor:pointer;color:var(--alarm);font-size:13px;line-height:1.35}
 .err:hover{text-decoration:underline}
 .err[disabled]{cursor:default;text-decoration:none}
@@ -252,9 +254,9 @@ const MODES = {
 const PIPE_COLOR = {RAW_GAS:'#79aef2',METHANE:'#79aef2',ETHANE:'#79aef2',LPG:'#79aef2',CHLORINE:'#79aef2',ETHYLENE:'#1764d6',PROPYLENE:'#1764d6',CRUDE:'#0a0a0a',NAPHTHA:'#0a0a0a',GASOLINE:'#0a0a0a',JET:'#0a0a0a',DIESEL:'#0a0a0a'};
 const NET_MODES = ['road','river','sea'], CARRY = {road:'T',river:'B',sea:'S'};
 const EDGE = 60, SNAP = 12, W_KM = 600, H_KM = 400, CELL = 10, COLS = W_KM/CELL, ROWS = H_KM/CELL;
-const KEY = 'petrogrid-layout-v2', RUN_KEY = 'petrogrid-run-custom';
+const KEY = 'petrogrid-layout-v2', RUN_KEY = 'petrogrid-run-custom', SEEN_KEY = 'petrogrid-editor-seen';
 const HINTS = {
-  select:'Drag a site to move it. Click a road, lane or pipeline to pick it, then drag its points. Double-click a pipeline to add a bend. Right-click to erase or remove. Ctrl+Z undoes.',
+  select:'Drag a site to move it. Click a road, lane or pipeline to pick it, then drag its points. Double-click a pipeline to add a bend. Right-click to erase or remove. Ctrl+Z undoes, Ctrl+Shift+Z redoes.',
   road:'Press, drag and release to lay one straight road. Lay them end to end for bends. Ends snap to sites, to other ends, and onto the middle of a road.',
   river:'Press, drag and release to lay a river lane for barges, on water. Ends snap to sites within reach and to other river lanes.',
   sea:'Press, drag and release to lay a sea lane for ships, on water. Ends snap to sites within reach and to other sea lanes.',
@@ -313,12 +315,12 @@ function lineAt(list, p){let b = null, bd = 7/sc; list.forEach((c,i) => {const h
 function selLine(){return !sel ? null : sel.t === 'conn' ? S.connections[sel.i] : sel.t === 'net' ? S.network[sel.i] : null;}
 function handleAt(p){const c = selLine(); if (!c) return -1; let b = -1, bd = 8/sc; c.points.forEach((q,i) => {const d = Math.hypot(q[0]-p[0], q[1]-p[1]); if (d < bd){bd = d; b = i;}}); return b;}
 /* where an end of a strip lands: a site, the end of a strip of the same kind, or onto the middle of one */
-function snap(p, mode, commit, skip){let best = null, bd = SNAP;
+function snap(p, mode, commit, skip){let best = null, bd = SNAP; const mine = q => skip && (skip instanceof Set ? skip.has(q) : q === skip);
   for (const s of S.sites){const d = Math.hypot(s.x-p[0], s.y-p[1]); if (d < bd){bd = d; best = [s.x, s.y];}}
   if (best) return best; bd = SNAP;
-  for (const n of S.network){if (n.mode !== mode) continue; for (const q of n.points){if (q === skip) continue; const d = Math.hypot(q[0]-p[0], q[1]-p[1]); if (d < bd){bd = d; best = [q[0], q[1]];}}}
+  for (const n of S.network){if (n.mode !== mode) continue; for (const q of n.points){if (mine(q)) continue; const d = Math.hypot(q[0]-p[0], q[1]-p[1]); if (d < bd){bd = d; best = [q[0], q[1]];}}}
   if (best) return best; bd = 9; let hit = null;
-  for (const n of S.network){if (n.mode !== mode || (skip && n.points.includes(skip))) continue; const h = segHit(n.points, p); if (h && h.d < bd){bd = h.d; hit = {n, k:h.k, pt:h.pt};}}
+  for (const n of S.network){if (n.mode !== mode || (skip && n.points.some(mine))) continue; const h = segHit(n.points, p); if (h && h.d < bd){bd = h.d; hit = {n, k:h.k, pt:h.pt};}}
   if (hit){if (commit) hit.n.points.splice(hit.k, 0, [hit.pt[0], hit.pt[1]]); return hit.pt;}
   return [Math.max(0, Math.min(W_KM, Math.round(p[0]))), Math.max(0, Math.min(H_KM, Math.round(p[1])))];}
 function bow(a, b, k){const dx = b[0]-a[0], dy = b[1]-a[1], L = Math.hypot(dx,dy) || 1, nx = -dy/L, ny = dx/L, off = (k%2 ? -1 : 1)*(Math.floor(k/2)+1)*Math.min(18, L*.12);
@@ -348,6 +350,7 @@ function draw(){
   ctx.strokeStyle = '#cdd2d7'; ctx.strokeRect(X(0), Y(0), W_KM*sc, H_KM*sc);
   S.network.forEach((n,i) => line(n.points, n.mode, sel && sel.t === 'net' && sel.i === i));
   S.connections.forEach((c,i) => line(c.points, 'pipeline', sel && sel.t === 'conn' && sel.i === i, c.material));
+  pipeNames();
   if (netDraft) line([netDraft.a, snap(mouse, netDraft.mode, false)], netDraft.mode, true);
   const picked = selLine();
   if (picked) picked.points.forEach((q,i) => {const end = sel.t === 'conn' && (i === 0 || i === picked.points.length-1); if (end) return;
@@ -367,12 +370,23 @@ function draw(){
 function line(pts, mode, on, mat){const M = MODES[mode]; ctx.save(); ctx.setLineDash(M.dash); ctx.lineWidth = on ? M.w+1.4 : M.w;
   ctx.strokeStyle = on ? '#1764d6' : mat ? PIPE_COLOR[mat] || '#b9bec4' : M.col; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   ctx.beginPath(); pts.forEach((p,i) => ctx[i ? 'lineTo' : 'moveTo'](X(p[0]), Y(p[1]))); ctx.stroke(); ctx.restore();
-  if (pts.length > 1 && mat){const k = Math.floor((pts.length-1)/2), a = pts[k], b = pts[k+1] || a; ctx.save(); ctx.font = '10.5px "Instrument Sans",system-ui,sans-serif'; ctx.textBaseline = 'alphabetic';
-    const t = cap(word(mat))+' pipeline'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.strokeText(t, X((a[0]+b[0])/2)+5, Y((a[1]+b[1])/2)-5); ctx.fillStyle = on ? '#1764d6' : '#3f454c'; ctx.fillText(t, X((a[0]+b[0])/2)+5, Y((a[1]+b[1])/2)-5); ctx.restore();}}
+}
+/* each pipeline's name on one of its own stretches, where it lands on no other name and no site label */
+function pipeNames(){ctx.save(); ctx.font = '10.5px "Instrument Sans",system-ui,sans-serif'; ctx.textBaseline = 'alphabetic';
+  const taken = S.sites.map(s => {const w = s.name.length*8.2+26, x = X(s.x), y = Y(s.y); return [x-14, y-12, x+14+w, y+12];});
+  const hits = b => taken.some(t => b[0] < t[2] && b[2] > t[0] && b[1] < t[3] && b[3] > t[1]);
+  S.connections.forEach((c,i) => {const on = sel && sel.t === 'conn' && sel.i === i, t = cap(word(c.material))+' pipeline', w = ctx.measureText(t).width, pts = c.points, n = pts.length-1;
+    /* the middle stretch first, then outwards */
+    const order = [...Array(n).keys()].sort((a,b) => Math.abs(a-(n-1)/2)-Math.abs(b-(n-1)/2)); let at = null;
+    for (const k of order) for (const f of [.5, .3, .7]){const x = X(pts[k][0]+(pts[k+1][0]-pts[k][0])*f)+5, y = Y(pts[k][1]+(pts[k+1][1]-pts[k][1])*f)-5, box = [x-2, y-11, x+w+2, y+3]; if (!hits(box)){at = {x, y, box}; break;} if (at) break;}
+    if (!at){if (!on) return; const k = order[0]; at = {x:X((pts[k][0]+pts[k+1][0])/2)+5, y:Y((pts[k][1]+pts[k+1][1])/2)-5, box:[0,0,0,0]};}
+    taken.push(at.box); ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.strokeText(t, at.x, at.y); ctx.fillStyle = on ? '#1764d6' : '#3f454c'; ctx.fillText(t, at.x, at.y);});
+  ctx.restore();}
 
 /* ---------- interaction ---------- */
+function showHint(text, ms){const el = $('hint'); el.textContent = text; el.classList.remove('gone'); clearTimeout(showHint.t); showHint.t = setTimeout(() => el.classList.add('gone'), ms);}
 function setTool(t){tool = t; netDraft = null; document.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === t));
-  cv.style.cursor = t === 'select' ? 'default' : 'crosshair'; $('hint').textContent = HINTS[t]; $('brushBox').style.display = t === 'water' || t === 'land' ? 'flex' : 'none'; draw();}
+  cv.style.cursor = t === 'select' ? 'default' : 'crosshair'; showHint(HINTS[t], 9000); $('brushBox').style.display = t === 'water' || t === 'land' ? 'flex' : 'none'; draw();}
 document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
 function paint(p, on){const c0 = Math.floor(p[0]/CELL), r0 = Math.floor(p[1]/CELL), R = +$('brush').value, set = waterSet();
   for (let c = c0-R; c <= c0+R; c++) for (let r = r0-R; r <= r0+R; r++){if (c < 0 || r < 0 || c >= COLS || r >= ROWS) continue; const k = c+','+r;
@@ -384,13 +398,16 @@ cv.onmousedown = e => {if (e.button !== 0) return; const p = toKm(e); hideMenu()
   if (NET_MODES.includes(tool)){netDraft = {mode:tool, a:snap(p, tool, true)}; draw(); return;}
   /* a site wins over a line's end that sits on it */
   const s = siteAt(p), h = s ? -1 : handleAt(p), c = selLine();
-  if (h >= 0 && !(sel.t === 'conn' && (h === 0 || h === c.points.length-1))){sel.h = h; drag = {handle:h}; draw(); return;}
+  if (h >= 0 && !(sel.t === 'conn' && (h === 0 || h === c.points.length-1))){sel.h = h; drag = {handle:h, mates:new Set([c.points[h]])};
+    /* a joint where strips of one kind meet moves as one */
+    if (sel.t === 'net') for (const n of S.network) if (n.mode === c.mode) for (const q of n.points) if (q[0] === c.points[h][0] && q[1] === c.points[h][1]) drag.mates.add(q);
+    draw(); return;}
   if (s){sel = {t:'site', id:s.id}; drag = {site:s};}
   else {let i = lineAt(S.connections, p); if (i !== null) sel = {t:'conn', i}; else {i = lineAt(S.network, p); sel = i === null ? null : {t:'net', i};}}
   refresh(true);};
 cv.onmousemove = e => {mouse = toKm(e);
   if (drag && drag.site) moveSite(drag.site, Math.max(0, Math.min(W_KM, Math.round(mouse[0]))), Math.max(0, Math.min(H_KM, Math.round(mouse[1]))));
-  else if (drag && drag.handle !== undefined){const c = selLine(); if (c){const q = c.points[drag.handle]; const to = sel.t === 'net' ? snap(mouse, c.mode, false, q) : [Math.max(0,Math.min(W_KM,Math.round(mouse[0]))), Math.max(0,Math.min(H_KM,Math.round(mouse[1])))]; q[0] = to[0]; q[1] = to[1];}}
+  else if (drag && drag.handle !== undefined){const c = selLine(); if (c){const to = sel.t === 'net' ? snap(mouse, c.mode, false, drag.mates) : [Math.max(0,Math.min(W_KM,Math.round(mouse[0]))), Math.max(0,Math.min(H_KM,Math.round(mouse[1])))]; for (const q of drag.mates){q[0] = to[0]; q[1] = to[1];}}}
   else if (drag && 'paint' in drag) paint(mouse, drag.paint);
   draw();};
 window.onmouseup = () => {
@@ -416,7 +433,7 @@ cv.oncontextmenu = e => {e.preventDefault(); netDraft = null; drag = null; const
 window.addEventListener('mousedown', e => {if (!menu.contains(e.target)) hideMenu();}, true);
 const KEYS = {v:'select', r:'road', b:'river', s:'sea', w:'water', e:'land'};
 window.onkeydown = e => {if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return; const k = e.key.toLowerCase();
-  if ((e.metaKey || e.ctrlKey) && k === 'z'){undo(); e.preventDefault(); return;}
+  if ((e.metaKey || e.ctrlKey) && (k === 'z' || k === 'y')){if (e.shiftKey || k === 'y') redo(); else undo(); e.preventDefault(); return;}
   if (e.metaKey || e.ctrlKey) return;
   if (k === 'escape'){netDraft = null; sel = null; ring = null; refresh(true);}
   else if (k === 'delete' || k === 'backspace'){const c = selLine();
@@ -453,9 +470,10 @@ function tieSites(){for (const s of S.sites) for (const mode of NET_MODES){let n
   for (const n of S.network){if (n.mode !== mode) continue; if (n.points.some(q => Math.hypot(q[0]-s.x, q[1]-s.y) <= SNAP)){near = true; break;} const h = segHit(n.points, [s.x, s.y]); if (h && h.d < bd){bd = h.d; hit = {n, h};}}
   if (!near && hit) hit.n.points.splice(hit.h.k, 0, [hit.h.pt[0], hit.h.pt[1]]);}}
 /* undo: the layout as text after each edit; Ctrl+Z steps back */
-const history = []; let histAt = '';
-function remember(){const now = JSON.stringify(S); if (now === histAt) return; if (histAt) history.push(histAt); if (history.length > 80) history.shift(); histAt = now;}
-function undo(){if (!history.length){toast('Nothing to undo.'); return;} histAt = history.pop(); S = JSON.parse(histAt); sel = null; netDraft = null; drag = null; save(); refresh(true); queueCheck();}
+const history = [], future = []; let histAt = '';
+function remember(){const now = JSON.stringify(S); if (now === histAt) return; if (histAt) history.push(histAt); if (history.length > 80) history.shift(); histAt = now; future.length = 0;}
+function step(from, to, none){if (!from.length){toast(none); return;} to.push(histAt); histAt = from.pop(); S = JSON.parse(histAt); sel = null; netDraft = null; drag = null; save(); refresh(true); queueCheck();}
+const undo = () => step(history, future, 'Nothing to undo.'), redo = () => step(future, history, 'Nothing to redo.');
 function refresh(noEdit){if (!noEdit){tieSites(); save(); remember();} draw(); const acc = access(S);
   const el = $('sel');
   if (!sel){el.innerHTML = '<p class="hint">Nothing selected. Click a site, a road, a lane or a pipeline.</p>';}
@@ -478,10 +496,10 @@ function refresh(noEdit){if (!noEdit){tieSites(); save(); remember();} draw(); c
   li.push([acc.road.pieces <= 1, acc.road.pieces <= 1 ? 'Road network in one piece' : `Road network in one piece (now ${acc.road.pieces})`]);
   const lost = prob.errors.filter(e => (e.mode === 'river' || e.mode === 'sea') && e.site !== null).length;
   li.push([lost === 0, lost === 0 ? 'Berths within reach of their lanes' : `Berths within reach of their lanes (${lost} not)`]);
-  li.push([prob.dry === 0, prob.dry === 0 ? 'River and sea lanes drawn on water' : `River and sea lanes drawn on water (${prob.dry} leave it)`]);
+  li.push([prob.dry === 0 ? true : null, prob.dry === 0 ? 'River and sea lanes drawn on water' : `${prob.dry} river or sea lane${prob.dry === 1 ? ' has' : 's have'} a point on land (allowed)`]);
   const straight = S.connections.filter(c => c.points.length < 3).length;
   li.push([straight === 0, straight === 0 ? 'Every pipeline has a bend' : `Every pipeline has a bend (${straight} are straight)`]);
-  $('list').innerHTML = li.map(([ok,t]) => `<li class="${ok ? 'ok' : 'no'}">${t}</li>`).join('');
+  $('list').innerHTML = li.map(([ok,t]) => `<li class="${ok === null ? 'note' : ok ? 'ok' : 'no'}">${t}</li>`).join('');
   const u = []; for (const s of S.sites){const P = PRESETS[s.preset];
     const n = P.needs.filter(m => !S.sites.some(o => o.id !== s.id && PRESETS[o.preset].makes.includes(m) && canMove(m, o.id, s.id, acc)));
     const o = P.makes.filter(m => !S.sites.some(q => q.id !== s.id && (PRESETS[q.preset].anything || PRESETS[q.preset].needs.includes(m) || (PRESETS[q.preset].optional || []).includes(m)) && canMove(m, s.id, q.id, acc)));
@@ -554,6 +572,9 @@ $('file').onchange = async e => {const f = e.target.files[0]; e.target.value = '
   let stored = null; try {stored = JSON.parse(localStorage.getItem(KEY) || 'null');} catch (e){}
   load(stored || clone(DEFAULT), true);
   new ResizeObserver(fit).observe(cv.parentElement); fit();
+  /* the first visit gets the whole idea in one line, a little longer */
+  let seen = true; try {seen = localStorage.getItem(SEEN_KEY) === '1'; localStorage.setItem(SEEN_KEY, '1');} catch (e){}
+  if (!seen) showHint('This is the default world. Drag sites, redraw roads, lanes and water, re-bend pipelines; Check tells you whether it still works, and Run this world plays it. Ctrl+Z undoes.', 16000);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
 })();
 </script>
