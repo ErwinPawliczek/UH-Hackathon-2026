@@ -474,13 +474,13 @@ const CHAPTERS = [
     id: "problem",
     eyebrow: "The problem",
     title: "One failure can shut down the entire pipeline.",
-    lede: "Chemical plants feed each other in a chain, so when one stops, every plant and customer after it runs short. In February 2021 a freeze took 80\u201385% of U.S. polyethylene and polypropylene production offline. Resin prices rose 30\u201350% that year, and the shortage reached car parts, pipes and medical devices."
+    lede: "Chemical plants feed each other in a chain, so when one stops, every plant and customer after it runs short. In February 2021 a freeze took about three-quarters of U.S. ethylene capacity offline, and polyethylene and polypropylene plants with it. Resin prices rose 30\u201350% that year, and the shortage reached car parts, pipes and medical devices."
   },
   {
     id: "solution",
     eyebrow: "The solution",
     title: "PetroGrid is a flight simulator for the chemical supply chain.",
-    lede: "A simulator of the Gulf Coast chemical network, from oil and gas fields to the companies that buy plastic, built on real plant units, yields and logistics. Shut down any unit at any plant and it shows who runs short, how soon, and what it costs."
+    lede: "A simulator of a Gulf-Coast-style chemical network, from oil and gas fields to the companies that buy plastic, built on realistic plant units, yields and logistics. Shut down any unit at any plant and it shows who runs short, how soon, and what it costs."
   }
 ];
 const SUBHEADS = ["The supply chain, top to bottom", "Every tank reads three numbers about itself. Everything else follows.", "Run the same moment forward twice, once as it is and once as if nothing had broken, and price the difference.", "Price is set by how full a tank is, and price then decides when buyers order, how much customers consume, and how hard plants run."];
@@ -496,7 +496,7 @@ const GROUP_SUBHEAD = { 0: 1, 1: 2, 2: 3 };
 const HOW = [
   {
     title: "One tick is 15 minutes",
-    body: "Every tick, each tank reads its three numbers, each plant sets its rate and every tank moves. On the hour, pipelines move and tanks place orders. Pickups, deliveries and shutdowns fire when they happen.",
+    body: "Every tick, each tank reads its three numbers, each plant sets its rate, pipelines move and every tank moves. On the hour, tanks place orders and loads are dispatched. Pickups, deliveries and shutdowns fire when they happen.",
     figure: "clock"
   },
   {
@@ -516,7 +516,7 @@ const HOW = [
   },
   {
     title: "When and how much to buy",
-    body: "A tank not fed by pipeline buys for itself, once an hour: as soon as Urgency is above zero, enough to get back to 70% full, in whole vehicle loads, waiting until a lot fills at least 80% of the vehicle. A truck carries 20 to 25 t, a barge 1,200 to 2,000 t, a ship a few thousand tonnes.",
+    body: "A tank not fed by pipeline buys for itself, once an hour: as soon as Urgency is above zero, enough to get back to 70% full, in whole vehicle loads, waiting until a lot fills at least 80% of the vehicle. A truck carries 20 to 25 t, a barge 1,500 or 2,000 t, a ship 12,000 to 40,000 t.",
     figure: "buy"
   },
   // ── The market (from "9-market-model.md"): price comes from stock, and price changes behaviour ──
@@ -541,13 +541,13 @@ const HOW = [
   {
     group: 2,
     title: "Price decides how much customers consume",
-    body: "Customers want less as the price they have been paying rises: normal demand \xD7 (price \xF7 base) to the power \u22120.2, kept between 60% and 120% of normal. Lost sales split in two: priced out, and not delivered. The damage figure counts both.",
+    body: "Customers want less as the price they have been paying rises: normal demand \xD7 (price \xF7 base) to the power \u22120.2, kept between 60% and 120% of normal. Lost sales split in two: priced out, and not delivered. The multiplayer damage summary counts both.",
     figure: "demand"
   },
   {
     group: 2,
     title: "Price decides how hard a plant runs",
-    body: "Once an hour every plant compares what a tonne fetches with what it costs: product value minus feed and energy. Below half its normal margin it slows, down to its minimum rate at no margin. It never shuts down for price alone.",
+    body: "Once an hour every plant compares what a tonne fetches with what it costs: product value minus feed and energy. Below half its normal margin it slows, down to its minimum rate at no margin. It never shuts down for price alone, and in normal running this rarely binds.",
     figure: "margin"
   },
   {
@@ -602,7 +602,7 @@ const HOW = [
 ];
 const HERO = [
   { title: "A connected industry, flying blind.", body: "Every Gulf Coast plant depends on the ones before it, but each company can only see its own. When one fails, nobody knows who's next until they are." },
-  { title: "When something fails, PetroGrid shows what fails next.", body: "A live model of the chain from oil fields to plastic. Shut down any unit and see who runs short, when, and what it costs. Or build your own network and break that instead." }
+  { title: "When something fails, PetroGrid shows what fails next.", body: "A live model of the chain from oil fields to plastic. Shut down any unit and see who runs short, when, and what it costs. Or redraw the map and break that instead." }
 ];
 const CLOSE = { title: "Stress-test the chemical supply chain before reality does." };
 
@@ -980,12 +980,13 @@ const LANES = [
     { id: "read", text: "Every tank reads Feed, Room, Urgency" },
     { id: "rate", text: "Every plant sets its rate" },
     { id: "move", text: "Every tank moves: (in \u2212 out) \xD7 0.25 h" },
+    { id: "pipe", text: "Pipelines move what the receiver draws" },
     { id: "trucks", text: "Vehicles on the road move on" }
   ] },
   { title: "Every hour", note: "every 4th tick", rows: [
-    { id: "pipe", text: "Pipelines move what the receiver draws" },
     { id: "order", text: "Tanks with Urgency > 0 order" },
-    { id: "price", text: "Each order: cheapest delivered cost wins" }
+    { id: "price", text: "Each order: cheapest delivered cost wins" },
+    { id: "dispatch", text: "Ordered loads are dispatched" }
   ] },
   { title: "Separate events", note: "", rows: [
     { id: "pickup", text: "Pickup: seller's pickup gap updates" },
@@ -1037,7 +1038,7 @@ function runTicker(root, ms = 900) {
     orders = 0;
     truck = null;
   };
-  const EVENTS = /* @__PURE__ */ new Set(["order", "price", "pickup", "deliver", "stop", "restart"]);
+  const EVENTS = /* @__PURE__ */ new Set(["order", "price", "dispatch", "pickup", "deliver", "stop", "restart"]);
   const hold = /* @__PURE__ */ new Map();
   const fire = (ids) => {
     hold.forEach((n, id) => n <= 1 ? hold.delete(id) : hold.set(id, n - 1));
@@ -1049,7 +1050,7 @@ function runTicker(root, ms = 900) {
     [...ids, ...hold.keys()].forEach((id) => rows.get(id)?.classList.add("is-fired"));
   };
   const step = () => {
-    const t = k * 0.25, q = k % 4, ids = ["read", "rate", "move"];
+    const t = k * 0.25, q = k % 4, ids = ["read", "rate", "pipe", "move"];
     if (truck && t >= truck.leave && t - 0.25 < truck.leave) ids.push("pickup");
     if (truck && t >= truck.arrive) {
       level = Math.min(CAP, level + LOAD);
@@ -1058,13 +1059,12 @@ function runTicker(root, ms = 900) {
     }
     if (truck) ids.push("trucks");
     if (q === 0) {
-      ids.push("pipe");
       const cover = (level + (truck ? LOAD : 0)) / TRIP;
       if (!truck && urgency(cover) > 0 && TARGET - level >= 0.8 * LOAD) {
         orders++;
         const leave = t + 0.25;
         truck = { leave, arrive: leave + TRIP + (orders === HOLDUP_ORDER ? HOLDUP : 0) };
-        ids.push("order", "price");
+        ids.push("order", "price", "dispatch");
       }
     }
     const g = feed(level);
@@ -1144,7 +1144,7 @@ function futuresHTML() {
 }
 const table = (head, rows, cls = "") => `<table class="sd-table cf-table ${cls}"><tr>${head.map((h, i) => `<th${i && cls === "cf-num" ? ' class="sd-num"' : ""}>${esc(h)}</th>`).join("")}</tr>${rows.map((r) => `<tr>${r.map((c, i) => `<td${i && cls === "cf-num" ? ' class="sd-num"' : ""}>${c}</td>`).join("")}</tr>`).join("")}</table>`;
 const pricedHTML = () => table(["Part", "What is counted", "How it is priced"], [
-  ["<b>Lost sales</b>", "Every tonne a customer wanted and did not get, plus, with the market on, demand priced out", "The material's base price per tonne"],
+  ["<b>Lost sales</b>", "Every tonne a customer wanted and did not get", "The material's base price per tonne"],
   ["<b>Stock run down</b>", "How much less product is in tanks and on vehicles at the end", "Each material's base price per tonne"],
   ["<b>Energy</b>", "Heat and power the plants bought", "$8 per GJ of heat, $80 per MWh of power"],
   ["<b>Freight</b>", "Every delivery made", "Tonnes \xD7 kilometres \xD7 the vehicle's rate"]
@@ -1542,7 +1542,7 @@ function modelFor(site) {
       ]),
       urgencyChart(),
       sawtoothChart(),
-      prose("Typical lot: a truck 20 to 25 t, a barge 1,200 to 2,000 t, a ship a few thousand tonnes.")
+      prose("Vehicle loads: a truck 20 to 25 t, a barge 1,500 or 2,000 t, a ship 12,000 to 40,000 t.")
     ));
   }
   const sells = site.kind !== "Customer", buys = site.kind !== "Source";
@@ -1573,7 +1573,7 @@ function modelFor(site) {
     eq("margin per tonne of feed = \u03A3 product price \xD7 yield \u2212 \u03A3 feed price \xD7 usage \u2212 energy ($8/GJ heat, $80/MWh power)"),
     eq("plant rate = design rate \xD7 the lowest ( Feed , Room , margin signal ), never below its minimum rate for margin alone"),
     marginChart(),
-    prose("Full rate while the margin is at least half of normal; down to the minimum rate at no margin. It never shuts down for price alone."),
+    prose("Full rate while the margin is at least half of normal; down to the minimum rate at no margin. It never shuts down for price alone, and in normal running this rarely binds."),
     eq("asking price = the higher of ( asking price + base \xD7 cost rise , cost floor \xD7 ( 1 \u2212 how full its tank is ) )"),
     prose("An empty tank will not sell below cost; a full one may, to keep running. Pipeline feed is priced at its maker's cost, so a price rise moves down the chain about one stage an hour.")
   );
@@ -2223,5 +2223,57 @@ if (!matchMedia("(prefers-reduced-motion: reduce)").matches) runTraffic(document
 });
 (function(){const timers=new Map();addEventListener("scroll",(e)=>{for(const el of (e.target===document?[document.documentElement,document.body]:[e.target])){if(!(el instanceof Element))continue;el.classList.add("is-scrolling");clearTimeout(timers.get(el));timers.set(el,setTimeout(()=>{el.classList.remove("is-scrolling");timers.delete(el);},700));}},{capture:true,passive:true});})();
 </script>
+
+<!-- Sources: a small pop-up at the very bottom of the page -->
+<style>
+.cite-wrap{position:absolute;left:0;right:0;bottom:14px;display:flex;justify-content:center;z-index:40;pointer-events:none}
+.cite-btn{all:unset;pointer-events:auto;cursor:pointer;font:500 11px/1 "IBM Plex Mono",ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--chrome-fg);padding:9px 18px;background:var(--chrome);
+  clip-path:polygon(10px 0,calc(100% - 10px) 0,100% 50%,calc(100% - 10px) 100%,10px 100%,0 50%);box-shadow:inset 0 0 0 1.5px var(--chrome-fg)}
+.cite-btn{background:var(--chrome-fg);color:var(--chrome)}
+.cite-btn:hover,.cite-btn[aria-expanded="true"]{background:var(--primary);color:var(--primary-foreground)}
+.cite-btn:focus-visible{outline:2px solid var(--primary);outline-offset:3px}
+.cite-pop{position:fixed;left:50%;bottom:64px;transform:translateX(-50%);width:min(560px,calc(100vw - 32px));max-height:min(70vh,560px);overflow:auto;z-index:60;
+  background:var(--background);color:var(--foreground);padding:1.5px;filter:drop-shadow(0 8px 24px rgba(10,10,10,.18));
+  clip-path:polygon(14px 0,calc(100% - 14px) 0,100% 14px,100% calc(100% - 14px),calc(100% - 14px) 100%,14px 100%,0 calc(100% - 14px),0 14px)}
+.cite-pop::before{content:"";position:absolute;inset:0;background:var(--foreground);z-index:-2;clip-path:inherit}
+.cite-pop::after{content:"";position:absolute;inset:1.5px;background:var(--background);z-index:-1;
+  clip-path:polygon(13px 0,calc(100% - 13px) 0,100% 13px,100% calc(100% - 13px),calc(100% - 13px) 100%,13px 100%,0 calc(100% - 13px),0 13px)}
+.cite-in{padding:18px 22px 20px}
+.cite-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.cite-title{font:500 11px/1 "IBM Plex Mono",ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--primary)}
+.cite-x{all:unset;cursor:pointer;font:500 11px/1 "IBM Plex Mono",ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;padding:6px 8px;color:var(--muted-foreground)}
+.cite-x:hover{color:var(--foreground)}
+.cite-x:focus-visible{outline:2px solid var(--primary)}
+.cite-list{list-style:none;margin:0;padding:0;counter-reset:c}
+.cite-list li{counter-increment:c;display:grid;grid-template-columns:22px 1fr;gap:8px;padding:9px 0;border-top:1px solid var(--grid-line);font:400 13px/1.45 "Instrument Sans",system-ui,sans-serif}
+.cite-list li::before{content:counter(c);font:500 11px/1.7 "IBM Plex Mono",ui-monospace,monospace;color:var(--muted-foreground)}
+.cite-list b{font-weight:600}
+.cite-list a{color:var(--primary);text-decoration:underline;text-underline-offset:2px}
+.cite-list span{display:block;color:var(--muted-foreground);font-size:12px}
+.cite-note{margin:10px 0 0;font:400 12px/1.45 "Instrument Sans",system-ui,sans-serif;color:var(--muted-foreground)}
+</style>
+<div class="cite-wrap"><button class="cite-btn" id="citeBtn" type="button" aria-expanded="false" aria-controls="citePop">Sources</button></div>
+<div class="cite-pop" id="citePop" role="dialog" aria-label="Sources" hidden>
+  <div class="cite-in">
+    <div class="cite-head"><span class="cite-title">Sources</span><button class="cite-x" id="citeX" type="button" aria-label="Close sources">Close</button></div>
+    <ol class="cite-list">
+      <li><div><b>More than 95% of U.S. ethylene capacity is in Texas or Louisiana.</b><span>U.S. Department of Energy, report to Congress, November 2018. Quoted and checked by <a href="https://www.politifact.com/factchecks/2019/oct/10/david-mckinley/fact-checking-ethylene-production-us/" target="_blank" rel="noopener">PolitiFact, 2019</a>.</span></div></li>
+      <li><div><b>About three-quarters of U.S. ethylene capacity offline in the February 2021 freeze.</b><span><a href="https://www.spglobal.com/energy/en/news-research/latest-news/chemicals/022321-factbox-three-fourths-of-us-ethylene-capacity-offline-from-deep-freeze-westlake-ceo" target="_blank" rel="noopener">S&amp;P Global, 23 February 2021</a>.</span></div></li>
+      <li><div><b>How the freeze broke refining and petrochemical supply chains.</b><span><a href="https://www.dallasfed.org/research/swe/2021/swe2102/swe2102c" target="_blank" rel="noopener">Federal Reserve Bank of Dallas, Southwest Economy, 2021</a>.</span></div></li>
+      <li><div><b>Force majeure notices after the 2021 freeze.</b><span>Oil &amp; Gas Journal.</span></div></li>
+      <li><div><b>Cost of unplanned downtime at one site.</b><span>Industrial Info Resources, 2014.</span></div></li>
+    </ol>
+    <p class="cite-note">Every figure in the model sections comes from the running PetroGrid engine. The network is a typical one, not a real company's.</p>
+  </div>
+</div>
+<script>
+(()=>{const b=document.getElementById("citeBtn"),p=document.getElementById("citePop"),x=document.getElementById("citeX");
+document.body.style.position="relative";
+const set=(open)=>{p.hidden=!open;b.setAttribute("aria-expanded",String(open));if(open)x.focus();};
+b.addEventListener("click",()=>set(p.hidden));x.addEventListener("click",()=>{set(false);b.focus();});
+addEventListener("keydown",(e)=>{if(e.key==="Escape"&&!p.hidden){set(false);b.focus();}});
+addEventListener("pointerdown",(e)=>{if(!p.hidden&&!p.contains(e.target)&&e.target!==b)set(false);});})();
+</script>
+
 
 </body></html>
