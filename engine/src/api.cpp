@@ -439,14 +439,6 @@ std::string buildWorldJson(const sim::World& w, const TerrainGrid& terrain,
   json heights = json::array();
   for (float h : terrain.height) heights.push_back(std::round(h * 10.0) / 10.0);
 
-  // Rail strips as drawn (display only; nothing runs on them yet).
-  json rails = json::array();
-  for (const auto& strip : w.rails) {
-    json pts = json::array();
-    for (size_t i = 0; i + 1 < strip.size(); i += 2) pts.push_back({strip[i], strip[i + 1]});
-    rails.push_back(std::move(pts));
-  }
-
   const json doc = {{"world", w.name},
                     {"seed", w.seed},
                     {"wKm", w.w_km},
@@ -463,7 +455,6 @@ std::string buildWorldJson(const sim::World& w, const TerrainGrid& terrain,
                     {"tanks", tanks},
                     {"routes", routes},
                     {"pipelines", pipes},
-                    {"rails", rails},
                     {"vehicles", vehicles}};
   return doc.dump();
 }

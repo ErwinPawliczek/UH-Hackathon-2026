@@ -453,9 +453,10 @@ def main():
                       "bays": {"road": bays[0], "river": bays[1], "sea": bays[2]},
                       "processes": procs, "tanks": tanks})
 
+    network = [s for s in layout["network"] if s["mode"] in ("road", "river", "sea")]
     world = {"format": 1, "name": "erwin-world-v1", "wKm": layout["wKm"], "hKm": layout["hKm"],
              "cellKm": layout["cellKm"], "water": layout["water"], "sites": sites,
-             "pipelines": pipelines, "network": layout["network"], "fleet": fleet,
+             "pipelines": pipelines, "network": network, "fleet": fleet,
              "contracts": [], "stranded_materials": [], "market": MARKET,
              "warm_start": True}
     OUT.parent.mkdir(parents=True, exist_ok=True)

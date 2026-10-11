@@ -436,25 +436,9 @@ bool loadWorld(const std::string& name, const std::string& text, uint64_t seed, 
   }
 
   std::array<std::vector<std::vector<Pt>>, kModeCount> strips;
-  std::vector<std::vector<double>> rails;
   size_t strip_points = 0;
   for (const json& jn : arrayFieldOrEmpty(doc, "network", "world")) {
     const std::string mode = strField(jn, "mode", "network strip");
-    if (mode == "rail") {
-      // Drawn, but the engine has no rail mode: kept only for display.
-      const std::vector<Pt> pts = parsePoints(field(jn, "points", "network strip"), "rail strip");
-      strip_points += pts.size();
-      if (strip_points > 200000) bad("network has too many points");
-      if (pts.size() >= 2) {
-        std::vector<double> flat;
-        for (const Pt& p : pts) {
-          flat.push_back(p.x);
-          flat.push_back(p.y);
-        }
-        rails.push_back(std::move(flat));
-      }
-      continue;
-    }
     int m = -1;
     for (int i = 0; i < kModeCount; ++i)
       if (mode == kModeNames[i]) m = i;
@@ -551,7 +535,6 @@ bool loadWorld(const std::string& name, const std::string& text, uint64_t seed, 
   }
 
   // Render-only map data.
-  out.rails = std::move(rails);
   out.name = name;
   out.w_km = w_km;
   out.h_km = h_km;
