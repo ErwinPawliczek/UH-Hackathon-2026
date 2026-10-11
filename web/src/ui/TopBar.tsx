@@ -9,6 +9,7 @@
 // for the rest of the run and the button shows its name. On the in-page stub
 // it is the stub-era scripted-scenario setting (a session restart).
 
+import { EDITOR_PATH, leaveCustomMap } from '../store/customMap';
 import { useId } from 'react';
 import { useSim } from '../store/sim';
 import { SCENARIOS } from '../engine/events';
@@ -79,6 +80,7 @@ export function TopBar() {
   const world = useSim((s) => s.world);
   const triggeredAll = useSim((s) => s.triggered);
   const triggeredAt = useSim((s) => s.triggeredAt);
+  const customMap = useSim((s) => s.customMap);
   const live = useSim((s) => s.sendCommand !== null);
   const logOpen = useWindows((s) => s.windows[LOG_WINDOW_ID]?.open === true);
   const rewindOpen = useWindows((s) => s.windows[REWIND_WINDOW_ID]?.open === true);
@@ -87,7 +89,8 @@ export function TopBar() {
   const canRewind = useSim((s) => s.rewindTo !== null) && Number(tick ?? 0) > 0;
 
   const { togglePlay, setScenario, triggerScenario } = useSim.getState();
-  const engineScenarios = backendKind === 'http' ? scenariosFor(world) : [];
+  // route closures name edges of the default map, so a custom map does not offer them
+  const engineScenarios = backendKind === 'http' ? scenariosFor(world).filter((s) => !customMap || s.group !== 'routes') : [];
   // a scenario whose duration has passed is over: the button goes back to "Scenario" and its entry can be picked again
   const triggered = activeScenarios(engineScenarios, triggeredAll, triggeredAt, Number(tick ?? 0));
 
@@ -146,9 +149,27 @@ export function TopBar() {
         />
       )}
 
+      {/* on a map from the map builder: say so, with the way back to the default world */}
+      {customMap && (
+        <span className="flex items-center gap-1 rounded-sm bg-blue-soft px-2 py-1 text-xs text-blue-strong" data-testid="custom-map-tag">
+          Custom map
+          <button
+            type="button"
+            className="cursor-pointer underline hover:text-ink"
+            onClick={() => { leaveCustomMap(); useSim.getState().retry(); }}
+            data-testid="default-world"
+          >
+            Default world
+          </button>
+        </span>
+      )}
+
+      {/* the map builder: redraw the world, then run it */}
+      <a className="btn ml-auto" href={EDITOR_PATH} data-testid="edit-map">Edit map</a>
+
       {/* floating windows: each toggle opens or closes one draggable panel */}
       <button
-        className={`btn ml-auto ${rewindOpen ? 'btn-active' : ''}`}
+        className={`btn ${rewindOpen ? 'btn-active' : ''}`}
         onClick={() => useWindows.getState().toggle(REWIND_WINDOW_ID, REWIND_WINDOW_AT)}
         disabled={!canRewind && !rewindOpen}
         aria-pressed={rewindOpen}
