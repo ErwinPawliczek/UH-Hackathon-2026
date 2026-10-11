@@ -60,6 +60,14 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 .group{position:relative;display:inline-flex}
 .strip.chamfer{position:absolute;left:0;top:calc(100% + 16px);z-index:8;display:flex;align-items:center;gap:6px;padding:7px 12px;white-space:nowrap}
 .strip[hidden]{display:none}
+.strip.tray{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:start;gap:4px 16px;width:600px;white-space:normal}
+.strip.tray[hidden]{display:none}
+.tray h3{font:12px/1.4 var(--f-mono);text-transform:uppercase;letter-spacing:.14em;color:var(--muted);margin:0 0 4px;font-weight:400}
+.tray .pick{display:flex;align-items:center;gap:7px;width:100%;border:0;background:none;padding:3px 4px;cursor:grab;text-align:left;font-size:13px}
+.tray .pick:hover{background:var(--panel-2)}
+.tray .pick[aria-pressed=true]{background:var(--blue-soft);color:var(--blue-strong)}
+.tray .pick svg{flex-shrink:0}
+.tray p{grid-column:1/4;margin:2px 0 0}
 .strip .label{margin:0 2px 0 0}
 .strip .brush{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-left:6px}
 
@@ -205,6 +213,10 @@ body.leaving main{transition:transform 1.1s cubic-bezier(.5,0,.6,1),opacity 1.1s
       <span class="brush">Brush <select id="brush"><option value="0">Small (10 km)</option><option value="1" selected>Medium (30 km)</option><option value="2">Large (50 km)</option></select></span>
     </span>
   </span>
+  <span class="group">
+    <button class="btn" data-group="sites" aria-expanded="false" title="The sites still to place on this map">Sites ▾</button>
+    <span class="strip chamfer tray" id="strip-sites" hidden></span>
+  </span>
   <span class="gap"></span>
   <button class="btn" id="play" title="Watch this map being drawn, then stand up into the simulation">Play build</button>
   <button class="btn" id="check" title="Ask the engine whether this world can be built and whether it holds for 30 days">Check</button>
@@ -250,7 +262,7 @@ body.leaving main{transition:transform 1.1s cubic-bezier(.5,0,.6,1),opacity 1.1s
     <h2 class="label">File</h2>
     <div class="row"><button class="btn" id="export">Export</button><button class="btn" id="import">Import</button></div>
     <input type="file" id="file" accept=".json,application/json" hidden>
-    <p class="hint">The layout is saved in this browser as you work. The 22 sites and 9 pipelines are fixed: move and rename sites, re-bend or redraw pipelines, and draw roads, ship routes, barge routes and water freely.</p>
+    <p class="hint">The layout is saved in this browser as you work. The set is fixed at 22 sites and 9 pipelines: place, move and rename sites, re-bend or redraw pipelines, and draw roads, ship routes, barge routes and water freely.</p>
   </section>
 </aside>
 
@@ -305,6 +317,7 @@ const MAPS_KEY = 'petrogrid-maps-v1', NAME_KEY = 'petrogrid-map-name';
 const HINTS = {
   select:'Drag a site to move it. Click a road, route or pipeline to pick it, then drag its points. Double-click a pipeline to add a bend. Right-click to erase or remove. Ctrl+Z undoes, Ctrl+Shift+Z redoes.',
   road:'Press, drag and release to lay one straight road. Lay them end to end for bends. Ends snap to sites, to other ends, and onto the middle of a road.',
+  place:'Click the map to place the site. Esc puts it back.',
   pipe:'Drag from one site to another to redraw the pipeline between them. The nine pipelines of this world are shown faintly; then bend the new one with Select.',
   river:'Press, drag and release to lay a barge route, on water. Ends snap to sites within reach and to other barge routes.',
   sea:'Press, drag and release to lay a ship route, on water. Ends snap to sites within reach and to other ship routes.',
@@ -315,13 +328,18 @@ const HINTS = {
 /* ---------- state ---------- */
 const blank = () => ({version:2,wKm:W_KM,hKm:H_KM,cellKm:CELL,water:[],sites:[],network:[],connections:[]});
 let S = blank(), DEFAULT = null, DEFAULT_ACCESS = null;
-let tool = 'select', sel = null, pipeDraft = null, netDraft = null, drag = null, mouse = [0,0], ring = null;
+let tool = 'select', placing = null, sel = null, pipeDraft = null, netDraft = null, drag = null, mouse = [0,0], ring = null;
 let lastCheck = null, checkedText = '', checkTimer = null, checking = false;
 const $ = id => document.getElementById(id);
 const clone = o => JSON.parse(JSON.stringify(o));
 const waterSet = () => new Set(S.water.map(([c,r]) => c+','+r));
 const siteById = id => S.sites.find(s => s.id === id);
 const connKey = c => c.from+'>'+c.to+'>'+c.material;
+/* what is still to do on a map being built from nothing */
+const unplaced = () => DEFAULT.sites.filter(d => !S.sites.some(s => s.id === d.id));
+const undrawn = () => DEFAULT.connections.filter(d => !S.connections.some(c => connKey(c) === connKey(d)));
+const nameOf = id => (siteById(id) || DEFAULT.sites.find(d => d.id === id) || {name:'?'}).name;
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 function toast(text){const t=$('toast');t.textContent=text;t.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>{t.style.display='none';},4200);}
 
 /* Fit any layout to the fixed scope: the default's 22 sites and 9 pipelines, with this layout's positions,
@@ -333,21 +351,22 @@ function conform(obj){
   out.water = Array.isArray(src.water) ? src.water.filter(c => Array.isArray(c) && c[0]>=0 && c[1]>=0 && c[0]<COLS && c[1]<ROWS).map(c => [c[0]|0,c[1]|0]) : [];
   const theirs = new Map((Array.isArray(src.sites) ? src.sites : []).map(s => [s.id, s]));
   let kept = 0;
-  out.sites = DEFAULT.sites.map(d => {const t = theirs.get(d.id), same = t && t.preset === d.preset;
-    if (same) kept++;
-    return {id:d.id, name:same && typeof t.name === 'string' && t.name.trim() ? t.name.trim().slice(0,60) : d.name, preset:d.preset,
-      x:same && isFinite(t.x) ? Math.max(0,Math.min(W_KM,Math.round(t.x))) : d.x, y:same && isFinite(t.y) ? Math.max(0,Math.min(H_KM,Math.round(t.y))) : d.y};});
+  /* only the sites the layout has, in the order they were placed; the rest wait in the Sites tray */
+  out.sites = []; const seen = new Set();
+  for (const t of (Array.isArray(src.sites) ? src.sites : [])){const d = DEFAULT.sites.find(x => x.id === t.id); if (!d || d.preset !== t.preset || seen.has(d.id)) continue; seen.add(d.id); kept++;
+    out.sites.push({id:d.id, name:typeof t.name === 'string' && t.name.trim() ? t.name.trim().slice(0,60) : d.name, preset:d.preset,
+      x:isFinite(t.x) ? Math.max(0,Math.min(W_KM,Math.round(t.x))) : d.x, y:isFinite(t.y) ? Math.max(0,Math.min(H_KM,Math.round(t.y))) : d.y});}
   const lines = [...(Array.isArray(src.network) ? src.network : []), ...(Array.isArray(src.connections) ? src.connections.filter(c => c.mode !== 'pipeline') : [])];
   out.network = lines.filter(n => NET_MODES.includes(n.mode)).map(n => ({mode:n.mode, points:pts(n.points)})).filter(n => n.points.length >= 2);
-  const pipes = new Map((Array.isArray(src.connections) ? src.connections : []).filter(c => c.mode === 'pipeline').map(c => [connKey(c), c]));
-  const at = id => {const s = out.sites.find(x => x.id === id); return [s.x, s.y];};
-  out.connections = DEFAULT.connections.map(d => {const t = pipes.get(connKey(d)); let mid = t ? pts(t.points).slice(1,-1) : [];
-    if (!t) {const a = at(d.from), b = at(d.to); mid = bow(a,b,0).slice(1,-1);}
-    return {from:d.from, to:d.to, mode:'pipeline', material:d.material, points:[at(d.from), ...mid, at(d.to)]};});
-  return {layout:out, kept, extraSites:Math.max(0, theirs.size - kept), extraPipes:[...pipes.keys()].filter(k => !DEFAULT.connections.some(d => connKey(d) === k)).length};
+  /* only the pipelines the layout has drawn, of the nine, between sites that are placed, in the order drawn */
+  const at = id => {const s = out.sites.find(x => x.id === id); return s ? [s.x, s.y] : null;}; let extraPipes = 0; const drawn = new Set();
+  for (const t of (Array.isArray(src.connections) ? src.connections : [])){if (t.mode !== 'pipeline') continue; const d = DEFAULT.connections.find(x => connKey(x) === connKey(t));
+    if (!d){extraPipes++; continue;} const a = at(d.from), z = at(d.to); if (!a || !z || drawn.has(connKey(d))) continue; drawn.add(connKey(d));
+    out.connections.push({from:d.from, to:d.to, mode:'pipeline', material:d.material, points:[a, ...pts(t.points).slice(1,-1), z]});}
+  return {layout:out, kept, extraSites:Math.max(0, theirs.size - kept), extraPipes};
 }
 function load(obj, quiet){const r = conform(obj); S = r.layout; sel = null; netDraft = null; drag = null; ring = null; refresh(true); if (!quiet) save(); remember(); queueCheck();
-  if (!quiet && (r.kept < DEFAULT.sites.length || r.extraSites || r.extraPipes)) toast('This world keeps the 22 default sites and 9 pipelines: positions and bends were taken where they matched, the rest left as the default.');}
+  if (!quiet && (r.extraSites || r.extraPipes)) toast('This world has a fixed set of 22 sites and 9 pipelines: the file\'s other sites and pipelines were left out.');}
 function save(){try{localStorage.setItem(KEY, JSON.stringify(S));}catch(e){}}
 
 /* ---------- canvas ---------- */
@@ -402,7 +421,7 @@ function draw(){if (PLAY.on){drawBuild(); return;}
   if (netDraft) line([netDraft.a, snap(mouse, netDraft.mode, false)], netDraft.mode, true);
   if (tool === 'pipe'){/* what can be drawn: the nine pairs, faintly */
     ctx.save(); ctx.strokeStyle = 'rgba(23,100,214,.22)'; ctx.lineWidth = 7; ctx.lineCap = 'round';
-    for (const c of S.connections){const a = siteById(c.from), b = siteById(c.to); ctx.beginPath(); ctx.moveTo(X(a.x), Y(a.y)); ctx.lineTo(X(b.x), Y(b.y)); ctx.stroke();}
+    for (const c of DEFAULT.connections){const a = siteById(c.from), b = siteById(c.to); if (!a || !b) continue; ctx.beginPath(); ctx.moveTo(X(a.x), Y(a.y)); ctx.lineTo(X(b.x), Y(b.y)); ctx.stroke();}
     ctx.restore();
     if (pipeDraft){const a = siteById(pipeDraft.from), t = nearSite(mouse, SNAP+6); line([[a.x, a.y], t && t.id !== a.id ? [t.x, t.y] : mouse], 'pipeline', true);}}
   const picked = selLine();
@@ -438,13 +457,28 @@ function pipeNames(){ctx.save(); ctx.font = '10.5px "Instrument Sans",system-ui,
 
 /* ---------- interaction ---------- */
 function showHint(text, ms){const el = $('hint'); el.textContent = text; el.classList.remove('gone'); clearTimeout(showHint.t); showHint.t = setTimeout(() => el.classList.add('gone'), ms);}
-const GROUPS = {routing:['road','pipe','sea','river'], terrain:['water','land']};
-const TOOL_WORDS = {road:'Road', pipe:'Pipeline', sea:'Ship Route', river:'Barge Route', water:'Water', land:'Land'};
+const GROUPS = {routing:['road','pipe','sea','river'], terrain:['water','land'], sites:['place']};
+const TOOL_WORDS = {place:'Site', road:'Road', pipe:'Pipeline', sea:'Ship Route', river:'Barge Route', water:'Water', land:'Land'};
+/* a site's badge as markup, for the tray */
+function badgeSvg(preset){const d = (window.PETROGRID_SITE_ICONS || {})[preset]; return `<svg width="26" height="24" viewBox="-13 -12 26 24" aria-hidden="true"><polygon points="12,0 6,10.4 -6,10.4 -12,0 -6,-10.4 6,-10.4" fill="#fff" stroke="#0a0a0a" stroke-width="1.5"/><g transform="translate(-7.5,-7.5) scale(.625)" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d ? d.markup : ''}</g></svg>`;}
+const sitesHeading = () => {const n = DEFAULT ? unplaced().length : 0; return placing !== null && tool === 'place' ? `Sites: ${nameOf(placing)}` : n ? `Sites: ${n} to place` : 'Sites';};
+function fillTray(){if (!DEFAULT) return; const el = $('strip-sites'), left = unplaced(), kinds = [['Sources', ['source']], ['Plants', ['plant']], ['Customers', ['sink','port']]];
+  if (!left.length){el.innerHTML = '<p class="hint" style="grid-column:1/4">Every site is on the map. Right-click a site to take it off again.</p>';}
+  else el.innerHTML = kinds.map(([title, ks]) => `<div><h3>${title}</h3>${left.filter(d => ks.includes(PRESETS[d.preset].kind)).map(d => `<button class="pick" data-site="${d.id}" aria-pressed="${placing === d.id && tool === 'place'}">${badgeSvg(d.preset)}<span>${esc(d.name)}</span></button>`).join('') || '<span class="hint">all placed</span>'}</div>`).join('') + `<p class="hint">${plural(left.length, 'site', 'sites')} to place. Pick one, then click the map; or drag it onto the map.</p>`;
+  el.querySelectorAll('.pick').forEach(b => {b.onmousedown = e => {placing = +b.dataset.site; setTool('place'); trayDrag = true; e.preventDefault();};});
+  const h = document.querySelector('[data-group="sites"]'); h.textContent = sitesHeading() + ' ▾';}
+let trayDrag = false;
+function placeSite(p){const d = DEFAULT.sites.find(x => x.id === placing); if (!d || siteById(d.id)) return false;
+  if (p[0] < 0 || p[1] < 0 || p[0] > W_KM || p[1] > H_KM){toast('Place it on the map.'); return false;}
+  S.sites.push({id:d.id, name:d.name, preset:d.preset, x:Math.round(p[0]), y:Math.round(p[1])}); sel = {t:'site', id:d.id}; placing = null; setTool('select'); if (unplaced().length) openGroup('sites'); refresh(); return true;}
+/* take a site off the map: it goes back to the tray, its pipelines go undrawn, roads stay as they are */
+function removeSite(id){const s = siteById(id); if (!s) return; S.connections = S.connections.filter(c => c.from !== id && c.to !== id); S.sites = S.sites.filter(x => x.id !== id); sel = null; refresh(); toast(`${s.name} is back in Sites.`);}
 function openGroup(g){for (const k in GROUPS){const on = k === g; $('strip-'+k).hidden = !on; const b = document.querySelector(`[data-group="${k}"]`); b.setAttribute('aria-expanded', String(on));}}
 function setTool(t){tool = t; netDraft = null; pipeDraft = null; document.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === t));
   /* a heading names its active tool and keeps its strip open while that tool is in hand */
-  let mine = null; for (const k in GROUPS){const on = GROUPS[k].includes(t); if (on) mine = k; const b = document.querySelector(`[data-group="${k}"]`); b.textContent = (on ? `${cap(k)}: ${TOOL_WORDS[t]}` : cap(k)) + ' ▾'; b.setAttribute('aria-pressed', String(on));}
-  openGroup(mine);
+  let mine = null; for (const k in GROUPS){const on = GROUPS[k].includes(t); if (on) mine = k; const b = document.querySelector(`[data-group="${k}"]`); b.textContent = (k === 'sites' ? sitesHeading() : on ? `${cap(k)}: ${TOOL_WORDS[t]}` : cap(k)) + ' ▾'; b.setAttribute('aria-pressed', String(on));}
+  /* with a site in hand the tray steps aside, so the whole map can be clicked */
+  openGroup(mine === 'sites' ? null : mine); fillTray();
   cv.style.cursor = t === 'select' ? 'default' : 'crosshair'; showHint(HINTS[t], 9000); draw();}
 document.querySelectorAll('[data-group]').forEach(b => b.onclick = () => {const k = b.dataset.group; openGroup($('strip-'+k).hidden ? k : (GROUPS[k].includes(tool) ? k : null));});
 document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
@@ -456,6 +490,7 @@ function moveSite(s, nx, ny){for (const c of S.connections){if (c.from === s.id)
 cv.onmousedown = e => {if (e.button !== 0) return; const p = toKm(e); hideMenu();
   if (tool === 'water' || tool === 'land'){drag = {paint:tool === 'water'}; paint(p, drag.paint); draw(); return;}
   if (NET_MODES.includes(tool)){netDraft = {mode:tool, a:snap(p, tool, true)}; draw(); return;}
+  if (tool === 'place'){placeSite(p); return;}
   if (tool === 'pipe'){const from = nearSite(p, SNAP+6); pipeDraft = from ? {from:from.id} : null; draw(); return;}
   /* a site wins over a line's end that sits on it */
   const s = siteAt(p), h = s ? -1 : handleAt(p), c = selLine();
@@ -474,12 +509,16 @@ cv.onmousemove = e => {mouse = toKm(e);
 /* the Pipeline tool: a drag from site to site redraws the pipeline that joins them, if this world has one */
 function dropPipe(){const a = siteById(pipeDraft.from), b = nearSite(mouse, SNAP+6); pipeDraft = null;
   if (!b || b.id === a.id){draw(); return;}
-  const i = S.connections.findIndex(c => (c.from === a.id && c.to === b.id) || (c.from === b.id && c.to === a.id));
-  if (i < 0){const others = [...new Set(S.connections.filter(c => c.from === a.id || c.to === a.id).map(c => siteById(c.from === a.id ? c.to : c.from).name))];
+  const d = DEFAULT.connections.find(c => (c.from === a.id && c.to === b.id) || (c.from === b.id && c.to === a.id));
+  if (!d){const others = [...new Set(DEFAULT.connections.filter(c => c.from === a.id || c.to === a.id).map(c => nameOf(c.from === a.id ? c.to : c.from)))];
     toast(`There is no pipeline between ${a.name} and ${b.name} in this world. ${others.length ? `${a.name} connects by pipeline to ${others.join(', ')}.` : `${a.name} has no pipeline.`}`); draw(); return;}
-  const c = S.connections[i], from = siteById(c.from), to = siteById(c.to), twin = S.connections.slice(0, i).filter(o => (o.from === c.from && o.to === c.to) || (o.from === c.to && o.to === c.from)).length;
-  c.points = bow([from.x, from.y], [to.x, to.y], twin); sel = {t:'conn', i}; refresh();}
-window.onmouseup = () => {
+  const from = siteById(d.from), to = siteById(d.to), twin = DEFAULT.connections.slice(0, DEFAULT.connections.indexOf(d)).filter(o => (o.from === d.from && o.to === d.to) || (o.from === d.to && o.to === d.from)).length;
+  let i = S.connections.findIndex(c => connKey(c) === connKey(d)); const points = bow([from.x, from.y], [to.x, to.y], twin);
+  if (i < 0){S.connections.push({from:d.from, to:d.to, mode:'pipeline', material:d.material, points}); i = S.connections.length-1;} else S.connections[i].points = points;
+  sel = {t:'conn', i}; refresh();}
+window.onmouseup = e => {
+  /* a site dragged out of the tray and let go over the map */
+  if (trayDrag){trayDrag = false; if (tool === 'place' && e && e.target === cv){placeSite(toKm(e));} return;}
   if (pipeDraft){dropPipe(); return;}
   if (netDraft){const b = snap(mouse, netDraft.mode, true), a = netDraft.a; if (Math.hypot(a[0]-b[0], a[1]-b[1]) >= 4){S.network.push({mode:netDraft.mode, points:[a,b]}); sel = {t:'net', i:S.network.length-1};} netDraft = null; refresh(); return;}
   if (drag){drag = null; refresh();}};
@@ -492,6 +531,7 @@ const menu = $('menu'); function hideMenu(){menu.style.display = 'none';}
 cv.oncontextmenu = e => {e.preventDefault(); netDraft = null; drag = null; const p = toKm(e), items = [];
   const h = handleAt(p), cur = selLine();
   if (cur && h >= 0 && !(sel.t === 'conn' && (h === 0 || h === cur.points.length-1))) items.push(['Remove this bend', () => removeBend(cur, h)]);
+  const rs = siteAt(p); if (rs) items.push([`Take ${rs.name} off the map`, () => removeSite(rs.id)]);
   const ci = lineAt(S.connections, p); if (ci !== null && h < 0){const c = S.connections[ci]; items.push([`Add a bend to the ${word(c.material)} pipeline here`, () => {sel = {t:'conn', i:ci}; addBend(c, p);}, true]);}
   const ni = lineAt(S.network, p); if (ni !== null){const n = S.network[ni]; items.push([`Erase this ${MODES[n.mode].label.toLowerCase()}`, () => {S.network.splice(S.network.indexOf(n), 1); sel = null;}]);}
   if (isWater(p)){items.push(['Erase water here (brush size)', () => paint(p, false)]);
@@ -505,12 +545,12 @@ const KEYS = {v:'select', r:'road', p:'pipe', b:'river', s:'sea', w:'water', e:'
 window.onkeydown = e => {if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return; const k = e.key.toLowerCase();
   if ((e.metaKey || e.ctrlKey) && (k === 'z' || k === 'y')){if (e.shiftKey || k === 'y') redo(); else undo(); e.preventDefault(); return;}
   if (e.metaKey || e.ctrlKey) return;
-  if (k === 'escape'){netDraft = null; pipeDraft = null; sel = null; ring = null; refresh(true);}
+  if (k === 'escape'){netDraft = null; pipeDraft = null; if (tool === 'place'){placing = null; setTool('select'); return;} sel = null; ring = null; refresh(true);}
   else if (k === 'delete' || k === 'backspace'){const c = selLine();
     if (c && sel.h !== undefined) removeBend(c, sel.h);
     else if (sel && sel.t === 'net'){S.network.splice(sel.i, 1); sel = null; refresh();}
-    else if (sel && sel.t === 'conn') toast('Pipelines are fixed: re-bend them, but they cannot be removed.');
-    else if (sel && sel.t === 'site') toast('Sites are fixed: move or rename them, but they cannot be removed.');
+    else if (sel && sel.t === 'conn'){S.connections.splice(sel.i, 1); sel = null; refresh(); toast('Pipeline taken off: draw it again with Routing, Pipeline.');}
+    else if (sel && sel.t === 'site') removeSite(sel.id);
     e.preventDefault();}
   else if (KEYS[k]) setTool(KEYS[k]);};
 
@@ -560,7 +600,9 @@ function refresh(noEdit){if (!noEdit){tieSites(); save(); remember();} draw(); c
     if (sel.t === 'conn'){const a = siteById(c.from), b = siteById(c.to); el.innerHTML = `<p style="margin:0"><b>${cap(word(c.material))} pipeline</b></p><p class="hint">${a.name} to ${b.name} · <span class="mono">${len.toFixed(0)} km</span> · ${c.points.length-2} bend${c.points.length === 3 ? '' : 's'}</p><p class="hint">Drag a bend to move it. Double-click the line to add one; right-click a bend to remove it.</p>`;}
     else el.innerHTML = `<p style="margin:0"><b>${MODES[c.mode].label}</b></p><p class="hint"><span class="mono">${len.toFixed(0)} km</span> · drag its points; Delete erases it.</p>`;}
   /* checklist, for the fixed scope */
-  const li = [], prob = localProblems(acc);
+  const li = [], prob = localProblems(acc), toPlace = unplaced(), toDraw = undrawn();
+  if (toPlace.length) li.push([false, `${plural(toPlace.length, 'site', 'sites')} not placed yet (open Sites)`]);
+  for (const d of toDraw) li.push([false, `Pipeline to draw: ${cap(word(d.material))}: ${nameOf(d.from)} → ${nameOf(d.to)}`]);
   const offRoad = prob.errors.filter(e => e.mode === 'road' && e.site !== null).length;
   li.push([offRoad === 0, offRoad === 0 ? 'Every site on a road' : `Every site on a road (${offRoad} not)`]);
   li.push([acc.road.pieces <= 1, acc.road.pieces <= 1 ? 'Road network in one piece' : `Road network in one piece (now ${acc.road.pieces})`]);
@@ -577,13 +619,17 @@ function refresh(noEdit){if (!noEdit){tieSites(); save(); remember();} draw(); c
     if (o.length) u.push(`<li><b>${esc(s.name)}</b> cannot ship ${o.map(word).join(', ')}</li>`);}
   $('unmet').innerHTML = u.join('') || '<li class="ok">Every need can be supplied and every product can ship.</li>';
   if (!noEdit) queueCheck();
-  showCheck(); showName();}
+  showCheck(); showName(); fillTray();}
 const esc = t => String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;');
 
 /* ---------- Check: ask the engine; fall back to the editor's own rules when the server has no check ---------- */
 const MOCK = new URLSearchParams(location.search).get('mock');
 function queueCheck(){clearTimeout(checkTimer); if (JSON.stringify(S) !== checkedText){$('run').disabled = true; $('run').title = 'Checking…';} checkTimer = setTimeout(runCheck, 900);}
 async function runCheck(){clearTimeout(checkTimer); const text = JSON.stringify(S); if (checking) return checking;
+  /* a map still being built is not sent to the trial: say what is missing */
+  const nS = unplaced().length, nP = undrawn().length;
+  if (nS || nP){const errors = []; if (nS) errors.push({site:null, mode:null, text:`${plural(nS, 'site', 'sites')} not placed yet`}); if (nP) errors.push({site:null, mode:null, text:`${plural(nP, 'pipeline', 'pipelines')} not drawn yet`});
+    lastCheck = {ok:false, incomplete:true, errors, warnings:[], summary:null, trial:null}; checkedText = text; draw(); showCheck(); return lastCheck;}
   $('check').disabled = true; showCheck('Checking…');
   checking = (async () => {await null; let res = null, local = false;
     try {
@@ -609,7 +655,8 @@ function showCheck(busy){const el = $('result'), run = $('run'), panel = $('chec
   if (busy && !c){el.innerHTML = `<p class="hint">${busy}</p>`; return;}
   if (!c){el.innerHTML = '<p class="hint">Not checked yet.</p>'; return;}
   const t = trialWords(c.trial); let h = '';
-  if (!c.ok) h += `<p class="big bad">${c.errors.length} thing${c.errors.length === 1 ? '' : 's'} to fix</p>`;
+  if (c.incomplete) h += '<p class="big">Still being built</p>';
+  else if (!c.ok) h += `<p class="big bad">${c.errors.length} thing${c.errors.length === 1 ? '' : 's'} to fix</p>`;
   else if (t) h += `<p class="big ${t.ok ? '' : 'bad'}">${esc(t.text)}</p>`;
   else h += '<p class="big">This world can be built</p>';
   if (c.errors.length) h += '<ul style="margin-top:6px">' + c.errors.map((e,i) => `<li><button class="err" data-i="${i}" ${e.site === null || e.site === undefined ? 'disabled' : ''}>${esc(e.text)}</button></li>`).join('') + '</ul>';
@@ -618,9 +665,10 @@ function showCheck(busy){const el = $('result'), run = $('run'), panel = $('chec
   else if (c.local) h += '<p class="hint">The server check is not available: this is the builder’s own check.</p>';
   if (c.ok && c.summary) h += `<p class="hint mono" style="margin-top:6px">${[['roadKm','km road'],['riverKm','km river'],['seaKm','km sea'],['vehicles','vehicles']].filter(([k]) => isFinite(c.summary[k])).map(([k,u]) => `${Math.round(c.summary[k]).toLocaleString('en-US')} ${u}`).join(' · ')}</p>`;
   if (!fresh) h += `<p class="hint">${busy || 'Edited since: checking again…'}</p>`;
-  el.innerHTML = h; panel.classList.toggle('bad', !c.ok);
+  if (c.incomplete) h += '<p class="hint">The engine checks the map once all 22 sites are placed and all 9 pipelines drawn.</p>';
+  el.innerHTML = h; panel.classList.toggle('bad', !c.ok && !c.incomplete);
   el.querySelectorAll('.err:not([disabled])').forEach(b => b.onclick = () => {const e = c.errors[+b.dataset.i]; ring = {id:e.site}; sel = {t:'site', id:e.site}; refresh(true);});
-  run.disabled = !(fresh && c.ok); run.title = !fresh ? 'Checking…' : c.ok ? 'Save this layout and run the simulation on it' : 'Fix what the check found first';}
+  run.disabled = !(fresh && c.ok); run.title = !fresh ? 'Checking…' : c.ok ? 'Save this layout and run the simulation on it' : c.incomplete ? 'Place every site and draw every pipeline first' : 'Fix what the check found first';}
 $('check').onclick = () => runCheck();
 $('run').onclick = async () => {const c = await runCheck(); if (!c.ok || checkedText !== JSON.stringify(S)){showCheck(); return;}
   if (c.trial && !c.trial.pass && !confirm('This world builds but does not hold; run it anyway?')) return;
@@ -661,10 +709,9 @@ function saveMap(){const name = $('saveName').value.trim().slice(0,40); if (!nam
   const entry = {name, savedAt:Date.now(), layout:clone(S), thumb:thumb(S)}; if (old) Object.assign(old, entry); else maps.push(entry);
   if (writeMaps(maps)){setName(name); listMaps(); toast(`Saved as ${name}.`);}}
 /* a new map: the 22 sites where the default has them, the 9 pipelines straight, and nothing else */
+/* a new map is empty: no sites, pipelines, roads, routes or water. The sites wait in the Sites tray. */
 function newMap(){if (dirty() && !confirm('This map has changes that are not saved under a name. Start a new one anyway?')) return;
-  const L = blank(); L.sites = clone(DEFAULT.sites); const at = id => {const s = L.sites.find(x => x.id === id); return [s.x, s.y];};
-  L.connections = DEFAULT.connections.map(d => ({from:d.from, to:d.to, mode:'pipeline', material:d.material, points:[at(d.from), at(d.to)]}));
-  load(L, true); save(); setName('Untitled map'); closeMaps(); toast('A new map: the sites and pipelines, with no roads, lanes or water yet.');}
+  load(blank(), true); save(); setName('Untitled map'); closeMaps(); setTool('select'); openGroup('sites'); toast('An empty map. Pick a site from Sites and click the map to place it.');}
 function closeMaps(){$('mapsPanel').hidden = true; $('maps').setAttribute('aria-expanded', 'false');}
 $('maps').onclick = () => {const p = $('mapsPanel'); p.hidden = !p.hidden; $('maps').setAttribute('aria-expanded', String(!p.hidden)); if (!p.hidden) listMaps();};
 $('saveMap').onclick = saveMap; $('saveName').onkeydown = e => {if (e.key === 'Enter') saveMap();}; $('newMap').onclick = newMap;
@@ -743,7 +790,7 @@ function playBuild(L, opts){PLAY.L = L; PLAY.plan = planBuild(L); PLAY.t = 0; PL
   document.body.classList.add('playing'); closeMaps(); for (const k in GROUPS) $('strip-'+k).hidden = true; fit(); PLAY.last = performance.now(); PLAY.raf = requestAnimationFrame(playFrame);}
 function stopBuild(){PLAY.on = false; cancelAnimationFrame(PLAY.raf); document.body.classList.remove('playing', 'leaving');
   if (new URLSearchParams(location.search).has('play')){location.href = location.pathname; return;} fit(); setTool(tool);}
-$('play').onclick = () => playBuild(clone(S), {custom:JSON.stringify(S) !== JSON.stringify(conform(clone(DEFAULT)).layout)});
+$('play').onclick = () => {if (unplaced().length || undrawn().length){toast('Play build needs a finished map: place every site and draw every pipeline first.'); return;} playBuild(clone(S), {custom:JSON.stringify(S) !== JSON.stringify(conform(clone(DEFAULT)).layout)});};
 window.addEventListener('keydown', e => {if (!PLAY.on) return; if (e.key === ' '){PLAY.paused = !PLAY.paused; $('playNote').textContent = PLAY.paused ? 'Paused · Space plays · Esc leaves' : 'Space pauses · Esc leaves'; e.preventDefault(); e.stopImmediatePropagation();} else if (e.key === 'Escape'){stopBuild(); e.stopImmediatePropagation();} else e.stopImmediatePropagation();}, true);
 
 /* ---------- start: the working layout if there is one, else the default from the app ---------- */
