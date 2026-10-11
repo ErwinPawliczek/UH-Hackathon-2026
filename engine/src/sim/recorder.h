@@ -18,6 +18,10 @@ struct Recorder {
   std::vector<std::vector<float>> tank_fill, proc_rate;
   std::vector<LogEntry> log;
   uint64_t next_seq = 1;
+  // A muted recorder keeps nothing: no log lines, no hourly history. For
+  // runs nobody looks at (a room's shadow engines); the simulation itself
+  // never reads the recorder, so a muted run steps to the same state hash.
+  bool muted = false;
 
   // Economy history (inspect.h economyJson): one row per recorded hour since
   // tick 0, never trimmed (a 60-day run of the 22-site world is about

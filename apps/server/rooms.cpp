@@ -79,13 +79,36 @@ std::string trimmed(std::string s) {
 
 // Sends one command to the room's engine (room locked) and logs it with its
 // tick when the engine took it.
-std::string issue(Room& room, const json::json& command) {
+// `actor` is the player id behind a play action, empty for the host. An
+// accepted command also goes to every shadow but the actor's own, whose
+// shadow is made here from the run as it stood just before their first one.
+std::string issue(Room& room, const json::json& command, const std::string& actor = std::string()) {
   const std::string text = command.dump();
+  crx_sim* before = nullptr;
+  if (!actor.empty() && room.shadows.count(actor) == 0) {
+    before = crx_fork(room.sim);
+    if (before != nullptr) crx_mute(before);
+  }
   const std::string reply = crx_command(room.sim, text.c_str());
   const json::json r = json::json::parse(reply, nullptr, false);
-  if (r.is_object() && r.value("ok", false)) room.commands.emplace_back(crx_tick(room.sim), text);
+  const bool ok = r.is_object() && r.value("ok", false);
+  if (ok) {
+    room.commands.emplace_back(crx_tick(room.sim), text);
+    for (const auto& shadow : room.shadows)
+      if (shadow.first != actor) crx_command(shadow.second, text.c_str());
+    if (before != nullptr) room.shadows.emplace(actor, before);
+  } else if (before != nullptr) {
+    crx_destroy(before);
+  }
   room.refreshSnapshotLocked();
   return reply;
+}
+
+// Lost customer sales so far, at base prices (the forecast's unmet_usd).
+double lostSalesUsd(crx_sim* sim) {
+  uint32_t n = 0;
+  const double* kpis = crx_kpis(sim, &n);
+  return n > 2 ? kpis[2] : 0.0;
 }
 
 RoomPlayer* playerByToken(Room& room, const std::string& token) {
@@ -120,6 +143,7 @@ Room::Room(std::string c, std::string h, crx_sim* s)
 Room::~Room() {
   stop_.store(true);
   if (clock_.joinable()) clock_.join();
+  for (const auto& shadow : shadows) crx_destroy(shadow.second);
   crx_destroy(sim);
 }
 
@@ -139,6 +163,7 @@ void Room::beat(double elapsedSeconds) {
   tickDebt -= whole;
   const uint32_t ticks = static_cast<uint32_t>(std::min<double>(whole, kMaxTicksPerBeat));
   crx_step(sim, ticks);
+  for (const auto& shadow : shadows) crx_step(shadow.second, ticks);
   refreshSnapshotLocked();
 }
 
@@ -429,7 +454,7 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
     } else {
       return sendJson(res, 200, no("Unknown action"));
     }
-    sendJson(res, 200, issue(*room, command));
+    sendJson(res, 200, issue(*room, command, me->id));
   });
 
   svr.Get("/api/room/" + code + "/snapshot", [&rooms, room404](const Req& req, Res& res) {
@@ -560,14 +585,20 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
     view(req, res, [](Room& r, Res& out) {
       json::json doc = json::json::parse(crx_scores(r.sim), nullptr, false);
       if (!doc.is_object() || !doc.contains("scores")) return sendJson(out, 500, no("no scores"));
+      const double lost = lostSalesUsd(r.sim);
       for (json::json& row : doc["scores"]) {
         row["owner"] = nullptr;
         row["ownerName"] = nullptr;
+        // Damage to the economy: customer sales lost in this run that would
+        // not have been lost had this player never acted. Negative = helped.
+        row["damageUsd"] = 0.0;
         const int site = row.value("site", -1);
         for (const RoomPlayer& p : r.players)
           if (p.site == site) {
             row["owner"] = p.id;
             row["ownerName"] = p.name;
+            const auto shadow = r.shadows.find(p.id);
+            if (shadow != r.shadows.end()) row["damageUsd"] = lost - lostSalesUsd(shadow->second);
           }
       }
       sendJson(out, 200, doc.dump());

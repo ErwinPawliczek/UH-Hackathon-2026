@@ -813,6 +813,18 @@ const double* crx_kpis(const crx_sim* sim, uint32_t* n) {
   return api->kpis.data();
 }
 
+void crx_mute(crx_sim* sim) {
+  ApiSim* api = asApi(sim);
+  if (api == nullptr) return;
+  crx::sim::Recorder& rec = api->sim->recorder();
+  crx::sim::Recorder empty;
+  empty.tank_fill.resize(rec.tank_fill.size());
+  empty.proc_rate.resize(rec.proc_rate.size());
+  empty.next_seq = rec.next_seq;
+  empty.muted = true;
+  rec = std::move(empty);
+}
+
 const char* crx_step_report(crx_sim* sim, uint32_t ticks) {
   ApiSim* api = asApi(sim);
   if (api == nullptr) return "{}";

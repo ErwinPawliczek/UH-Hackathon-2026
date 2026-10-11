@@ -23,6 +23,7 @@ void pushRing(std::vector<float>& ring, T value) {
 }  // namespace
 
 void recordHourly(const World& world, const State& state, Recorder& rec) {
+  if (rec.muted) return;
   for (size_t t = 0; t < world.tanks.size(); ++t)
     pushRing(rec.tank_fill[t], world.tanks[t].capacity_t > 0.0
                                    ? state.tank[t].level_t / world.tanks[t].capacity_t
@@ -59,6 +60,7 @@ void Recorder::rejectedTotals(const World& world, const State& state, double& to
 
 void logEvent(Recorder& rec, uint64_t tick, const std::string& type, const std::string& site,
               const std::string& unit, const std::string& text) {
+  if (rec.muted) return;
   rec.log.push_back({rec.next_seq++, tick, type, site, unit, text});
 }
 
