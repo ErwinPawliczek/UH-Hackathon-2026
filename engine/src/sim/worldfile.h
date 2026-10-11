@@ -21,6 +21,7 @@
 #include "sim/world.h"
 
 #include <string>
+#include <vector>
 
 namespace crx {
 namespace sim {
@@ -36,6 +37,15 @@ bool buildNamedWorld(const std::string& name, uint64_t seed, World& out, std::st
 // labels the world (World::name) and the error messages.
 bool buildWorldFromJson(const std::string& name, const std::string& json_text, uint64_t seed,
                         World& out, std::string& error);
+
+// Rounds the interior corners of a polyline given as a flat x,y list (a
+// world file's "smooth_km"). Each interior vertex that turns by more than
+// about 8 degrees becomes a short curve: a quadratic Bezier from a point d
+// back along the incoming segment to a point d along the outgoing one, with
+// the old vertex as control point, where d = min(radius, 0.45 x either
+// segment's length). The two end points never move. A radius of 0, or fewer
+// than three points, returns the input unchanged.
+std::vector<double> roundPolylineCorners(const std::vector<double>& xy, double radius_km);
 
 }  // namespace sim
 }  // namespace crx

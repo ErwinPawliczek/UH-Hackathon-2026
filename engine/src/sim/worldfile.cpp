@@ -38,6 +38,43 @@ struct Pt {
 
 double dist(Pt a, Pt b) { return std::hypot(a.x - b.x, a.y - b.y); }
 
+// Corner rounding (worldfile.h roundPolylineCorners) on points.
+std::vector<Pt> roundCorners(const std::vector<Pt>& in, double radius) {
+  if (!(radius > 0.0) || in.size() < 3) return in;
+  // Zero-length segments have no direction: drop repeated points first.
+  std::vector<Pt> p;
+  p.reserve(in.size());
+  for (const Pt& q : in)
+    if (p.empty() || dist(p.back(), q) > 1e-9) p.push_back(q);
+  if (p.size() < 3) return in;
+
+  // A curve is 7 points; very long drawn paths get coarser curves so the
+  // point count stays sane.
+  const int steps = p.size() > 400 ? 3 : 6;
+  const double straight_cos = std::cos(8.0 * 3.14159265358979323846 / 180.0);
+  std::vector<Pt> out;
+  out.reserve(p.size() * static_cast<size_t>(steps + 1));
+  out.push_back(p.front());
+  for (size_t i = 1; i + 1 < p.size(); ++i) {
+    const double l1 = dist(p[i - 1], p[i]), l2 = dist(p[i], p[i + 1]);
+    const Pt u{(p[i].x - p[i - 1].x) / l1, (p[i].y - p[i - 1].y) / l1};
+    const Pt v{(p[i + 1].x - p[i].x) / l2, (p[i + 1].y - p[i].y) / l2};
+    const double d = std::min({radius, 0.45 * l1, 0.45 * l2});
+    if (u.x * v.x + u.y * v.y > straight_cos || d < 1e-6) {
+      out.push_back(p[i]);  // near enough straight on, or nothing to round with
+      continue;
+    }
+    const Pt a{p[i].x - u.x * d, p[i].y - u.y * d}, b{p[i].x + v.x * d, p[i].y + v.y * d};
+    for (int k = 0; k <= steps; ++k) {
+      const double t = static_cast<double>(k) / steps, s = 1.0 - t;
+      out.push_back({s * s * a.x + 2.0 * s * t * p[i].x + t * t * b.x,
+                     s * s * a.y + 2.0 * s * t * p[i].y + t * t * b.y});
+    }
+  }
+  out.push_back(p.back());
+  return out;
+}
+
 [[noreturn]] void bad(const std::string& msg) { throw std::runtime_error(msg); }
 
 // ---- JSON field access with messages that name the place ----
@@ -111,7 +148,8 @@ bool validSiteKey(const std::string& key) {
 // leaving it off the network. Appends nodes, edges and polyline points to
 // the world and sets Site::node for the mode.
 void buildModeGraph(World& world, crx::Mode mode, const std::vector<std::vector<Pt>>& strips,
-                    const std::vector<int>& bays, const std::vector<uint8_t>& strict) {
+                    const std::vector<int>& bays, const std::vector<uint8_t>& strict,
+                    double smooth_km) {
   const int m = modeIndex(mode);
 
   // 1. Vertices: every strip point, consecutive duplicates dropped.
@@ -296,13 +334,20 @@ void buildModeGraph(World& world, crx::Mode mode, const std::vector<std::vector<
     e.b = node_of[path.back()];
     e.mode = mode;
     e.speed_kmh = kSpeedKmh[m];
+    // The drawn path between the two nodes, its corners rounded when the
+    // world asks for it (the nodes at either end stay where they are). The
+    // edge is as long as the path that is drawn and driven.
+    std::vector<Pt> pts;
+    pts.reserve(path.size());
+    for (const uint32_t g : path) pts.push_back(gpos[g]);
+    if (smooth_km > 0.0) pts = roundCorners(pts, smooth_km);
     e.polyline = Range<uint32_t>{static_cast<uint32_t>(world.polyline_xy.size() / 2),
-                                 static_cast<uint32_t>(path.size())};
+                                 static_cast<uint32_t>(pts.size())};
     double length = 0;
-    for (size_t i = 0; i < path.size(); ++i) {
-      world.polyline_xy.push_back(gpos[path[i]].x);
-      world.polyline_xy.push_back(gpos[path[i]].y);
-      if (i > 0) length += dist(gpos[path[i - 1]], gpos[path[i]]);
+    for (size_t i = 0; i < pts.size(); ++i) {
+      world.polyline_xy.push_back(pts[i].x);
+      world.polyline_xy.push_back(pts[i].y);
+      if (i > 0) length += dist(pts[i - 1], pts[i]);
     }
     e.length_km = std::max(length, kMinEdgeKm);
     world.edges.push_back(e);
@@ -322,6 +367,10 @@ bool loadWorld(const std::string& name, const std::string& text, uint64_t seed, 
   const double w_km = numFieldOr(doc, "wKm", 600, "world");
   const double h_km = numFieldOr(doc, "hKm", 400, "world");
   const double cell_km = numFieldOr(doc, "cellKm", 10, "world");
+  // Corner rounding radius for routes and pipelines, km; 0 (or no key)
+  // leaves every path exactly as drawn.
+  const double smooth_km = numFieldOr(doc, "smooth_km", 0, "world");
+  if (!(smooth_km >= 0.0 && smooth_km <= 100.0)) bad("\"smooth_km\" must be from 0 to 100");
   if (w_km <= 0 || h_km <= 0 || cell_km <= 0) bad("wKm, hKm and cellKm must be > 0");
 
   // WorldSpec holds C strings; the pool keeps them alive until the build.
@@ -425,7 +474,8 @@ bool loadWorld(const std::string& name, const std::string& text, uint64_t seed, 
     ps.to = keepStr(to.find('/') == std::string::npos ? to + "/" + mat : to);
     ps.cap_t_h = numField(jp, "cap_t_h", ctx);
     if (jp.contains("points")) {
-      const std::vector<Pt> pts = parsePoints(jp.at("points"), ctx);
+      std::vector<Pt> pts = parsePoints(jp.at("points"), ctx);
+      if (smooth_km > 0.0) pts = roundCorners(pts, smooth_km);
       if (pts.size() >= 2)
         for (const Pt& p : pts) {
           ps.points_xy.push_back(p.x);
@@ -512,8 +562,9 @@ bool loadWorld(const std::string& name, const std::string& text, uint64_t seed, 
       bays[s] = out.sites[s].bays[static_cast<size_t>(m)];
       must[s] = strict[s][static_cast<size_t>(m)];
     }
-    buildModeGraph(out, modes[m], strips[static_cast<size_t>(m)], bays, must);
+    buildModeGraph(out, modes[m], strips[static_cast<size_t>(m)], bays, must, smooth_km);
   }
+  if (out.polyline_xy.size() / 2 > 400000) bad("the network has too many points once smoothed");
   if (out.nodes.size() > kMaxNodes)
     bad("route graph has " + std::to_string(out.nodes.size()) + " nodes (limit " +
         std::to_string(kMaxNodes) + ")");
@@ -556,6 +607,20 @@ bool loadWorld(const std::string& name, const std::string& text, uint64_t seed, 
 }
 
 }  // namespace
+
+std::vector<double> roundPolylineCorners(const std::vector<double>& xy, double radius_km) {
+  std::vector<Pt> pts;
+  pts.reserve(xy.size() / 2);
+  for (size_t i = 0; i + 1 < xy.size(); i += 2) pts.push_back({xy[i], xy[i + 1]});
+  const std::vector<Pt> rounded = roundCorners(pts, radius_km);
+  std::vector<double> out;
+  out.reserve(rounded.size() * 2);
+  for (const Pt& p : rounded) {
+    out.push_back(p.x);
+    out.push_back(p.y);
+  }
+  return out;
+}
 
 bool buildWorldFromJson(const std::string& name, const std::string& json_text, uint64_t seed,
                         World& out, std::string& error) {
