@@ -694,6 +694,7 @@ One C++ binary wraps the C ABI (§7.1) and serves the built front end from the s
 | Route | Wraps | Notes |
 |---|---|---|
 | `POST /api/sim` | `crx_create` | Body: config JSON; reply `{ "id": … }`. |
+| `DELETE /api/sim/{id}` | — (crx_destroy) | Releases the session immediately; reply `{ "released": true }`. Unknown id → 404. The client calls it whenever it replaces a session (retry, settings change) and on page unload (fetch `keepalive: true`; `sendBeacon` cannot DELETE). |
 | `POST /api/sim/{id}/step` | `crx_step` | Body `{"ticks":N}`; reply is the snapshot binary. |
 | `POST /api/sim/{id}/command` | `crx_command` | Body: a §7.2 command; reply is the engine's JSON. |
 | `POST /api/sim/{id}/fork` | `crx_fork` | Baseline twin; reply `{ "id": … }`. |
@@ -703,8 +704,10 @@ One C++ binary wraps the C ABI (§7.1) and serves the built front end from the s
 | `GET /api/sim/{id}/kpis` | `crx_kpis` | KPI vector. |
 | `GET /` (static) | — | `web/dist` assets; the app itself. |
 
-Sessions live in memory only: cap 16, inactivity expiry 10 min. No server-side database — a run is
-recreated by replaying the same seed and commands (determinism rule 6).
+Sessions live in memory only: cap 200; when full, the least-recently-used session is evicted, so a
+new visitor is never refused with 503; idle expiry 2 minutes. No server-side database — a run is
+recreated by replaying the same seed and commands (determinism rule 6). A client whose session id
+goes away (evicted or expired mid-use) sees 404 and recreates the session transparently.
 
 ---
 

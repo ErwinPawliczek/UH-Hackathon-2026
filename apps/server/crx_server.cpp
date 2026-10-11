@@ -4,6 +4,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
@@ -99,7 +100,7 @@ uint64_t parseU64(const std::string& text, bool* ok) {
 Session::~Session() { crx_destroy(sim); }
 
 SessionRegistry::SessionRegistry(size_t capacity, std::chrono::steady_clock::duration ttl)
-    : capacity_(capacity), ttl_(ttl), idEntropy_(std::random_device{}()) {}
+    : capacity_(std::max<size_t>(capacity, 1)), ttl_(ttl), idEntropy_(std::random_device{}()) {}
 
 size_t SessionRegistry::size() const {
   std::lock_guard<std::mutex> lock(globalMutex_);
@@ -114,15 +115,34 @@ std::string SessionRegistry::nextIdLocked() {
   return buf;
 }
 
+// Destroys a session removed from the map only after waiting out any
+// in-flight engine call on it. Never called with the registry lock held: the
+// engine work happens under the session mutex, which never takes the
+// registry lock back.
+static void destroyWhenIdle(std::unique_ptr<Session> doomed) {
+  std::lock_guard<std::mutex> sessionLock(doomed->mutex);
+  doomed.reset();
+}
+
 SessionRegistry::CreateResult SessionRegistry::insertNew(crx_sim* sim) {
-  std::lock_guard<std::mutex> lock(globalMutex_);
-  if (sessions_.size() >= capacity_) {
-    crx_destroy(sim);
-    return {CreateStatus::kAtCapacity, {}};
+  std::unique_ptr<Session> victim;
+  std::string id;
+  {
+    std::lock_guard<std::mutex> lock(globalMutex_);
+    if (sessions_.size() >= capacity_) {
+      // The table is full: make room by dropping the least-recently-used
+      // session. A new visitor is never refused — the 503 path is gone.
+      const auto lru = std::min_element(
+          sessions_.begin(), sessions_.end(),
+          [](const auto& a, const auto& b) { return a.second->lastUsed < b.second->lastUsed; });
+      victim = std::move(lru->second);
+      sessions_.erase(lru);
+    }
+    Session* session = new Session(sim, nowFn_());
+    id = nextIdLocked();
+    sessions_.emplace(id, std::unique_ptr<Session>(session));
   }
-  Session* session = new Session(sim);
-  const std::string id = nextIdLocked();
-  sessions_.emplace(id, std::unique_ptr<Session>(session));
+  if (victim != nullptr) destroyWhenIdle(std::move(victim));
   return {CreateStatus::kCreated, id};
 }
 
@@ -147,11 +167,24 @@ SessionRegistry::CreateResult SessionRegistry::forkFrom(const std::string& paren
   return insertNew(child);
 }
 
+bool SessionRegistry::release(const std::string& id) {
+  std::unique_ptr<Session> doomed;
+  {
+    std::lock_guard<std::mutex> lock(globalMutex_);
+    const auto it = sessions_.find(id);
+    if (it == sessions_.end()) return false;
+    doomed = std::move(it->second);
+    sessions_.erase(it);
+  }
+  destroyWhenIdle(std::move(doomed));  // the engine handle dies after the wait
+  return true;
+}
+
 void SessionRegistry::reapExpired() {
   std::vector<std::unique_ptr<Session>> expired;
   {
     std::lock_guard<std::mutex> lock(globalMutex_);
-    const auto now = Clock::now();
+    const auto now = nowFn_();
     for (auto it = sessions_.begin(); it != sessions_.end();) {
       if (now - it->second->lastUsed > ttl_) {
         expired.push_back(std::move(it->second));
@@ -162,10 +195,7 @@ void SessionRegistry::reapExpired() {
     }
   }
   // Destroy only after waiting out any in-flight engine call on the session.
-  for (auto& session : expired) {
-    std::lock_guard<std::mutex> sessionLock(session->mutex);
-    session.reset();
-  }
+  for (auto& session : expired) destroyWhenIdle(std::move(session));
 }
 
 void registerRoutes(httplib::Server& svr, SessionRegistry& sessions, const std::string& webDir) {
@@ -181,13 +211,20 @@ void registerRoutes(httplib::Server& svr, SessionRegistry& sessions, const std::
       case SessionRegistry::CreateStatus::kBadConfig:
         sendJson(res, 400, jsonError("engine rejected the config JSON"));
         break;
-      case SessionRegistry::CreateStatus::kAtCapacity:
-        sendJson(res, 503, jsonError("session limit reached; retry after sessions expire"));
-        break;
       default:
         sendJson(res, 500, jsonError("unexpected create status"));
         break;
     }
+  });
+
+  // The client releases a session whenever it replaces one (retry, settings
+  // change) and on page unload (fetch keepalive — sendBeacon cannot DELETE).
+  svr.Delete("/api/sim/" + id, [&sessions](const httplib::Request& req, httplib::Response& res) {
+    if (!sessions.release(req.matches[1].str())) {
+      sendJson(res, 404, jsonError("unknown session"));
+      return;
+    }
+    sendJson(res, 200, json::json{{"released", true}}.dump());
   });
 
   const auto stepHandler = [&sessions](const httplib::Request& req, httplib::Response& res) {
@@ -242,9 +279,6 @@ void registerRoutes(httplib::Server& svr, SessionRegistry& sessions, const std::
                  break;
                case SessionRegistry::CreateStatus::kNotFound:
                  sendJson(res, 404, jsonError("unknown session"));
-                 break;
-               case SessionRegistry::CreateStatus::kAtCapacity:
-                 sendJson(res, 503, jsonError("session limit reached; retry after sessions expire"));
                  break;
                default:
                  sendJson(res, 500, jsonError("fork failed"));

@@ -54,7 +54,8 @@ int main(int argc, char** argv) {
   });
 
   // Inactivity expiry (§7.4): a light sweep every 30 s alongside the per-request
-  // reap in create(); bounded work, no cancellation ceremony at shutdown.
+  // reap in create(); sessions idle past the 2-minute TTL are freed (bounded
+  // work, no cancellation ceremony at shutdown).
   std::atomic<bool> stop{false};
   std::thread reaper([&sessions, &stop] {
     while (!stop.load(std::memory_order_relaxed)) {

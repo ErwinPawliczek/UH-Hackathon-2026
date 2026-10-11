@@ -10,17 +10,17 @@
 #ifndef CRX_SERVER_H
 #define CRX_SERVER_H
 
-#include "crx/api.h"
-
-#include <httplib.h>
-
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "crx/api.h"
+
+#include <httplib.h>
 
 namespace crx {
 namespace server {
@@ -28,25 +28,30 @@ namespace server {
 // One hosted simulation: the engine handle, its own mutex (one sim per
 // session, calls serialised) and a last-use stamp for inactivity expiry.
 struct Session {
-  explicit Session(crx_sim* handle) : sim(handle) {}
+  Session(crx_sim* handle, std::chrono::steady_clock::time_point now)
+      : sim(handle), lastUsed(now) {}
   ~Session();
   Session(const Session&) = delete;
   Session& operator=(const Session&) = delete;
 
   crx_sim* sim;
   std::mutex mutex;
-  std::chrono::steady_clock::time_point lastUsed{std::chrono::steady_clock::now()};
+  std::chrono::steady_clock::time_point lastUsed;
 };
 
-// In-memory session table (§7.4): capped at `capacity`, entries expire after
+// In-memory session table (§7.4): capped at `capacity` (least-recently-used
+// eviction when full — a new visitor is never refused), entries expire after
 // `ttl` of inactivity. Thread-safe. Lock order is always registry → session,
-// so a reaped session is never destroyed under a concurrent engine call.
+// so a reaped or released session is never destroyed under a concurrent
+// engine call.
 class SessionRegistry {
  public:
-  SessionRegistry(size_t capacity = 16,
-                  std::chrono::steady_clock::duration ttl = std::chrono::minutes(10));
+  using Clock = std::chrono::steady_clock;
 
-  enum class CreateStatus { kCreated, kBadConfig, kNotFound, kAtCapacity };
+  SessionRegistry(size_t capacity = 200,
+                  std::chrono::steady_clock::duration ttl = std::chrono::minutes(2));
+
+  enum class CreateStatus { kCreated, kBadConfig, kNotFound };
   struct CreateResult {
     CreateStatus status;
     std::string id;
@@ -54,6 +59,11 @@ class SessionRegistry {
 
   CreateResult create(const std::string& configJson);
   CreateResult forkFrom(const std::string& parentId);
+
+  // Destroys the named session now, without waiting for the TTL: the client
+  // calls DELETE /api/sim/{id} whenever it replaces or leaves a session.
+  // Returns false when the id is unknown (already released or never existed).
+  bool release(const std::string& id);
 
   // Runs fn(session) with the session locked and its last-use stamp touched.
   // Returns false when the id is unknown.
@@ -66,7 +76,7 @@ class SessionRegistry {
       if (it == sessions_.end()) return false;
       s = it->second.get();
       s->mutex.lock();  // acquired while the registry lock is held: excludes reap
-      s->lastUsed = Clock::now();
+      s->lastUsed = nowFn_();
     }
     std::unique_lock<std::mutex> sessionLock(s->mutex, std::adopt_lock);
     fn(*s);
@@ -79,9 +89,11 @@ class SessionRegistry {
 
   size_t size() const;
 
- private:
-  using Clock = std::chrono::steady_clock;
+  // Test seam: replace the source of "now" so TTL and LRU behaviour are
+  // testable without sleeps. Not synchronised — set it before concurrent use.
+  void setNowSource(std::function<Clock::time_point()> source) { nowFn_ = std::move(source); }
 
+ private:
   std::string nextIdLocked();
   CreateResult insertNew(crx_sim* sim);
 
@@ -91,6 +103,7 @@ class SessionRegistry {
   std::unordered_map<std::string, std::unique_ptr<Session>> sessions_;
   uint64_t idCounter_ = 0;
   uint64_t idEntropy_;  // seeded once, from std::random_device
+  std::function<Clock::time_point()> nowFn_ = [] { return Clock::now(); };
 };
 
 // Registers every §7.4 route on svr. When webDir contains an index.html it is
