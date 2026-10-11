@@ -18,8 +18,21 @@ export class HttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** the reply body as sent (often {"error": "..."}) */
+    readonly body: string = '',
   ) {
     super(message);
+  }
+
+  /** The server's own explanation when the body carries one, else the message. */
+  get reason(): string {
+    try {
+      const parsed = JSON.parse(this.body) as { error?: unknown };
+      if (typeof parsed.error === 'string' && parsed.error !== '') return parsed.error;
+    } catch {
+      // not JSON: fall through to the plain message
+    }
+    return this.message;
   }
 }
 
@@ -46,6 +59,7 @@ export class HttpBackend implements SimBackend {
       throw new HttpError(
         res.status,
         `${init?.method ?? 'GET'} ${path} -> ${res.status}${detail ? `: ${detail}` : ''}`,
+        detail,
       );
     }
     return res;
@@ -121,6 +135,14 @@ export class HttpBackend implements SimBackend {
 
   async series(id: string, kind: number, refId: number): Promise<number[]> {
     return this.json(`/api/sim/${encodeURIComponent(id)}/series?kind=${kind}&id=${refId}`);
+  }
+
+  async rewind(id: string, tick: number): Promise<{ tick: number }> {
+    const reply = await this.json<{ ok?: boolean; tick?: number }>(
+      `/api/sim/${encodeURIComponent(id)}/rewind`,
+      { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ tick }) },
+    );
+    return { tick: typeof reply.tick === 'number' ? reply.tick : tick };
   }
 
   /**

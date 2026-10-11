@@ -15,6 +15,7 @@ import { scenariosFor, type EngineScenario } from '../engine/scenarios';
 import { DropdownMenu } from './DropdownMenu';
 import { fmtClock } from './format';
 import { LOG_WINDOW_AT, LOG_WINDOW_ID } from './EventLog';
+import { REWIND_WINDOW_AT, REWIND_WINDOW_ID } from './RewindWindow';
 import { useWindows } from './windows';
 
 /**
@@ -77,6 +78,8 @@ export function TopBar() {
   const triggered = useSim((s) => s.triggered);
   const live = useSim((s) => s.sendCommand !== null);
   const logOpen = useWindows((s) => s.windows[LOG_WINDOW_ID]?.open === true);
+  const rewindOpen = useWindows((s) => s.windows[REWIND_WINDOW_ID]?.open === true);
+  const canRewind = useSim((s) => s.rewindTo !== null) && Number(tick ?? 0) > 0;
 
   const { togglePlay, setSpeed, setSeed, setScenario, triggerScenario } = useSim.getState();
   const engineScenarios = backendKind === 'http' ? scenariosFor(world) : [];
@@ -151,7 +154,16 @@ export function TopBar() {
 
       {/* floating windows: each toggle opens or closes one draggable panel */}
       <button
-        className={`btn ml-auto ${logOpen ? 'btn-active' : ''}`}
+        className={`btn ml-auto ${rewindOpen ? 'btn-active' : ''}`}
+        onClick={() => useWindows.getState().toggle(REWIND_WINDOW_ID, REWIND_WINDOW_AT)}
+        disabled={!canRewind && !rewindOpen}
+        aria-pressed={rewindOpen}
+        data-testid="rewind-toggle"
+      >
+        ↶ Back in time
+      </button>
+      <button
+        className={`btn ${logOpen ? 'btn-active' : ''}`}
         onClick={() => useWindows.getState().toggle(LOG_WINDOW_ID, LOG_WINDOW_AT)}
         aria-pressed={logOpen}
         data-testid="log-toggle"

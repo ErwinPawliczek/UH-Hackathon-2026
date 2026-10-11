@@ -12,3 +12,8 @@ const ROUTINE_EVENTS = new Set(['dispatch', 'delivered']);
 export function isRoutineEvent(e: SimEvent): boolean {
   return ROUTINE_EVENTS.has(e.type);
 }
+
+/** The events worth a marker or a row when looking back over a run: everything notable up to `tick`. */
+export function notableEvents(events: SimEvent[], tick: number): SimEvent[] {
+  return events.filter((e) => e.tick <= tick && !isRoutineEvent(e));
+}

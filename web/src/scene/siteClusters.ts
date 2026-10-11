@@ -288,7 +288,7 @@ function placeGlyph(
 }
 
 function tankMatrix(anchor: TankAnchor, fill: number): THREE.Matrix4 {
-  const height = 0.12 + Math.max(0.02, fill) * 1.6;
+  const height = 0.1 + Math.max(0.02, fill) * 1.15;
   return new THREE.Matrix4().compose(
     new THREE.Vector3(anchor.x, anchor.groundY + height / 2, anchor.z),
     new THREE.Quaternion(),

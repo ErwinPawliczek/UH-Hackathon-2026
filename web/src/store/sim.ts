@@ -27,8 +27,6 @@ export const DEFAULT_SPEED = 1;
 /** Persisted-settings schema version; bump when a saved value must be reset. */
 const SETTINGS_VERSION = 1;
 export const TICKS_PER_DAY = 96;
-/** Simulation horizon in days (§9). */
-export const HORIZON_DAYS = 60;
 
 export interface SimState {
   // settings — persisted (seed, scenario, speed); backendKind is runtime-only:
@@ -53,6 +51,13 @@ export interface SimState {
   prevSnap: Snapshot | null;
   /** performance.now() of the last snapshot, for frame interpolation */
   snapAt: number;
+  /**
+   * Changes whenever the run's timeline is replaced rather than advanced: a
+   * new session, or going back in time. Anything that buffers state across
+   * snapshots (frame interpolation, trails, cached series) must drop it when
+   * this number changes.
+   */
+  runEpoch: number;
   events: SimEvent[];
   lastSeq: number;
   selected: Selection;
@@ -61,6 +66,14 @@ export interface SimState {
   sendCommand: ((cmd: Record<string, unknown>) => Promise<unknown>) | null;
   /** Keys of the engine scenarios already triggered in this session (each runs once). */
   triggered: string[];
+  /** Tick the run was at when each scenario was triggered — going back to that tick or earlier undoes it. */
+  triggeredAt: Record<string, number>;
+  /**
+   * Take the live session back to `tick` and reload everything derived from
+   * the run; wired by the engine session, null between sessions. Rejects
+   * with the server's reason when the session cannot go back there.
+   */
+  rewindTo: ((tick: number) => Promise<void>) | null;
 
   setSeed: (seed: number) => void;
   setScenario: (scenario: string) => void;
@@ -104,12 +117,15 @@ export const useSim = create<SimState>()(
       snap: null,
       prevSnap: null,
       snapAt: 0,
+      runEpoch: 0,
       events: [],
       lastSeq: -1,
       selected: null,
       error: null,
       sendCommand: null,
       triggered: [],
+      triggeredAt: {},
+      rewindTo: null,
       retryNonce: 0,
 
       setSeed: (seed) => set({ seed: Math.max(0, Math.floor(seed)) }),
@@ -145,8 +161,11 @@ export const useSim = create<SimState>()(
         // Note it on the timeline at the current tick. Local entries take
         // negative seqs so they never collide with the engine's log, and
         // lastSeq (the engine cursor) is left alone.
+        // (The session serialises commands with steps, so the snapshot in the
+        // store is the tick the engine was at when it took the command.)
         set((s) => ({
           triggered: [...s.triggered, scenario.key],
+          triggeredAt: { ...s.triggeredAt, [scenario.key]: Number(s.snap?.tick ?? 0) },
           events: [
             ...s.events,
             {

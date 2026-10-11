@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { clampToViewport, useWindows } from './windows';
 import { logRows } from './EventLog';
-import { timelineMarkers } from './Timeline';
+import { notableEvents } from './eventKinds';
 import type { SimEvent } from '../engine/events';
 
 describe('windows store', () => {
@@ -47,7 +47,7 @@ describe('clampToViewport', () => {
   });
 });
 
-describe('event log rows and timeline markers', () => {
+describe('event log rows and notable events', () => {
   const ev = (seq: number, tick: number, type: string): SimEvent => ({ seq, tick, type, text: `${type} ${seq}` });
   const events = [ev(0, 10, 'dispatch'), ev(1, 20, 'unit_failed'), ev(2, 30, 'delivered'), ev(3, 40, 'process_shutdown'), ev(4, 90, 'unit_repaired')];
 
@@ -57,7 +57,7 @@ describe('event log rows and timeline markers', () => {
     expect(logRows(events, 100, true, 2).map((e) => e.seq)).toEqual([4, 3]);
   });
 
-  it('marks only notable events on the strip', () => {
-    expect(timelineMarkers(events, 50).map((e) => e.seq)).toEqual([1, 3]);
+  it('keeps only notable events for markers', () => {
+    expect(notableEvents(events, 50).map((e) => e.seq)).toEqual([1, 3]);
   });
 });

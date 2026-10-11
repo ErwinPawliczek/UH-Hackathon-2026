@@ -160,6 +160,19 @@ export class StubBackend implements SimBackend {
     return [];
   }
 
+  /**
+   * The stub's state is a pure function of (seed, tick, outages), so going
+   * back is setting the tick and forgetting outages commanded at it or later.
+   */
+  async rewind(id: string, tick: number): Promise<{ tick: number }> {
+    const s = this.session(id);
+    if (!Number.isInteger(tick) || tick < 0) throw new Error('rewind: tick must be a non-negative integer');
+    if (tick > s.tick) throw new Error('rewind: tick is ahead of the run');
+    s.tick = tick;
+    s.outages = s.outages.filter((o) => o.startTick < tick);
+    return { tick };
+  }
+
   /** Stub sessions live in-page; releasing just drops the deterministic state. */
   async release(id: string): Promise<void> {
     this.sessions.delete(id);

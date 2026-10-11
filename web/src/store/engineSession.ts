@@ -43,6 +43,56 @@ interface LiveSession {
   backend: SimBackend;
 }
 
+/**
+ * Requests to one session run one at a time, in the order they were made: a
+ * command or a rewind never overtakes a step still in flight. That makes the
+ * store's snapshot the tick the engine was at when it took a command, and
+ * keeps a late step reply from overwriting the state a rewind just loaded.
+ */
+let chain: Promise<unknown> = Promise.resolve();
+function serial<T>(fn: () => Promise<T>): Promise<T> {
+  const run = chain.then(fn, fn);
+  chain = run.catch(() => undefined);
+  return run;
+}
+
+/**
+ * Take the session back to `tick` and reload what the client derived from
+ * the run: the snapshot (dropping the interpolation partner), the engine's
+ * event log from its first entry, and the scenario notes and ticks — a
+ * scenario triggered at that tick or later is forgotten by the engine and
+ * becomes available again. The run stays paused. Rejects with the server's
+ * reason when it refuses.
+ */
+async function rewindSession({ id, backend }: LiveSession, tick: number): Promise<void> {
+  useSim.setState({ playing: false });
+  await serial(async () => {
+    try {
+      await backend.rewind(id, tick);
+    } catch (err) {
+      throw new Error(err instanceof HttpError ? err.reason : err instanceof Error ? err.message : String(err));
+    }
+    const snap = await backend.step(id, 0);
+    const log = await backend.events(id, -1);
+    useSim.setState((s) => {
+      const kept = s.triggered.filter((key) => (s.triggeredAt[key] ?? 0) < tick);
+      const notes = s.events.filter((e) => e.seq < 0 && e.type === 'scenario' && e.tick < tick);
+      return {
+        snap,
+        prevSnap: null,
+        snapAt: performance.now(),
+        runEpoch: s.runEpoch + 1,
+        events: [...log, ...notes].sort((a, b) => a.tick - b.tick),
+        lastSeq: log.length > 0 ? log[log.length - 1].seq : -1,
+        triggered: kept,
+        triggeredAt: Object.fromEntries(kept.map((key) => [key, s.triggeredAt[key]])),
+        playing: false,
+        error: null,
+      };
+    });
+  });
+}
+
 /** Fire-and-forget DELETE of the current server-side session, if any. */
 function releaseCurrent(): void {
   if (session === null) return;
@@ -76,13 +126,16 @@ async function openSessionFor(
   // controls); cleared again on session teardown.
   useSim.setState({
     world,
+    runEpoch: useSim.getState().runEpoch + 1,
     events: [],
     triggered: [],
+    triggeredAt: {},
     lastSeq: -1,
     selected: null,
     prevSnap: null,
     snap: null,
-    sendCommand: (cmd) => backend.command(id, cmd),
+    sendCommand: (cmd) => serial(() => backend.command(id, cmd)),
+    rewindTo: (tick) => rewindSession({ id, backend }, tick),
   });
   const snap = await backend.step(id, 0);
   useSim.getState().pushSnapshot(snap);
@@ -114,7 +167,7 @@ export function openEngineSession(
   return () => {
     cancelled = true;
     releaseCurrent();
-    useSim.setState({ sendCommand: null });
+    useSim.setState({ sendCommand: null, rewindTo: null });
   };
 }
 
@@ -194,7 +247,7 @@ export function startStepLoop(): () => void {
     inFlight = true;
     void (async () => {
       try {
-        const snap = await current.backend.step(current.id, s.speed);
+        const snap = await serial(() => current.backend.step(current.id, s.speed));
         useSim.getState().pushSnapshot(snap);
         const { lastSeq } = useSim.getState();
         const events = await current.backend.events(current.id, lastSeq);
