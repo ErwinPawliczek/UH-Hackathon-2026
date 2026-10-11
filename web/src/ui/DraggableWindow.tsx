@@ -10,8 +10,8 @@
 // shows while `open` is true (a selected vehicle, a selected site) and tells
 // its owner when the close button is pressed. Its place is still remembered.
 
-import { useEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { clampToViewport, useWindows } from './windows';
+import { useEffect, useLayoutEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { bestPlacement, clampToViewport, placementCandidates, recentPress, useWindows, type Rect } from './windows';
 
 /**
  * Windows stack from here up, one step each in focus order — above the map
@@ -68,13 +68,39 @@ export function DraggableWindow({
     if (openProp === true) useWindows.getState().focus(id);
   }, [id, openProp]);
 
+  // …and it appears where it is least in the way: over as little of the
+  // windows already open as possible, and not over what was just clicked.
+  // Before paint, so it never flashes in one place and jumps to another. A
+  // window the visitor has dragged stays where they put it.
+  const frame = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (openProp !== true || frame.current === null) return;
+    if (useWindows.getState().windows[id]?.byUser === true) return;
+    const own = frame.current.getBoundingClientRect();
+    const others: Rect[] = [...document.querySelectorAll<HTMLElement>('[data-window-id]')]
+      .filter((el) => el !== frame.current)
+      .map((el) => el.getBoundingClientRect())
+      .map((r) => ({ x: r.left, y: r.top, w: r.width, h: r.height }));
+    const size = { w: own.width, h: own.height };
+    const spot = bestPlacement(
+      placementCandidates({ width: window.innerWidth, height: window.innerHeight }, size),
+      size,
+      others,
+      recentPress(performance.now()),
+    );
+    if (spot !== null) useWindows.getState().place(id, spot.x, spot.y);
+    // once per opening: `at` and the size are read then
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, openProp]);
+
   // A shrinking browser window must not strand the title bar off screen.
   useEffect(() => {
     if (!open) return;
     const onResize = () => {
       const cur = useWindows.getState().windows[id] ?? { x: at.x, y: at.y };
       const next = clampToViewport(cur.x, cur.y, width, { width: window.innerWidth, height: window.innerHeight });
-      if (next.x !== cur.x || next.y !== cur.y) useWindows.getState().move(id, next.x, next.y);
+      // a nudge back on screen is not the visitor placing the window
+      if (next.x !== cur.x || next.y !== cur.y) useWindows.getState().place(id, next.x, next.y);
     };
     onResize();
     window.addEventListener('resize', onResize);
@@ -112,8 +138,10 @@ export function DraggableWindow({
     <section
       className="chamfer pointer-events-auto fixed flex flex-col"
       style={{ left: place.x, top: place.y, width, maxHeight, zIndex: BASE_Z + Math.max(0, stack) }}
+      ref={frame}
       role="dialog"
       aria-label={title}
+      data-window-id={id}
       data-testid={`window-${id}`}
       onPointerDown={() => useWindows.getState().focus(id)}
     >
