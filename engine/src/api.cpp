@@ -439,14 +439,6 @@ std::string buildWorldJson(const sim::World& w, const TerrainGrid& terrain,
   json heights = json::array();
   for (float h : terrain.height) heights.push_back(std::round(h * 10.0) / 10.0);
 
-  // Rail strips as drawn (display only; nothing runs on them yet).
-  json rails = json::array();
-  for (const auto& strip : w.rails) {
-    json pts = json::array();
-    for (size_t i = 0; i + 1 < strip.size(); i += 2) pts.push_back({strip[i], strip[i + 1]});
-    rails.push_back(std::move(pts));
-  }
-
   const json doc = {{"world", w.name},
                     {"seed", w.seed},
                     {"wKm", w.w_km},
@@ -463,7 +455,6 @@ std::string buildWorldJson(const sim::World& w, const TerrainGrid& terrain,
                     {"tanks", tanks},
                     {"routes", routes},
                     {"pipelines", pipes},
-                    {"rails", rails},
                     {"vehicles", vehicles}};
   return doc.dump();
 }
@@ -832,6 +823,20 @@ const char* crx_economy(const crx_sim* sim, uint32_t bucket_h) {
   if (api == nullptr || bucket_h < 1 || bucket_h > 168) return nullptr;
   api->reply = crx::sim::economyJson(api->sim->world(), api->sim->state(), api->sim->recorder(),
                                      bucket_h);
+  return api->reply.c_str();
+}
+
+const char* crx_sourcing(const crx_sim* sim, const char* site, const char* material) {
+  const ApiSim* api = asApi(sim);
+  if (api == nullptr) return "{\"error\":\"null\"}";
+  const bool no_site = site == nullptr || site[0] == '\0';
+  const bool no_material = material == nullptr || material[0] == '\0';
+  if (no_site && no_material)
+    api->reply = crx::sim::buyTanksJson(*api->sim);
+  else if (no_site || no_material)
+    api->reply = R"({"error":"give both site and material, or neither"})";
+  else
+    api->reply = crx::sim::sourcingJson(*api->sim, site, material);
   return api->reply.c_str();
 }
 

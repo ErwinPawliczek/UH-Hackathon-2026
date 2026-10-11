@@ -700,3 +700,130 @@ TEST_CASE("M11: the economy view adds up to the order book and the running total
   CHECK(weekly.at("buckets") == 9);  // 60 days = 8 full weeks and a part
   CHECK(std::abs(sum(weekly.at("totals").at("demandT")) - st.cum_demand_t) <= 0.1);
 }
+
+TEST_CASE("M12: sourcing lists every way to supply a tank and names what the next pass books") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  const World& w = sim->world();
+
+  // The picker list: tanks that buy by vehicle and have a supplier.
+  const json list = json::parse(buyTanksJson(*sim));
+  CHECK(list.at("tanks").size() == 20);
+  for (const json& t : list.at("tanks")) {
+    CHECK(t.at("options").get<int>() >= 1);
+    CHECK(t.at("cover_h").get<double>() > 0.0);
+    CHECK(t.at("usual").is_null());  // nothing has been delivered yet
+  }
+
+  // Run for ten days. Just before each hourly pass ask every buying tank
+  // what the pass will book for it, then let the pass happen and compare
+  // with the order book.
+  size_t compared_tanks = 0, compared_lots = 0, tanks_with_bookings = 0;
+  for (int hour = 0; hour < 240; ++hour) {
+    sim->step(3);
+    REQUIRE(sim->state().tick % 4 == 3);
+    struct Expect {
+      uint32_t tank;
+      json doc;
+    };
+    std::vector<Expect> expected;
+    if (hour % 6 == 0) {  // every sixth hour is plenty, and keeps the test quick
+      for (const json& t : list.at("tanks")) {
+        const std::string site = t.at("site"), material = t.at("material");
+        const int tank = w.findTank(site + "/" + material);
+        REQUIRE(tank >= 0);
+        expected.push_back({static_cast<uint32_t>(tank), json::parse(sourcingJson(*sim, site, material))});
+      }
+    }
+    const uint64_t hash_before = sim->stateHash();
+    if (!expected.empty()) CHECK(sim->stateHash() == hash_before);  // asking changes nothing
+    const size_t orders_before = sim->state().order.size();
+    sim->step(1);
+    for (const Expect& e : expected) {
+      ++compared_tanks;
+      const json& pass = e.doc.at("next_pass");
+      CHECK(pass.at("tick") == sim->state().tick);
+      // The lots the pass really booked for this tank, in booking order.
+      std::vector<const Order*> booked;
+      for (size_t i = orders_before; i < sim->state().order.size(); ++i)
+        if (sim->state().order[i].to == e.tank) booked.push_back(&sim->state().order[i]);
+      REQUIRE(pass.at("lots").size() == booked.size());
+      std::set<std::pair<std::string, std::string>> chosen_pairs, booked_pairs;
+      for (size_t i = 0; i < booked.size(); ++i) {
+        const Order& o = *booked[i];
+        const std::string seller = w.sites[w.tanks[o.from].site.v].key;
+        const std::string cls = w.catalog.vehicle_classes[o.cls].key;
+        CHECK(pass.at("lots")[i].at("seller") == seller);
+        CHECK(pass.at("lots")[i].at("cls") == cls);
+        CHECK(pass.at("lots")[i].at("tonnes").get<double>() == doctest::Approx(o.qty_t).epsilon(1e-3));
+        booked_pairs.insert({seller, cls});
+        ++compared_lots;
+      }
+      for (const json& o : e.doc.at("options"))
+        if (o.at("chosen").get<bool>())
+          chosen_pairs.insert({o.at("seller").get<std::string>(), o.at("cls").get<std::string>()});
+      CHECK(chosen_pairs == booked_pairs);  // "chosen" is exactly what gets booked
+      if (!booked.empty()) ++tanks_with_bookings;
+    }
+  }
+  CHECK(compared_tanks == 40 * 20);
+  CHECK(tanks_with_bookings > 30);
+  CHECK(compared_lots > 40);
+
+  // One tank in detail, after ten days of deliveries.
+  const json doc = json::parse(sourcingJson(*sim, "STYRENICS", "BENZENE"));
+  const json& tank = doc.at("tank");
+  CHECK(tank.at("buys") == true);
+  CHECK(tank.at("cover_h").get<double>() ==
+        doctest::Approx(tank.at("level_t").get<double>() / tank.at("draw_t_h").get<double>())
+            .epsilon(1e-3));
+  CHECK(doc.at("usual").at("delivered_t").get<double>() > 0.0);
+  const json& options = doc.at("options");
+  REQUIRE(options.size() == 3);  // refinery and both crackers, by tank truck
+  double last = 0;
+  int usual_rows = 0;
+  for (const json& o : options) {
+    CHECK(o.at("cls") == "TRUCK_TANK");
+    CHECK(o.at("landed_usd_t").get<double>() >= last);  // cheapest first
+    last = o.at("landed_usd_t").get<double>();
+    // Landed cost is its parts, and freight is the class rate times distance.
+    CHECK(o.at("landed_usd_t").get<double>() ==
+          doctest::Approx(o.at("ask_usd_t").get<double>() + o.at("freight_usd_t").get<double>() +
+                          o.at("time_usd_t").get<double>() + o.at("switch_usd_t").get<double>())
+              .epsilon(1e-4));
+    CHECK(o.at("freight_usd_t").get<double>() ==
+          doctest::Approx(0.10 * o.at("km").get<double>()).epsilon(1e-3));
+    CHECK(o.at("travel_h").get<double>() ==
+          doctest::Approx(o.at("km").get<double>() / 70.0).epsilon(1e-2));
+    CHECK(o.at("lot_t").get<double>() <= 25.0);
+    CHECK(o.at("free_t").get<double>() <= o.at("stock_t").get<double>() + 1e-6);
+    CHECK(o.at("vehicles") == 13);
+    CHECK(o.at("feasible_now").get<bool>() == o.at("blocked").is_null());
+    CHECK(o.at("arrives_before_dry").get<bool>() ==
+          (o.at("travel_h").get<double>() + o.at("handling_h").get<double>() <
+           tank.at("cover_h").get<double>()));
+    usual_rows += o.at("usual").get<bool>() ? 1 : 0;
+  }
+  CHECK(usual_rows == 1);
+
+  // A supplier that is down shows as down, and a pipeline-fed tank says so.
+  REQUIRE(sim->command(R"({"type":"site_shutdown","site":"CRACKER_FLEX","duration_h":240})")
+              .find("\"ok\":true") != std::string::npos);
+  sim->step(8);
+  bool flex_down = false;
+  const json after_trip = json::parse(sourcingJson(*sim, "STYRENICS", "BENZENE"));
+  for (const json& o : after_trip.at("options"))
+    if (o.at("seller") == "CRACKER_FLEX") flex_down = o.at("seller_state") == "shut_down";
+  CHECK(flex_down);
+  const json piped = json::parse(sourcingJson(*sim, "VINYLS", "ETHYLENE"));
+  CHECK(piped.at("tank").at("buys") == false);
+  CHECK(piped.at("tank").at("piped_in") == true);
+  CHECK(piped.at("options").empty());
+  CHECK(piped.at("next_pass").is_null());
+
+  // Bad queries say why.
+  CHECK(json::parse(sourcingJson(*sim, "NOPE", "PE")).contains("error"));
+  CHECK(json::parse(sourcingJson(*sim, "VINYLS", "NOPE")).contains("error"));
+  CHECK(json::parse(sourcingJson(*sim, "VINYLS", "PE")).contains("error"));
+  CHECK(json::parse(sourcingJson(*sim, "11", "CHLORINE")).at("tank").at("site") == "VINYLS");
+}

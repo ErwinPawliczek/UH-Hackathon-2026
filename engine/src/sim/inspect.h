@@ -25,6 +25,21 @@ const char* vehicleStatusName(VehStatus status);
 // Returns an empty string when `index` is not a vehicle.
 std::string vehicleJson(const World& world, const State& state, uint32_t index);
 
+class Sim;
+
+// Sourcing for one buying tank (site key or index, material key): how much
+// cover it has, and every way of supplying it priced as procurement prices
+// it — seller, vehicle class, distance, time, lot, landed cost — with
+// whether it can be booked right now, whether it arrives before the tank is
+// dry, which one the next hourly pass books (from a dry run on a copy of the
+// run) and which seller has supplied it most so far. An unknown site,
+// material or tank gives {"error": "..."}.
+std::string sourcingJson(const Sim& sim, const std::string& site, const std::string& material);
+
+// Every tank that buys by vehicle and has at least one possible supplier:
+// the list a host builds its picker from.
+std::string buyTanksJson(const Sim& sim);
+
 // The run so far in time buckets of `bucket_h` hours (the last one partial):
 // per material what was ordered, spent, delivered and its price index; per
 // vehicle class what it moved; per bucket the money and service totals; per

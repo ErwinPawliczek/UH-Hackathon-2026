@@ -183,10 +183,6 @@ struct World {
   // rate instead of ramping up from a cold stop over the first day.
   bool warm_start = false;
 
-  // Render-only: rail strips as drawn (flat x,y lists). The engine has no
-  // rail mode, so nothing moves on them; the client draws the tracks.
-  std::vector<std::vector<double>> rails;
-
   int findSite(const std::string& key) const;
   int findTank(const std::string& key) const;
 };

@@ -67,6 +67,12 @@ const char* crx_vehicle(const crx_sim* sim, uint32_t index);
    NULL when bucket_h is out of range. Reply valid until the next call. */
 const char* crx_economy(const crx_sim* sim, uint32_t bucket_h);
 
+/* Sourcing. With site (key or index) and material: the buying tank and every
+   way of supplying it, priced as procurement prices it. With both NULL or
+   empty: the list of tanks that buy by vehicle. A bad query returns
+   {"error": "..."}. Reply valid until the next call. */
+const char* crx_sourcing(const crx_sim* sim, const char* site, const char* material);
+
 uint64_t crx_tick(const crx_sim* sim);
 uint64_t crx_state_hash(const crx_sim* sim);
 const char* crx_version(void);

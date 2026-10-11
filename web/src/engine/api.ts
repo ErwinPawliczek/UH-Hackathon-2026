@@ -55,15 +55,21 @@ export interface VehicleDetail {
     from: SiteRef;
     to: SiteRef;
     createdTick: number;
+    /** the arrival estimate made when the order was booked, not a live one */
     etaTick: number;
     priceUsdT: number;
     freightUsd: number;
   } | null;
   /** the site it is standing at, when it is at one */
   at: { site: number | null };
+  /** where it is, in map km */
+  position?: [number, number];
   /** where the leg it is driving now ends */
   legDestination: SiteRef | null;
-  /** the rest of its planned route, km points in map coordinates, from where it is */
+  /**
+   * the rest of its planned route, km points in map coordinates, starting at
+   * `position`; empty unless it is driving (to_pickup or to_dropoff)
+   */
   path: [number, number][];
   remainingKm: number;
   tripKm: number;

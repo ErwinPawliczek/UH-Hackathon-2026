@@ -71,6 +71,10 @@ class Sim {
   const Recorder& recorder() const { return rec_; }
   Recorder& recorder() { return rec_; }
   uint64_t stateHash() const { return hashState(*world_, state_); }
+  // Read-only views for hosts (inspect.h): the cached paths and the market
+  // settings this run prices with.
+  const PathCache& paths() const { return paths_; }
+  const MarketParams& marketParams() const { return market_params_; }
 
   // KPI vector (§5.10): service level, unmet t, unmet $, production index,
   // shutdown hours, stockouts, freight $, energy $.
