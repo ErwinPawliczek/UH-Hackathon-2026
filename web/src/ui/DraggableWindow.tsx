@@ -74,7 +74,7 @@ export function DraggableWindow({
   // window the visitor has dragged stays where they put it.
   const frame = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
-    if (openProp !== true || frame.current === null) return;
+    if (!open || frame.current === null) return;
     if (useWindows.getState().windows[id]?.byUser === true) return;
     const own = frame.current.getBoundingClientRect();
     const others: Rect[] = [...document.querySelectorAll<HTMLElement>('[data-window-id]')]
@@ -89,9 +89,10 @@ export function DraggableWindow({
       recentPress(performance.now()),
     );
     if (spot !== null) useWindows.getState().place(id, spot.x, spot.y);
-    // once per opening: `at` and the size are read then
+    // once per opening, for a toggled window as much as one that follows a
+    // selection: `at` and the size are read then
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, openProp]);
+  }, [id, open]);
 
   // A shrinking browser window must not strand the title bar off screen.
   useEffect(() => {
@@ -137,7 +138,8 @@ export function DraggableWindow({
   return (
     <section
       className="chamfer pointer-events-auto fixed flex flex-col"
-      style={{ left: place.x, top: place.y, width, maxHeight, zIndex: BASE_Z + Math.max(0, stack) }}
+      // never taller than the room under its top edge: the body scrolls instead, so the bottom is always reachable
+      style={{ left: place.x, top: place.y, width, maxWidth: 'calc(100vw - 16px)', maxHeight: `min(${maxHeight ?? '100vh'}, calc(100vh - ${Math.max(0, place.y) + 8}px))`, zIndex: BASE_Z + Math.max(0, stack) }}
       ref={frame}
       role="dialog"
       aria-label={title}
