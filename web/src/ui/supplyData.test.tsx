@@ -219,10 +219,10 @@ describe('ordering by hand', () => {
 describe('openSupplyOptions', () => {
   it('opens the Economy window on the Supply options tab, on that tank', () => {
     useWindows.setState({ windows: {}, order: [] });
-    useEconomyView.setState({ tab: 'procurement', supplyTank: null });
+    useEconomyView.setState({ tab: 'spending', detail: null, supplyTank: null });
     openSupplyOptions(12, 'BENZENE');
     expect(useWindows.getState().windows[ECONOMY_WINDOW_ID]?.open).toBe(true);
-    expect(useEconomyView.getState()).toMatchObject({ tab: 'supply', supplyTank: { site: 12, material: 'BENZENE' } });
+    expect(useEconomyView.getState()).toMatchObject({ tab: 'overview', detail: 'supply', supplyTank: { site: 12, material: 'BENZENE' } });
     // already open: it stays open (a second call must not close it) and moves to the new tank
     openSupplyOptions(10, 'PROPYLENE');
     expect(useWindows.getState().windows[ECONOMY_WINDOW_ID]?.open).toBe(true);

@@ -1,4 +1,4 @@
-// Economy window, Procurement tab: what the plants have bought so far.
+// Economy window, Spending tab: what the plants have bought so far.
 //
 // One chart of spend (or tonnes) per chemical over time, per day or as a
 // running total, with the chemicals table below it doing three jobs at once:
@@ -102,11 +102,11 @@ export function ProcurementView({ reply }: { reply: EconomyReply }) {
         <Switch label="Time" value={span} onChange={setSpan} options={[{ key: 'daily', label: 'Per day' }, { key: 'total', label: 'Running total' }]} />
       </div>
 
+      <p className="text-sm text-ink">
+        <span className="data font-semibold" data-testid="economy-total-spend">{fmtMoney(totalSpend)}</span> spent on {rows.length} chemicals
+        in {elapsedDaysWords(reply.tick)}.
+      </p>
       <div className="flex gap-2">
-        <Card label="Spent on chemicals">
-          <div className="text-2xl font-semibold leading-tight text-ink" data-testid="economy-total-spend">{fmtMoney(totalSpend)}</div>
-          <div className="text-xs text-muted">in {elapsedDaysWords(reply.tick)}, on {rows.length} chemicals</div>
-        </Card>
         <Card label="Freight">
           <div className="text-2xl font-semibold leading-tight text-ink">{fmtMoney(totalFreight)}</div>
           <div className="text-xs text-muted">{totalSpend > 0 ? `${((totalFreight / totalSpend) * 100).toFixed(1)}% on top of the chemicals` : ' '}</div>
