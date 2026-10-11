@@ -60,6 +60,15 @@ export type HostAction =
   | { action: 'speed'; speed: number }
   | { action: 'scenario'; command: Record<string, unknown> };
 
+/** What a player may do to their own plant (POST /api/room/{code}/play). */
+export type PlayerAction =
+  | { action: 'price'; markup: number }
+  | { action: 'rate'; share: number }
+  | { action: 'unit'; unit_index: number; down: boolean };
+
+/** The server's answer to a claim or a player action. */
+export interface RoomReply { ok?: boolean; error?: string }
+
 /** The owner's name per site index, from the room's sites and players; null where nobody has it. */
 export function siteOwners(room: Pick<RoomInfo, 'sites' | 'players'> | null, nSites: number): (string | null)[] {
   const out: (string | null)[] = Array.from({ length: nSites }, () => null);

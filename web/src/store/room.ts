@@ -21,7 +21,7 @@ import type { SimBackend } from '../engine/api';
 import { resolveWorld, type WorldSpec } from '../engine/world';
 import { adoptSession } from './engineSession';
 import { useSim } from './sim';
-import type { HostAction, RoomInfo, RoomScores } from './roomTypes';
+import type { HostAction, PlayerAction, RoomInfo, RoomReply, RoomScores } from './roomTypes';
 
 /** Real milliseconds between snapshot polls, and between polls of the room itself. */
 export const SNAPSHOT_POLL_MS = 250;
@@ -39,6 +39,12 @@ export interface RoomSource {
   snapshot(lastTick: number | null): Promise<Snapshot | null>;
   scores(): Promise<RoomScores>;
   host(hostToken: string, action: HostAction): Promise<{ ok?: boolean; error?: string }>;
+  /** the player's side: come in under a name, take (or free) a plant, and run it */
+  join(name: string): Promise<{ playerId: string; token: string; name?: string }>;
+  /** poll the room as this player from now on, so the room shows them as connected; null stops that */
+  identify(token: string | null): void;
+  claim(token: string, site: number | null): Promise<RoomReply>;
+  play(token: string, action: PlayerAction): Promise<RoomReply>;
   /** the read-only views (events, series, vehicle, economy, sourcing) as a session the panels can use */
   reads(): { id: string; backend: SimBackend };
   close(): void;
@@ -76,9 +82,11 @@ export function roomSource(code: string): RoomSource {
   // the panels ask a session for /api/sim/{id}/…: answer from the room's copy of the same routes
   const backend = new HttpBackend('', (input, init) => fetch(String(input).replace('/api/sim/', '/api/room/'), init));
   let etag: string | null = null;
+  let who: string | null = null;
   return {
     code,
-    info: () => json<RoomInfo>(base),
+    info: () => json<RoomInfo>(who === null ? base : `${base}?token=${encodeURIComponent(who)}`),
+    identify: (token) => { who = token; },
     world: () => json<unknown>(`${base}/world`),
     async snapshot(lastTick) {
       const res = await fetch(`${base}/snapshot`, etag !== null && lastTick !== null ? { headers: { 'If-None-Match': etag } } : undefined);
@@ -90,6 +98,9 @@ export function roomSource(code: string): RoomSource {
     },
     scores: () => json<RoomScores>(`${base}/scores`),
     host: (hostToken, action) => json(`${base}/host`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ hostToken, ...action }) }),
+    join: (name) => json(`${base}/join`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ name }) }),
+    claim: (token, site) => json(`${base}/claim`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ token, site }) }),
+    play: (token, action) => json(`${base}/play`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ token, ...action }) }),
     reads: () => ({ id: code, backend }),
     close: () => undefined,
   };

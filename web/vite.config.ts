@@ -5,11 +5,12 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  // Two pages share one bundle: the app at / and the multiplayer host screen
-  // at /host/ (host/index.html), so the server finds a real file at each path.
+  // Three pages share one bundle: the app at /, the multiplayer host screen at
+  // /host/ and the player's phone screen at /play/, so the server finds a real
+  // file at each path.
   build: {
     rollupOptions: {
-      input: { main: 'index.html', host: 'host/index.html' },
+      input: { main: 'index.html', host: 'host/index.html', play: 'play/index.html' },
     },
   },
   // The catalog of process recipes lives with the engine
