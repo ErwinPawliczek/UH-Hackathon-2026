@@ -76,6 +76,7 @@ void stepProduction(const World& world, State& state, const std::vector<ControlD
       state.cum_priced_out_t += priced_out;
       state.cum_priced_out_usd += usd;
       state.site_trade[proc.site.v].priced_out_t += priced_out;
+      state.proc_totals[p].priced_out_t += priced_out;
       state.site_trade[proc.site.v].priced_out_usd += usd;
     }
 

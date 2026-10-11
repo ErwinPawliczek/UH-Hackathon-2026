@@ -137,6 +137,7 @@ struct ProcTotals {
   double demand_t = 0;  // sinks: tonnes asked for
   double served_t = 0;  // sinks: tonnes actually drawn
   double down_h = 0;    // plants: hours in Shutdown or Restarting
+  double priced_out_t = 0;  // sinks: tonnes not wanted at the price paid
 };
 
 // Per-site trade the ledger does not carry: tonnes sold by vehicle, and the
@@ -199,6 +200,8 @@ struct State {
   bool margin_control = false;
   std::vector<double> cost_delta, ask_floor;      // per tank
   std::vector<double> margin_signal, proc_margin; // per process
+  // Per process, $ per tonne of basis at today's prices (market view; derived).
+  std::vector<double> proc_revenue, proc_feed_cost, proc_energy;
   // trade_block: pairs that do not trade, as seller site << 32 | buyer site,
   // kept sorted. Empty unless a player set one; hashed only when not empty.
   std::vector<uint64_t> trade_blocks;

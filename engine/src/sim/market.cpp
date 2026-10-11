@@ -42,7 +42,7 @@ void stepMarket(const World& world, State& state) {
     state.proc_margin[p] = 0.0;
     if (type.boundary != Boundary::None) continue;
 
-    double cost = 0, cost_base = 0, revenue = 0, revenue_base = 0;
+    double cost = 0, cost_base = 0, revenue = 0, revenue_base = 0, energy_usd = 0;
     for (size_t m = 0; m < type.net.size() && m < proc.mode_share.size(); ++m) {
       const double share = proc.mode_share[m];
       if (share <= 0) continue;
@@ -52,6 +52,7 @@ void stepMarket(const World& world, State& state) {
                                        slot.by_mode[m].power_mwh * kMarketPowerUsdMWh);
         cost += energy;
         cost_base += energy;
+        energy_usd += energy;
       }
       for (const Stream& s : type.net[m]) {
         if (s.slot >= kInternalStreamBase) continue;
@@ -69,6 +70,9 @@ void stepMarket(const World& world, State& state) {
         }
       }
     }
+    state.proc_revenue[p] = revenue;
+    state.proc_feed_cost[p] = cost - energy_usd;
+    state.proc_energy[p] = energy_usd;
     if (revenue_base <= 0.0) continue;
 
     // Dearer feed raises the price of everything the unit makes by the same

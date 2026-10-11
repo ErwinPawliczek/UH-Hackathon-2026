@@ -820,6 +820,13 @@ const char* crx_partners(const crx_sim* sim, uint32_t site) {
   return api->reply.empty() ? nullptr : api->reply.c_str();
 }
 
+const char* crx_market(const crx_sim* sim) {
+  const ApiSim* api = asApi(sim);
+  if (api == nullptr) return "{}";
+  api->reply = crx::sim::marketJson(*api->sim);
+  return api->reply.c_str();
+}
+
 double crx_lost_sales_usd(const crx_sim* sim) {
   const ApiSim* api = asApi(sim);
   if (api == nullptr) return 0.0;
