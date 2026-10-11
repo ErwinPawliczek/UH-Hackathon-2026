@@ -85,7 +85,11 @@ function UnitBlock({
   onAskFail: (() => void) | null;
 }) {
   const live = unitLive(snap, node);
-  const loadPct = Math.round(live.load * 100);
+  // against design: a plant running at design reads 100%, not its share of the spare capacity
+  const loadPct = Math.round(live.ofDesign * 100);
+  // a customer is not a plant unit: it is demand, said in plain words
+  const demand = node.process.boundary === 'sink';
+  const stopped = live.trainsOnline < live.trains;
   return (
     <div
       className="chamfer absolute flex flex-col px-2 py-1.5"
@@ -101,29 +105,42 @@ function UnitBlock({
       data-testid={`pfd-unit-${node.unit.key}`}
       // the key can repeat within a site (a fuel depot's four FD-OUT); the index never does
       data-unit-index={node.unitIndex}
+      data-kind={demand ? 'demand' : 'unit'}
       data-alarm={live.alarm ? 'true' : undefined}
     >
-      <div className="flex items-baseline justify-between gap-1">
-        <span className="whitespace-nowrap font-mono text-[11px] font-semibold leading-tight text-ink">{node.unit.key}</span>
-        <span className="whitespace-nowrap font-mono text-[10px] leading-tight tabular-nums" style={{ color: live.trainsOnline < live.trains ? 'var(--alarm)' : 'var(--muted)' }}>
-          {live.trainsOnline}/{live.trains} {live.trains === 1 ? 'train' : 'trains'}
-        </span>
-      </div>
-      <div className="truncate text-[10px] leading-tight text-muted">{node.unit.name}</div>
-      <div className="mt-1 flex items-center gap-1.5" title={`Taking ${fmtTph(live.inletTph)} t/h of the ${fmtTph(live.capacityTph)} t/h its online trains can take`}>
+      {demand ? (
+        <>
+          <div className="line-clamp-2 text-[11px] font-semibold leading-tight text-ink">{node.process.name}</div>
+          <div className="text-[10px] leading-tight" style={{ color: stopped ? 'var(--alarm)' : 'var(--muted)' }}>
+            {stopped ? 'stopped' : `taking ${fmtTph(live.inletTph)} t/h`}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="flex items-baseline justify-between gap-1">
+            <span className="whitespace-nowrap font-mono text-[11px] font-semibold leading-tight text-ink">{node.unit.key}</span>
+            <span className="whitespace-nowrap font-mono text-[10px] leading-tight tabular-nums" style={{ color: stopped ? 'var(--alarm)' : 'var(--muted)' }}>
+              {live.trainsOnline}/{live.trains} {live.trains === 1 ? 'train' : 'trains'}
+            </span>
+          </div>
+          {/* a long name wraps to a second line rather than being cut */}
+          <div className="line-clamp-2 text-[10px] leading-tight text-muted">{node.unit.name}</div>
+        </>
+      )}
+      <div className="mt-1 flex items-center gap-1.5" title={`${fmtTph(live.inletTph)} t/h, ${loadPct}% of design; its online trains can take ${fmtTph(live.capacityTph)} t/h`}>
         <div className="h-1.5 flex-1 overflow-hidden rounded-sm bg-line-2">
           <div className="h-full" style={{ width: `${Math.min(100, loadPct)}%`, backgroundColor: live.alarm ? 'var(--alarm)' : 'var(--blue)' }} />
         </div>
         <span className="font-mono text-[10px] leading-none tabular-nums text-ink">{live.capacityTph > 0 ? `${loadPct}%` : 'down'}</span>
       </div>
-      {node.notes.map((n) => (
+      {!demand && node.notes.map((n) => (
         <div key={`${n.dir}-${n.key}`} className="truncate text-[10px] leading-[12px] text-muted">{noteText(n, live.rate)}</div>
       ))}
       {/* destructive, so red; a unit that already has trains down cannot be failed again */}
       {onAskFail !== null && (
-        live.trainsOnline < live.trains ? (
+        stopped ? (
           <button type="button" className="btn btn-sm mt-auto self-start" disabled data-testid={`pfd-fail-${node.unit.key}`}>
-            Failed
+            {demand ? 'Stopped' : 'Failed'}
           </button>
         ) : (
           <button
@@ -132,7 +149,7 @@ function UnitBlock({
             onClick={onAskFail}
             data-testid={`pfd-fail-${node.unit.key}`}
           >
-            Fail unit
+            {demand ? 'Stop demand' : 'Fail unit'}
           </button>
         )
       )}
@@ -149,27 +166,36 @@ function FailForm({
   onCancel: () => void;
 }) {
   const max = Math.max(1, node.unit.trains);
+  const demand = node.process.boundary === 'sink';
   const [trains, setTrains] = useState(max);
   const [hours, setHours] = useState(24);
   return (
+    // In the flow under the diagram and pinned to the left edge of what is
+    // on screen, wrapping when the window is narrow: never cut off.
     <div
-      className="chamfer chamfer-sm absolute z-10 flex items-center gap-1.5 px-2 py-1.5 text-[11px]"
-      style={{ left: node.x, top: node.y + node.h + 4, ...css({ '--chamfer-fill': 'var(--white)', '--chamfer-line': 'var(--ink)' }) }}
+      className="chamfer chamfer-sm sticky left-0 mt-1 flex w-fit max-w-[560px] flex-wrap items-center gap-1.5 px-2 py-1.5 text-[11px]"
+      style={css({ '--chamfer-fill': 'var(--white)', '--chamfer-line': 'var(--ink)' })}
       data-testid={`pfd-fail-form-${node.unit.key}`}
     >
-      <span className="text-muted">Take down</span>
-      <input
-        id={`fail-trains-${node.unitIndex}`}
-        name="fail-trains"
-        type="number"
-        min={1}
-        max={max}
-        value={trains}
-        onChange={(e) => setTrains(Math.min(max, Math.max(1, Number(e.target.value) || 1)))}
-        className="field w-11 px-1 py-0.5"
-        aria-label={`Trains to take down on ${node.unit.key}`}
-      />
-      <span className="text-muted">of {max} for</span>
+      {demand ? (
+        <span className="text-ink">Stop {node.process.name} for</span>
+      ) : (
+        <>
+          <span className="text-ink">{node.unit.key}: take down</span>
+          <input
+            id={`fail-trains-${node.unitIndex}`}
+            name="fail-trains"
+            type="number"
+            min={1}
+            max={max}
+            value={trains}
+            onChange={(e) => setTrains(Math.min(max, Math.max(1, Number(e.target.value) || 1)))}
+            className="field w-11 px-1 py-0.5"
+            aria-label={`Trains to take down on ${node.unit.key}`}
+          />
+          <span className="text-muted">of {max} for</span>
+        </>
+      )}
       <input
         id={`fail-hours-${node.unitIndex}`}
         name="fail-hours"
@@ -178,11 +204,11 @@ function FailForm({
         value={hours}
         onChange={(e) => setHours(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
         className="field w-14 px-1 py-0.5"
-        aria-label={`Hours ${node.unit.key} stays down`}
+        aria-label={`Hours ${demand ? node.process.name : node.unit.key} stays down`}
       />
-      <span className="text-muted">h</span>
-      <button type="button" className="btn btn-danger btn-sm" onClick={() => onFail(trains, hours)} data-testid={`pfd-fail-confirm-${node.unit.key}`}>
-        Fail unit
+      <span className="text-muted">hours</span>
+      <button type="button" className="btn btn-danger btn-sm" onClick={() => onFail(demand ? max : trains, hours)} data-testid={`pfd-fail-confirm-${node.unit.key}`}>
+        {demand ? 'Stop demand' : 'Fail unit'}
       </button>
       <button type="button" className="btn btn-sm" onClick={onCancel}>Cancel</button>
     </div>
@@ -213,7 +239,8 @@ export function FlowsheetView({
   const under = Math.max(...sheet.nodes.map((n) => n.y + n.h));
 
   return (
-    <div className="relative" style={{ width: sheet.width, height: sheet.height + (failingNode !== undefined ? 44 : 0) }} data-testid="pfd">
+    <div style={{ width: sheet.width }}>
+    <div className="relative" style={{ width: sheet.width, height: sheet.height }} data-testid="pfd">
       <svg width={sheet.width} height={sheet.height} className="absolute left-0 top-0" aria-hidden="true">
         <defs>
           <marker id="pfd-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
@@ -272,6 +299,7 @@ export function FlowsheetView({
             onAskFail={onFailUnit === null ? null : () => setFailing(failing === n.id ? null : n.id)}
           />
         )))}
+    </div>
 
       {failingNode !== undefined && onFailUnit !== null && (
         <FailForm

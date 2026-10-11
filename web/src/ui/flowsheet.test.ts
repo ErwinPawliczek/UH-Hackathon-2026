@@ -281,6 +281,24 @@ describe('live values on the diagram', () => {
   });
 });
 
+describe('unit bars', () => {
+  it("reads against design, so a plant at design shows 100%, and a source has a throughput", () => {
+    const cdu = unit(sheetOf('REFINERY'), 'RF-CDU');
+    expect(unitLive(snapAt(1), cdu).ofDesign).toBeCloseTo(1, 6);
+    expect(unitLive(snapAt(1), cdu).load).toBeLessThan(1); // its trains carry spare above design
+    expect(unitLive(snapAt(0.5), cdu).ofDesign).toBeCloseTo(0.5, 6);
+    // a well takes nothing in: what goes through it is what it makes
+    const wells = sheetOf('OIL_FIELD').nodes.find((n): n is FlowUnitNode => n.kind === 'unit') as FlowUnitNode;
+    expect(wells.inletTph).toBeGreaterThan(100);
+    expect(unitLive(snapAt(1), wells).ofDesign).toBeCloseTo(1, 6);
+    expect(unitLive(snapAt(1), wells).inletTph).toBeCloseTo(wells.inletTph, 6);
+    // no trains online: nothing of design
+    const down = snapAt(1);
+    down.unitTrains[cdu.unitIndex] = 0;
+    expect(unitLive(down, cdu).ofDesign).toBe(0);
+  });
+});
+
 describe('hourly histories', () => {
   it('places samples on whole hours ending at the latest one', () => {
     // fetched at tick 114 with 28 samples: the last is tick 112, the first tick 4

@@ -1752,3 +1752,98 @@ TEST_CASE("M20: a tank cut off by a closed route keeps its options, marked route
   const json after_list = json::parse(buyTanksJson(*sim));
   for (const json& t : after_list.at("tanks")) CHECK(t.at("route_closed") == 0);
 }
+
+TEST_CASE("M21: a plant never passes more than its online trains allow") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  const World& w = sim->world();
+  sim->step(480);
+  uint32_t reactor = static_cast<uint32_t>(w.units.size());
+  for (uint32_t u = 0; u < w.units.size(); ++u) {
+    const Process& proc = w.processes[w.units[u].process.v];
+    const ProcessType& type = w.catalog.process_types[proc.type];
+    if (type.key == "PP_POLYMERISATION" && type.units[w.units[u].slot].key == "PO-RX") reactor = u;
+  }
+  REQUIRE(reactor < w.units.size());
+  const uint32_t p = w.units[reactor].process.v;
+  const double design = w.processes[p].design_rate_t_h;
+  REQUIRE(sim->state().proc[p].rate_t_h == doctest::Approx(design));
+
+  // One of the two reactor trains fails for two days.
+  REQUIRE(sim->command(json{{"type", "unit_outage"}, {"unit_index", reactor}, {"trains", 1},
+                            {"duration_h", 48}}
+                           .dump())
+              .find("\"ok\":true") != std::string::npos);
+  const double cap = 1.10 * design / 2.0;  // one train of two, each sized for 55% of design
+  for (int tick = 0; tick < 48 * 4 - 1; ++tick) {
+    sim->step(1);
+    REQUIRE(sim->state().unit[reactor].trains_down == 1);
+    // From the very first tick: never above what one train passes.
+    CHECK(sim->state().proc[p].rate_t_h <= cap * (1.0 + 1e-12));
+    // So the load the client shows for the unit is never above 100%.
+    const double load = sim->state().proc[p].rate_t_h / cap;
+    CHECK(load <= 1.0 + 1e-12);
+  }
+  CHECK(sim->state().proc[p].rate_t_h == doctest::Approx(cap));  // and it settles on the cap
+  sim->step(80);
+  CHECK(sim->state().proc[p].rate_t_h > cap);  // repaired: ramps back up
+
+  // The same for every plant in the world under a harsher test: half of
+  // every multi-train unit goes at once.
+  auto all = makeMapSim();
+  all->step(200);
+  for (uint32_t u = 0; u < w.units.size(); ++u) {
+    const ProcessType& type = w.catalog.process_types[w.processes[w.units[u].process.v].type];
+    const int trains = type.units[w.units[u].slot].trains;
+    if (trains < 2) continue;
+    all->command(json{{"type", "unit_outage"}, {"unit_index", u}, {"trains", trains / 2},
+                      {"duration_h", 24}}
+                     .dump());
+  }
+  for (int tick = 0; tick < 96; ++tick) {
+    all->step(1);
+    const State& st = all->state();
+    for (uint32_t u = 0; u < w.units.size(); ++u) {
+      const Process& proc = w.processes[w.units[u].process.v];
+      const ProcessType& type = w.catalog.process_types[proc.type];
+      if (type.boundary == Boundary::Sink) continue;
+      const UnitSlot& slot = type.units[w.units[u].slot];
+      const int online = slot.trains - st.unit[u].trains_down;
+      const double unit_max = w.units[u].cap_per_train_t_h * online /
+                              unitThroughputPerBasis(slot, proc.mode_share);
+      CHECK(st.proc[w.units[u].process.v].rate_t_h <= unit_max * (1.0 + 1e-9));
+    }
+  }
+}
+
+TEST_CASE("M22: supply and demand shocks say when they start and end") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  sim->step(96);
+  const auto ok = [&](const json& cmd) {
+    return json::parse(sim->command(cmd.dump())).at("ok").get<bool>();
+  };
+  REQUIRE(ok({{"type", "supply_shock"}, {"site", "GAS_FIELD"}, {"multiplier", 0.5}, {"duration_h", 240}}));
+  REQUIRE(ok({{"type", "demand_shock"}, {"site", "FUEL_DEPOT"}, {"multiplier", 1.3}, {"duration_h", 36}}));
+  sim->step(1);
+  const auto has = [&](const char* type, const char* site, const std::string& text) {
+    for (const LogEntry& e : sim->recorder().log)
+      if (e.type == type && e.site == site && e.text == text) return true;
+    return false;
+  };
+  CHECK(has("supply_shock", "GAS_FIELD", "Gas field: output cut to 50% for 10 days"));
+  CHECK(has("demand_shock", "FUEL_DEPOT", "Fuel depot: demand raised to 130% for 36 hours"));
+  CHECK(!has("shock_ended", "FUEL_DEPOT", "Fuel depot: demand back to normal"));
+  sim->step(36 * 4);
+  CHECK(has("shock_ended", "FUEL_DEPOT", "Fuel depot: demand back to normal"));
+  CHECK(!has("shock_ended", "GAS_FIELD", "Gas field: output back to normal"));
+  sim->step(204 * 4);
+  CHECK(has("shock_ended", "GAS_FIELD", "Gas field: output back to normal"));
+  size_t starts = 0, ends = 0;
+  for (const LogEntry& e : sim->recorder().log) {
+    starts += (e.type == "supply_shock" || e.type == "demand_shock") ? 1 : 0;
+    ends += e.type == "shock_ended" ? 1 : 0;
+  }
+  CHECK(starts == 2);  // once each, not every tick
+  CHECK(ends == 2);
+}

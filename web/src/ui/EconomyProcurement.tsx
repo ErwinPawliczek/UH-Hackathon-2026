@@ -16,8 +16,8 @@ import { LineChart } from './charts/LineChart';
 import { Sparkline } from './charts/Sparkline';
 import { CHART_COLORS, CHART_OTHER } from './charts/palette';
 import {
-  SLOT_COUNT, bucketTicks, classSeries, defaultSlots, fmtAxisMoney, fmtAxisTonnes, fmtMoney, fmtTonnes,
-  fullBuckets, materialRows, procurementSeries, sum, toggleSlot, type Measure, type Span,
+  SLOT_COUNT, bucketDays, classSeries, defaultSlots, fmtAxisMoney, fmtAxisTonnes, fmtMoney, fmtTonnes,
+  elapsedDaysWords, fullBuckets, materialRows, procurementSeries, sum, toggleSlot, type Measure, type Span,
 } from './economyData';
 
 const CHART_WIDTH = 688;
@@ -71,10 +71,10 @@ export function ProcurementView({ reply }: { reply: EconomyReply }) {
   const rows = useMemo(() => materialRows(reply, measure), [reply, measure]);
   // colours are handed out once per run, to the biggest chemicals at that moment
   const slots = picked !== null && picked.epoch === epoch ? picked.slots : defaultSlots(rows);
-  const ticks = useMemo(() => bucketTicks(reply), [reply]);
+  const days = useMemo(() => bucketDays(reply), [reply]);
   // per day, the day still running is left off: its total is not in yet
   const n = span === 'daily' ? fullBuckets(reply) : reply.buckets;
-  const x = ticks.slice(0, n);
+  const x = days.slice(0, n);
   const money = measure === 'usd';
   const format = money ? fmtAxisMoney : fmtAxisTonnes;
   const unit = span === 'daily' ? 'per day' : 'running total';
@@ -105,7 +105,7 @@ export function ProcurementView({ reply }: { reply: EconomyReply }) {
       <div className="flex gap-2">
         <Card label="Spent on chemicals">
           <div className="text-2xl font-semibold leading-tight text-ink" data-testid="economy-total-spend">{fmtMoney(totalSpend)}</div>
-          <div className="text-xs text-muted">in {reply.buckets} day{reply.buckets === 1 ? '' : 's'}, on {rows.length} chemicals</div>
+          <div className="text-xs text-muted">in {elapsedDaysWords(reply.tick)}, on {rows.length} chemicals</div>
         </Card>
         <Card label="Freight">
           <div className="text-2xl font-semibold leading-tight text-ink">{fmtMoney(totalFreight)}</div>
@@ -123,7 +123,7 @@ export function ProcurementView({ reply }: { reply: EconomyReply }) {
         </Card>
       </div>
 
-      <LineChart
+      <LineChart xUnit="days"
         title={money ? 'Money spent on chemicals' : 'Chemicals ordered'}
         unit={unit}
         x={x}
@@ -176,7 +176,7 @@ export function ProcurementView({ reply }: { reply: EconomyReply }) {
                 <td className="data py-0.5 text-right text-ink">{fmtTonnes(r.orderedT)}</td>
                 <td className="data py-0.5 text-right text-muted">{fmtMoney(r.freightUsd)}</td>
                 <td className="data py-0.5 text-right text-muted">{priceWords(r.priceIndex)}</td>
-                <td className="py-0.5 pl-3"><Sparkline values={r.perBucket} x={ticks} width={120} height={16} color={color} /></td>
+                <td className="py-0.5 pl-3"><Sparkline values={r.perBucket} x={days} width={120} height={16} color={color} /></td>
               </tr>
             );
           })}
@@ -202,7 +202,7 @@ export function ProcurementView({ reply }: { reply: EconomyReply }) {
         </tbody>
       </table>
 
-      <LineChart
+      <LineChart xUnit="days"
         title={money ? 'Freight paid, by vehicle type' : 'Tonnes carried, by vehicle type'}
         unit={unit}
         x={x}

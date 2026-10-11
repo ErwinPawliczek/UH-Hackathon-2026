@@ -143,7 +143,7 @@ function unitNotes(unit: UnitSpec): FlowNote[] {
 
 /** Height a unit block needs: its text, its notes, and room for its ports. */
 export function unitHeight(notes: number, portsIn: number, portsOut: number): number {
-  const text = 62 + notes * 12 + 34; // key and name, trains and load, notes, the Fail unit button
+  const text = 74 + notes * 12 + 34; // key and a name of up to two lines, trains and load, notes, the Fail unit button
   const ports = (Math.max(portsIn, portsOut) + 1) * PORT_PITCH;
   return Math.max(text, ports);
 }
@@ -168,7 +168,8 @@ export function buildFlowsheet(world: WorldSpec, siteIdx: number): Flowsheet | n
       const id = `u${unit.index}`;
       units.push({
         kind: 'unit', id, unit, process, procIndex: process.index, unitIndex: unit.index,
-        inletTph: sum(unit.in.map((s) => s.tph)), notes: unitNotes(unit),
+        // what goes through it: what it takes in, or for a source (a well, a mine), which takes nothing in, what it makes
+        inletTph: unit.in.length > 0 ? sum(unit.in.map((s) => s.tph)) : sum(unit.out.map((s) => s.tph)), notes: unitNotes(unit),
         layer: 0, x: 0, y: 0, w: UNIT_W, h: 0,
       });
       for (const s of unit.in) {
@@ -494,6 +495,8 @@ export interface UnitLive {
   capacityTph: number;
   /** inlet over online capacity, 0..1+ ; 0 when nothing is online */
   load: number;
+  /** throughput as a share of design, 0..1: a unit at design reads 100% (its trains carry some spare above that) */
+  ofDesign: number;
   /** trains are down, or its process is shut or restarting */
   alarm: boolean;
   rate: number;
@@ -508,6 +511,7 @@ export function unitLive(snap: Snapshot, node: FlowUnitNode): UnitLive {
   return {
     trainsOnline, trains, inletTph, capacityTph, rate,
     load: capacityTph > 0 ? inletTph / capacityTph : 0,
+    ofDesign: trainsOnline > 0 ? rate : 0,
     alarm: trainsOnline < trains || isDown(snap.procStatus[node.procIndex]),
   };
 }
