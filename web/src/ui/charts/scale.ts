@@ -58,6 +58,30 @@ export function timeMarks(from: number, to: number, maxMarks = 6): { ticks: numb
   return { ticks, withTime: step < TICKS_PER_DAY };
 }
 
+/** Spacings a day axis may use, in whole days. */
+const DAY_STEPS = [1, 2, 5, 10, 20, 50, 100];
+
+/**
+ * Marks for an axis whose x is already in days: on whole days only, at most
+ * `maxMarks` of them — never a fraction of a day, whatever the span.
+ */
+export function dayMarks(from: number, to: number, maxMarks = 6): number[] {
+  const span = Math.max(1e-9, to - from);
+  const step = DAY_STEPS.find((s) => span / s <= maxMarks) ?? DAY_STEPS[DAY_STEPS.length - 1];
+  const marks: number[] = [];
+  for (let d = Math.ceil(from / step - 1e-9) * step; d <= to + 1e-9; d += step) marks.push(d);
+  return marks;
+}
+
+/**
+ * A day value as an axis mark ("D5") or, spelled out for a readout, "Day 5";
+ * a point between two days keeps one decimal ("Day 5.5").
+ */
+export function fmtDay(day: number, spelled: boolean): string {
+  const v = Math.abs(day - Math.round(day)) < 1e-6 ? String(Math.round(day)) : (Math.round(day * 10) / 10).toFixed(1);
+  return spelled ? `Day ${v}` : `D${v}`;
+}
+
 /** Index of the entry of ascending `xs` nearest to `x`; -1 for an empty list. */
 export function nearestIndex(xs: number[], x: number): number {
   if (xs.length === 0) return -1;
