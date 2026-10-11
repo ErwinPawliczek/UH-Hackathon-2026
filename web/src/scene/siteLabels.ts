@@ -3,7 +3,8 @@
 // badge also carries the plant's state: alarm red with a white icon while a
 // plant is shut down, a red outline while it restarts, blue while it holds
 // at minimum. Rendered with CSS2DRenderer so text stays crisp; the overlay
-// and every label are pointer-events: none, so picking is untouched. Labels hide past a camera
+// and every label are pointer-events: none; the scene's picking reads the label boxes
+// (data-site) so a click on a badge or a name selects that site. Labels hide past a camera
 // distance threshold to avoid clutter when zoomed out, and a label that
 // would cover a neighbour's steps one row up or down (or hides if no row is
 // free) so a dense corner of the map stays readable.
@@ -81,6 +82,7 @@ export class SiteLabels {
       if (anchor === undefined) return;
       const el = document.createElement('span');
       el.className = 'site-label';
+      el.dataset.site = String(s);
       el.style.cssText = 'pointer-events:none;user-select:none;';
       // CSS2DRenderer owns the root element's display (it toggles it to hide
       // a label), so the row layout lives on a box inside it: the badge (a

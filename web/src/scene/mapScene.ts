@@ -49,6 +49,8 @@ const VEH_TO_DROPOFF = 4;
 /** Screen pixels within which a click picks a moving vehicle, and one standing at a site. */
 const PICK_MOVING_PX = 18;
 const PICK_STANDING_PX = 9;
+/** Right on a vehicle: within this many pixels it wins even over a site. */
+const PICK_EXACT_PX = 8;
 /** Seconds a vehicle takes to appear or fade out. */
 const VEHICLE_FADE_S = 0.25;
 /** Seconds a truck's or barge's cargo takes to grow onto its bed, or shrink off it. */
@@ -576,19 +578,41 @@ export class MapScene {
       ((clientX - rect.left) / rect.width) * 2 - 1,
       -((clientY - rect.top) / rect.height) * 2 + 1,
     );
-    // A moving vehicle is a small, fast target: one near the pointer wins,
-    // even over a site underneath it.
-    const moving = this.vehicleNear(clientX - rect.left, clientY - rect.top, rect, PICK_MOVING_PX, true);
-    if (moving >= 0) return { kind: 'vehicle', index: moving };
+    const px = clientX - rect.left;
+    const py = clientY - rect.top;
+    // A site's label (badge and name) is that site, whatever passes under it.
+    const labelled = this.labelAt(clientX, clientY);
+    if (labelled >= 0) return { kind: 'site', index: labelled };
+    // Right on a vehicle: the vehicle, even over a site.
+    const exact = this.vehicleNearAny(px, py, rect, PICK_EXACT_PX);
+    if (exact >= 0) return { kind: 'vehicle', index: exact };
     this.raycaster.setFromCamera(this.ndc, this.camera);
     const hits = this.raycaster.intersectObjects(
       [this.siteLayer.pads, ...this.vehicleLayer.meshes],
       false,
     );
+    // A site cluster wins over anything merely near the pointer.
     for (const hit of hits) {
       if (hit.object === this.siteLayer.pads && hit.instanceId !== undefined) {
         return { kind: 'site', index: this.siteLayer.glyphSite[hit.instanceId] };
       }
+    }
+    // Small pads on a large map miss raycasts by a few pixels: the projected
+    // site centre within a click tolerance counts as the cluster.
+    const v = new THREE.Vector3();
+    let bestSite = -1;
+    let bestDist = 24; // px
+    this.siteLayer.siteAnchors.forEach((anchor, i) => {
+      v.set(anchor.x, anchor.topY + 0.85, anchor.z).project(this.camera);
+      if (v.z > 1) return; // behind the camera
+      const d = Math.hypot((v.x * 0.5 + 0.5) * rect.width - px, (-v.y * 0.5 + 0.5) * rect.height - py);
+      if (d < bestDist) {
+        bestDist = d;
+        bestSite = i;
+      }
+    });
+    if (bestSite >= 0) return { kind: 'site', index: bestSite };
+    for (const hit of hits) {
       const meshIdx = this.vehicleLayer.meshes.indexOf(hit.object as THREE.InstancedMesh);
       if (meshIdx >= 0 && hit.instanceId !== undefined) {
         const index = this.vehicleLayer.members[meshIdx][hit.instanceId];
@@ -596,26 +620,29 @@ export class MapScene {
         if (index !== undefined && (this.shown[index] ?? 1) >= 0.5) return { kind: 'vehicle', index };
       }
     }
-    // a vehicle standing at a site (queueing, loading, unloading), when the pointer is right on it
-    const standing = this.vehicleNear(clientX - rect.left, clientY - rect.top, rect, PICK_STANDING_PX, false);
-    if (standing >= 0) return { kind: 'vehicle', index: standing };
-    // Small pads on a large map miss raycasts by a few pixels — fall back
-    // to the projected site centre within a click tolerance.
-    const v = new THREE.Vector3();
-    let bestSite = -1;
-    let bestDist = 24; // px
-    this.siteLayer.siteAnchors.forEach((anchor, i) => {
-      v.set(anchor.x, anchor.topY + 0.85, anchor.z).project(this.camera);
-      if (v.z > 1) return; // behind the camera
-      const px = (v.x * 0.5 + 0.5) * rect.width;
-      const py = (-v.y * 0.5 + 0.5) * rect.height;
-      const d = Math.hypot(px - (clientX - rect.left), py - (clientY - rect.top));
-      if (d < bestDist) {
-        bestDist = d;
-        bestSite = i;
-      }
-    });
-    return bestSite >= 0 ? { kind: 'site', index: bestSite } : null;
+    // Away from any site, a moving vehicle is a small, fast target: near is enough.
+    const moving = this.vehicleNear(px, py, rect, PICK_MOVING_PX, true);
+    if (moving >= 0) return { kind: 'vehicle', index: moving };
+    const standing = this.vehicleNear(px, py, rect, PICK_STANDING_PX, false);
+    return standing >= 0 ? { kind: 'vehicle', index: standing } : null;
+  }
+
+  /** Site whose visible label box (badge and name) holds a client point, or -1. */
+  private labelAt(clientX: number, clientY: number): number {
+    const host = this.renderer.domElement.parentElement;
+    if (host === null) return -1;
+    for (const el of host.querySelectorAll<HTMLElement>('.site-label[data-site]')) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) continue;
+      return Number(el.dataset.site);
+    }
+    return -1;
+  }
+
+  /** The nearest drawn vehicle within `radiusPx`, moving or standing, or -1. */
+  private vehicleNearAny(px: number, py: number, rect: DOMRect, radiusPx: number): number {
+    const moving = this.vehicleNear(px, py, rect, radiusPx, true);
+    return moving >= 0 ? moving : this.vehicleNear(px, py, rect, radiusPx, false);
   }
 
   /**
