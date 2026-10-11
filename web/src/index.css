@@ -69,6 +69,90 @@ h2 {
 }
 
 /*
+ * Scroll bars: only the bar itself, nothing else. No track, no track
+ * background, no arrows, no corner square — a thin bar (6 px, in a 10 px
+ * strip so it is easy to grab) with the same 45 degree cut corners as the
+ * windows, vertical and horizontal alike. Hairline grey at rest; PetroGrid
+ * blue while the pointer is over it or dragging it, and while the content is
+ * moving (ui/scrollState.ts sets [data-scrolling] on a scrolling element).
+ *
+ * This styles the browser's own scroll bar, so every scrolling area gets it
+ * with no markup: window bodies, lists, the flow diagram's sideways scroll,
+ * menus, the page. clip-path does not apply to a scroll bar's parts, so the
+ * cut corners are four corner gradients. Colours are literal: custom
+ * properties do not reach these pseudo-elements reliably.
+ */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-track-piece,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+  border: 0;
+}
+
+*::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+*::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  min-width: 32px;
+  /* 2 px of clear strip either side of the 6 px bar: a bigger target than the bar */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  background-origin: padding-box;
+  background-repeat: no-repeat;
+  background-size: 51% 51%;
+  background-position: top left, top right, bottom right, bottom left;
+  background-image:
+    linear-gradient(135deg, transparent 1.5px, #cdd2d7 0),
+    linear-gradient(225deg, transparent 1.5px, #cdd2d7 0),
+    linear-gradient(315deg, transparent 1.5px, #cdd2d7 0),
+    linear-gradient(45deg, transparent 1.5px, #cdd2d7 0);
+}
+
+*::-webkit-scrollbar-thumb:hover,
+*::-webkit-scrollbar-thumb:active,
+[data-scrolling]::-webkit-scrollbar-thumb {
+  background-image:
+    linear-gradient(135deg, transparent 1.5px, #1764d6 0),
+    linear-gradient(225deg, transparent 1.5px, #1764d6 0),
+    linear-gradient(315deg, transparent 1.5px, #1764d6 0),
+    linear-gradient(45deg, transparent 1.5px, #1764d6 0);
+}
+
+/*
+ * Firefox has no scroll bar pseudo-elements: the nearest it offers is a thin
+ * bar on a transparent track, in the same two colours. (Chromium must not
+ * see these properties — it would drop the styling above in their favour.)
+ */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #cdd2d7 transparent;
+  }
+
+  [data-scrolling] {
+    scrollbar-color: #1764d6 transparent;
+  }
+}
+
+/*
+ * A scrolling area that must not jump sideways when its bar appears keeps
+ * the bar's strip reserved from the start.
+ */
+.scroll-steady {
+  scrollbar-gutter: stable;
+}
+
+/*
  * Windows and the cards inside them have no rounded corners: each corner is
  * cut off at 45 degrees, the same distance along x and y, small enough that
  * the shape still reads as a rectangle — an echo of the hexagon buttons.

@@ -130,7 +130,8 @@ export function DraggableWindow({
           ✕
         </button>
       </header>
-      <div className="min-h-0 flex-1 overflow-auto">{children}</div>
+      {/* the window body scrolls; its bar's strip is reserved, so content never jumps when the bar appears */}
+      <div className="scroll-steady min-h-0 flex-1 overflow-auto" data-testid={`window-${id}-body`}>{children}</div>
       </div>
     </section>
   );
