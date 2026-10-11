@@ -20,7 +20,6 @@ namespace json = nlohmann;
 
 namespace {
 
-constexpr const char* kRoomWorld = R"({"seed":42,"world":"erwin-world-v1"})";
 constexpr size_t kMaxPlayers = 40;
 constexpr double kMinSpeed = 0.1, kMaxSpeed = 64.0;
 constexpr int kBeatMs = 50;
@@ -222,9 +221,14 @@ void runClock(Room* room, std::atomic<bool>* stop) {
 }
 }  // namespace
 
-std::shared_ptr<Room> RoomRegistry::create() {
+std::shared_ptr<Room> RoomRegistry::create(const std::string& world) {
   reapExpired();
-  crx_sim* sim = crx_create(kRoomWorld);
+  // A plain name only: it becomes a file name in the worlds directory.
+  if (world.empty() || world.size() > 64) return nullptr;
+  for (const char c : world)
+    if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_')) return nullptr;
+  const std::string config = json::json{{"seed", 42}, {"world", world}}.dump();
+  crx_sim* sim = crx_create(config.c_str());
   if (sim == nullptr) return nullptr;
   std::shared_ptr<Room> victim;
   std::shared_ptr<Room> room;
@@ -243,6 +247,8 @@ std::shared_ptr<Room> RoomRegistry::create() {
       code = randomCode();
     } while (rooms_.count(code) != 0);
     room = std::make_shared<Room>(code, randomToken(), sim);
+    room->world = world;
+    room->config = config;
     room->lastUsed = nowFn_().time_since_epoch().count();
     rooms_.emplace(code, room);
   }
@@ -281,10 +287,17 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
         return sendJson(res, 200, no(got.empty() ? "Enter the host password" : "That host password is not right"));
       }
     }
-    const std::shared_ptr<Room> room = rooms.create();
-    if (!room) return sendJson(res, 500, no("The world could not be built"));
+    const json::json b = body(req);
+    if (b.contains("world") && !b["world"].is_string())
+      return sendJson(res, 200, no("Name the world as text"));
+    const std::string world = b.contains("world") ? b["world"].get<std::string>() : "erwin-world-v1";
+    const std::shared_ptr<Room> room = rooms.create(world);
+    if (!room)
+      return b.contains("world") ? sendJson(res, 200, no("There is no world called " + world))
+                                 : sendJson(res, 500, no("The world could not be built"));
     if (rooms.runClocks()) room->startClock();
-    sendJson(res, 200, json::json{{"code", room->code}, {"hostToken", room->hostToken}}.dump());
+    sendJson(res, 200,
+             json::json{{"code", room->code}, {"hostToken", room->hostToken}, {"world", room->world}}.dump());
   });
 
   svr.Get("/api/room/" + code, [&rooms, room404](const Req& req, Res& res) {
@@ -313,6 +326,7 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
     }
     sendJson(res, 200,
              json::json{{"code", room->code},
+                        {"world", room->world},
                         {"phase", phaseName(room->phase)},
                         {"tick", room->tick},
                         {"speed", room->speed},
@@ -535,14 +549,16 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
     crx_sim* with = nullptr;
     std::vector<std::pair<uint64_t, std::string>> commands;
     uint64_t now = 0;
+    std::string config;
     {
       std::lock_guard<std::mutex> lock(room->mutex);
+      config = room->config;
       with = crx_fork(room->sim);
       commands = room->commands;
       now = room->tick;
     }
     std::string doc;
-    if (with == nullptr || !forecastJson(with, kRoomWorld, commands, now, static_cast<uint32_t>(days), doc))
+    if (with == nullptr || !forecastJson(with, config, commands, now, static_cast<uint32_t>(days), doc))
       return sendJson(res, 500, no("The forecast could not be computed"));
     sendJson(res, 200, doc);
   });

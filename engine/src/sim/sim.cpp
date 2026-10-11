@@ -107,6 +107,13 @@ std::unique_ptr<Sim> Sim::createOn(std::shared_ptr<World> world, uint64_t seed) 
   if (mk.min_lot_cap_frac >= 0) mp.min_lot_cap_frac = mk.min_lot_cap_frac;
   if (mk.min_lot_target_frac >= 0) mp.min_lot_target_frac = mk.min_lot_target_frac;
   if (mk.dispatch_urgency_boost_h >= 0) mp.dispatch_urgency_boost_h = mk.dispatch_urgency_boost_h;
+  if (mk.price_aware_buying >= 0) mp.price_aware_buying = mk.price_aware_buying > 0;
+  if (mk.price_cheap_ratio >= 0) mp.price_cheap_ratio = mk.price_cheap_ratio;
+  if (mk.price_dear_ratio >= 0) mp.price_dear_ratio = mk.price_dear_ratio;
+  if (mk.price_cheap_fill >= 0) mp.price_cheap_fill = mk.price_cheap_fill;
+  if (mk.price_dear_fill >= 0) mp.price_dear_fill = mk.price_dear_fill;
+  if (mk.price_cheap_cover >= 0) mp.price_cheap_cover = mk.price_cheap_cover;
+  if (mk.price_dear_cover >= 0) mp.price_dear_cover = mk.price_dear_cover;
   if (mk.max_lots_per_tank >= 1)
     mp.max_lots_per_tank = static_cast<uint32_t>(std::min(mk.max_lots_per_tank, 100000.0));
   sim->signals.assign(w.tanks.size(), TankSignals{});

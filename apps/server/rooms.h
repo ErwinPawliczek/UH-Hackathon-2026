@@ -50,6 +50,8 @@ class Room {
   Room& operator=(const Room&) = delete;
 
   const std::string code, hostToken;
+  std::string world;   // the world file's name; set once at creation
+  std::string config;  // the engine config the run was built from
 
   // Everything below is guarded by `mutex`; the clock thread takes it only
   // for the few microseconds a step takes.
@@ -100,7 +102,8 @@ class RoomRegistry {
 
   // A new room on the default world, paused at tick 0. Null when the engine
   // could not build the world.
-  std::shared_ptr<Room> create();
+  // `world` names a file in the worlds directory (letters, digits, - and _).
+  std::shared_ptr<Room> create(const std::string& world = "erwin-world-v1");
   std::shared_ptr<Room> find(const std::string& code);
   void reapExpired();
   size_t size() const;

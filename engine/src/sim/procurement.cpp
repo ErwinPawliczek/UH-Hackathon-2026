@@ -200,8 +200,12 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
     if (tk.role != TankRole::Feed && tk.role != TankRole::Both) continue;
 
     const double u = tk.export_buy ? params.export_urgency : signals[t].u;
-    if (u <= 0.0) continue;
-    const double target = tk.target_frac * tk.capacity_t;
+    // A price-aware buyer may order with cover to spare when the price is
+    // good, and up to a fuller tank; the lot loop decides once it has a quote.
+    const bool aware = params.price_aware_buying && !tk.export_buy;
+    if (u <= 0.0 && !aware) continue;
+    const double fill = aware ? std::max(tk.target_frac, params.price_cheap_fill) : tk.target_frac;
+    const double target = fill * tk.capacity_t;
     const double want = target - (ts.level_t + ts.inbound_t);
     if (want <= 0.0) continue;
     requests.push_back({static_cast<uint32_t>(t), u, want});
@@ -227,7 +231,7 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
       // strictly lower cost replaces the incumbent).
       struct Candidate {
         uint32_t seller_tank, cls;
-        double cost, price, freight_usd, eta_h, km;
+        double cost, price, freight_usd, eta_h, km, ask;
       };
       Candidate best{};
       bool found = false;
@@ -246,12 +250,44 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
           if (!found || q.cost < best.cost) {
             best = {static_cast<uint32_t>(s), static_cast<uint32_t>(cls), q.cost,
                     (q.ask + q.bid) / 2.0,
-                    q.lot_t * catalog.vehicle_classes[cls].freight * q.km, q.eta_h, q.km};
+                    q.lot_t * catalog.vehicle_classes[cls].freight * q.km, q.eta_h, q.km, q.ask};
             found = true;
           }
         }
       }
 
+      if (!found && req.urgency <= 0.0) break;  // an early look at prices, not a need
+      if (found && lot == 0 && params.price_aware_buying && !buyer.export_buy) {
+        // Price-aware buying: how cheap or dear is the best offer, from -1
+        // (dear) to +1 (cheap), smooth around par.
+        const TankState& bs = state.tank[req.tank];
+        const double base = catalog.materials[buyer.material].base_price;
+        const double ratio = base > 0.0 ? best.ask / base : 1.0;
+        const auto smooth = [](double x) {
+          x = std::clamp(x, 0.0, 1.0);
+          return x * x * (3.0 - 2.0 * x);
+        };
+        const double cheap = ratio <= 1.0
+                                 ? smooth((1.0 - ratio) / std::max(1e-6, 1.0 - params.price_cheap_ratio))
+                                 : -smooth((ratio - 1.0) / std::max(1e-6, params.price_dear_ratio - 1.0));
+        const double cover = std::max(0.0, bs.level_t + bs.inbound_t) / buyer.design_out_t_h /
+                             (bs.lead_time_h * bs.caution);  // in lead times
+        if (cover >= 1.0) {  // under one lead time: buy at any price, as ever
+          const double mix = std::abs(cheap);
+          const double limit =
+              2.5 + mix * ((cheap > 0 ? params.price_cheap_cover : params.price_dear_cover) - 2.5);
+          if (cover >= limit) break;  // comfortable at this price: wait
+          const double fill =
+              buyer.target_frac +
+              mix * ((cheap > 0 ? std::max(buyer.target_frac, params.price_cheap_fill)
+                                : std::min(buyer.target_frac, params.price_dear_fill)) -
+                     buyer.target_frac);
+          want = fill * buyer.capacity_t - (bs.level_t + bs.inbound_t);
+        } else {
+          want = buyer.target_frac * buyer.capacity_t - (bs.level_t + bs.inbound_t);
+        }
+        if (want <= 1e-6) break;
+      }
       if (!found) {
         // A lot with no candidate stays open and pushes the material's
         // price index up (§5.6).

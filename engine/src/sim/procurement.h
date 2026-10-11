@@ -43,6 +43,19 @@ struct MarketParams {
   // come first served, with urgency worth a head start of at most this
   // many hours (sort key = created − urgency x boost).
   double dispatch_urgency_boost_h = -1.0;
+
+  // --- Market behaviour, all off unless the world file switches it on. ---
+  // Price-aware buying: a buyer compares the best ask it is offered with the
+  // material's base price. Cheap (ratio <= price_cheap_ratio): it orders
+  // while its cover is still long (up to price_cheap_cover lead times) and
+  // fills to price_cheap_fill of the tank. Dear (>= price_dear_ratio): it
+  // waits until cover is down to price_dear_cover lead times and fills only
+  // to price_dear_fill. Smooth in between; at par, and whenever cover is
+  // under one lead time, it buys exactly as without the switch.
+  bool price_aware_buying = false;
+  double price_cheap_ratio = 0.9, price_dear_ratio = 1.1;
+  double price_cheap_fill = 0.9, price_dear_fill = 0.5;
+  double price_cheap_cover = 4.0, price_dear_cover = 1.5;
 };
 
 // One way of filling a lot: a seller tank and a vehicle class, priced as the

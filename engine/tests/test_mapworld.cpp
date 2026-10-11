@@ -2538,3 +2538,54 @@ TEST_CASE("M32: a hurricane slows the roads and a water restriction holds barges
     moving += modeOf(v) != Mode::Road && sim->state().vehicle[v].status != VehStatus::Idle ? 1 : 0;
   CHECK(moving > 0);  // and they sail again
 }
+
+// --- Market behaviour (world erwin-market-v1: the switches on) ---------------
+
+namespace {
+std::unique_ptr<Sim> makeMarketSim() {
+  std::string error;
+  auto sim = Sim::createFromConfig(R"({"seed":42,"world":"erwin-market-v1"})", error);
+  REQUIRE_MESSAGE(sim != nullptr, "createFromConfig failed: " << error);
+  return sim;
+}
+}  // namespace
+
+TEST_CASE("M33: price-aware buyers defer when the only seller is dear and stock up when it is cheap") {
+  auto plain = makeMarketSim();
+  auto dear = makeMarketSim();
+  auto cheap = makeMarketSim();
+  REQUIRE(plain->marketParams().price_aware_buying);
+  CHECK(!makeMapSim()->marketParams().price_aware_buying);  // off in the default world
+  const World& w = plain->world();
+  const int pe = w.findSite("POLYETHYLENE");
+  REQUIRE(pe >= 0);
+  for (Sim* s : {plain.get(), dear.get(), cheap.get()}) s->step(96 * 5);
+  REQUIRE(json::parse(dear->command(R"({"type":"set_price","site":"POLYETHYLENE","markup":0.3})")).at("ok") == true);
+  REQUIRE(json::parse(cheap->command(R"({"type":"set_price","site":"POLYETHYLENE","markup":-0.2})")).at("ok") == true);
+  const auto sold = [&](const Sim& s) { return s.state().site_trade[static_cast<size_t>(pe)].sold_t; };
+  const auto ordered = [&](const Sim& s) {
+    double t = 0;
+    for (const Order& o : s.state().order)
+      if (w.tanks[o.from].site.v == static_cast<uint32_t>(pe)) t += o.qty_t;
+    return t;
+  };
+  const auto stock = [&](const Sim& s) {
+    for (size_t t = 0; t < w.tanks.size(); ++t)
+      if (w.tanks[t].site.v == static_cast<uint32_t>(pe) && w.tanks[t].role == TankRole::Product)
+        return s.state().tank[t].level_t / w.tanks[t].capacity_t;
+    return 0.0;
+  };
+  const double sold0 = sold(*plain), ordered0 = ordered(*plain);
+  for (Sim* s : {plain.get(), dear.get(), cheap.get()}) s->step(96 * 20);
+  const double base_sold = sold(*plain) - sold0;
+  MESSAGE("PE sold over 20 days: plain " << base_sold << " t, +30% " << (sold(*dear) - sold0)
+                                         << " t, -20% " << (sold(*cheap) - sold0) << " t; PE tank fill plain "
+                                         << stock(*plain) << ", +30% " << stock(*dear) << ", -20% " << stock(*cheap));
+  CHECK(ordered(*dear) - ordered0 < 0.97 * (ordered(*plain) - ordered0));
+  CHECK(sold(*dear) - sold0 < base_sold);
+  CHECK(stock(*dear) > stock(*plain));
+  CHECK(ordered(*cheap) - ordered0 > 1.02 * (ordered(*plain) - ordered0));
+  CHECK(stock(*cheap) < stock(*plain));
+  // The customers are still served while they wait for a better price.
+  CHECK(dear->state().cum_unmet_t == doctest::Approx(plain->state().cum_unmet_t).epsilon(0.02));
+}

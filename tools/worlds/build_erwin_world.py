@@ -8,6 +8,8 @@ which sites have river and sea berths, and the fleet. Rates are closed forward
 from the three sources so that every tonne made has somewhere to go.
 
 Run from the repository root:  python3 tools/worlds/build_erwin_world.py
+With --market it writes erwin-market-v1.json instead: the same world with the
+market switches on.
 """
 import heapq
 import json
@@ -44,6 +46,11 @@ MARKET = {"min_lot_cap_frac": 0.8, "min_lot_target_frac": 0.4, "max_lots_per_tan
           # No supplier contracts in this world, so a charge for "switching supplier" would
           # sit on every option equally and only confuse the Supply options view.
           "switch_cost_frac": 0.0}
+
+# The market world (--market): the same world with the engine's market
+# behaviour switched on. Written to erwin-market-v1.json; erwin-world-v1.json
+# never carries these keys.
+MARKET_SWITCHES = {"price_aware_buying": True}
 
 MERGE_KM = 4.0
 ATTACH_KM = 12.0
@@ -231,6 +238,10 @@ def build_graph(layout, mode, site_xy):
 
 
 def main():
+    market_world = "--market" in sys.argv[1:]
+    name = "erwin-market-v1" if market_world else "erwin-world-v1"
+    out_path = OUT.with_name(name + ".json")
+    market = dict(MARKET, **MARKET_SWITCHES) if market_world else MARKET
     layout = json.loads(LAYOUT.read_text())
     r = balance()
     k = SINK_SHARE
@@ -462,13 +473,13 @@ def main():
                       "processes": procs, "tanks": tanks})
 
     network = [s for s in layout["network"] if s["mode"] in ("road", "river", "sea")]
-    world = {"format": 1, "name": "erwin-world-v1", "wKm": layout["wKm"], "hKm": layout["hKm"],
+    world = {"format": 1, "name": name, "wKm": layout["wKm"], "hKm": layout["hKm"],
              "cellKm": layout["cellKm"], "water": layout["water"], "sites": sites,
              "pipelines": pipelines, "network": network, "fleet": fleet,
-             "contracts": [], "stranded_materials": [], "market": MARKET,
+             "contracts": [], "stranded_materials": [], "market": market,
              "warm_start": True, "smooth_km": SMOOTH_KM}
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(world, separators=(",", ":")) + "\n")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(world, separators=(",", ":")) + "\n")
 
     # ---------------- report ----------------
     p = lambda *a: print(*a)
@@ -486,7 +497,7 @@ def main():
     p("total vehicles:", sum(f["count"] for f in fleet))
     for mode in modes:
         p(f"{mode}: {len(attached[mode])} sites attached")
-    p(f"wrote {OUT.relative_to(ROOT)} ({OUT.stat().st_size // 1024} kB)")
+    p(f"wrote {out_path.relative_to(ROOT)} ({out_path.stat().st_size // 1024} kB)")
 
 
 if __name__ == "__main__":
