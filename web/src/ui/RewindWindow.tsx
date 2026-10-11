@@ -183,7 +183,11 @@ export function RewindWindow() {
 
         <div>
           <p className="label mb-1">Go to just before an event</p>
-          <ul className="data divide-y divide-line rounded-sm border border-line bg-white" data-testid="rewind-events">
+          <div
+            className="chamfer chamfer-sm"
+            style={{ '--chamfer-fill': 'var(--white)', '--chamfer-line': 'var(--line)' } as React.CSSProperties}
+          >
+            <ul className="chamfer-body data divide-y divide-line" data-testid="rewind-events">
             {rows.map((e) => (
               <li key={e.seq}>
                 <button
@@ -199,7 +203,8 @@ export function RewindWindow() {
               </li>
             ))}
             {rows.length === 0 && <li className="px-2 py-2 text-muted">Nothing but routine deliveries so far.</li>}
-          </ul>
+            </ul>
+          </div>
         </div>
       </div>
     </DraggableWindow>
