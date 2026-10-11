@@ -77,11 +77,27 @@ bool queueEvent(const World& world, const std::string& body, State& state, std::
 
   EventDef def;
   uint64_t duration_h = 0;
+  // unit_outage names its unit by key within the site ('unit') or by the
+  // unit's own index in the world ('unit_index', the index the world JSON
+  // gives each unit). The index is the one that is always unambiguous: a
+  // site can hold several units with the same key (the fuel depot's four
+  // demand blocks are all FD-OUT), and the key picks the first.
+  int unit_by_index = -1;
   if (type == "unit_outage") {
     def.type = EventDef::Type::UnitOutage;
-    if (!j.contains("unit") || !j["unit"].is_string() || !j.contains("trains") ||
+    const bool has_key = j.contains("unit") && j["unit"].is_string();
+    if (j.contains("unit_index")) {
+      if (!j["unit_index"].is_number_unsigned() ||
+          j["unit_index"].get<uint64_t>() >= world.units.size()) {
+        error = "unit_outage: 'unit_index' must be a unit index from 0 to " +
+                std::to_string(world.units.empty() ? 0 : world.units.size() - 1);
+        return false;
+      }
+      unit_by_index = static_cast<int>(j["unit_index"].get<uint64_t>());
+    }
+    if ((!has_key && unit_by_index < 0) || !j.contains("trains") ||
         !j["trains"].is_number_unsigned()) {
-      error = "unit_outage: need 'unit' (key) and 'trains'";
+      error = "unit_outage: need 'unit' (key) or 'unit_index', and 'trains'";
       return false;
     }
     def.trains = j["trains"].get<uint32_t>();
@@ -126,6 +142,9 @@ bool queueEvent(const World& world, const std::string& body, State& state, std::
     // An edge break needs no site; the log files it under the site nearest
     // the edge's first end.
     def.site = nearestSite(world, world.edges[def.edge].a);
+  } else if (unit_by_index >= 0 && !j.contains("site")) {
+    // A unit named by index brings its own site.
+    def.site = world.processes[world.units[static_cast<size_t>(unit_by_index)].process.v].site.v;
   } else {
     if (!j.contains("site")) {
       error = "event: missing 'site'";
@@ -138,8 +157,17 @@ bool queueEvent(const World& world, const std::string& body, State& state, std::
     }
     def.site = static_cast<uint32_t>(site);
   }
-  if (j.contains("unit") && j["unit"].is_string())
+  if (unit_by_index >= 0) {
+    // The index wins over a key; with a site given it must be that site's unit.
+    if (world.processes[world.units[static_cast<size_t>(unit_by_index)].process.v].site.v != def.site) {
+      error = "unit_outage: unit " + std::to_string(unit_by_index) + " is not at " +
+              world.sites[def.site].key;
+      return false;
+    }
+    def.unit = unit_by_index;
+  } else if (j.contains("unit") && j["unit"].is_string()) {
     def.unit = resolveUnit(world, static_cast<int>(def.site), j["unit"].get<std::string>());
+  }
   if (j.contains("multiplier") && j["multiplier"].is_number())
     def.multiplier = j["multiplier"].get<double>();
   if (j.contains("duration_h") && j["duration_h"].is_number())
@@ -173,8 +201,9 @@ void applyOutage(const World& world, State& state, Recorder& rec, const EventDef
     const ProcessType& type =
         world.catalog.process_types[world.processes[unit.process.v].type];
     takeDown(world, state, static_cast<uint32_t>(def.unit), def.trains, def.end_tick);
+    // Process and unit both: several units at a site can share a name.
     logEvent(rec, state.tick, "unit_failed", site.key, type.units[unit.slot].key,
-             site.name + ": " + type.units[unit.slot].name + " failed (" +
+             site.name + ": " + type.name + ", " + type.units[unit.slot].name + " failed (" +
                  std::to_string(def.trains) + " train(s) down)");
     return;
   }
@@ -201,7 +230,7 @@ void expireOutage(const World& world, State& state, Recorder& rec, const EventDe
       us.trains_down = 0;
       us.back_at_tick = 0;
       logEvent(rec, state.tick, "unit_repaired", site.key, type.units[unit.slot].key,
-               site.name + ": " + type.units[unit.slot].name + " repaired");
+               site.name + ": " + type.name + ", " + type.units[unit.slot].name + " repaired");
     }
 }
 
@@ -329,7 +358,7 @@ void stepEvents(const World& world, State& state, Recorder& rec) {
     us.back_at_tick = 0;
     const Site& site = world.sites[world.processes[unit.process.v].site.v];
     logEvent(rec, state.tick, "unit_repaired", site.key, type.units[unit.slot].key,
-             site.name + ": " + type.units[unit.slot].name + " repaired");
+             site.name + ": " + type.name + ", " + type.units[unit.slot].name + " repaired");
   }
 
   // Optional random failures (§5.9): Bernoulli per tick at trains·dt/mtbf.
@@ -347,7 +376,9 @@ void stepEvents(const World& world, State& state, Recorder& rec) {
                  state.tick + static_cast<uint64_t>(mttr / kTickHours));
         const Site& site = world.sites[world.processes[unit.process.v].site.v];
         logEvent(rec, state.tick, "unit_failed", site.key, slot.key,
-                 site.name + ": " + slot.name + " failed (random)");
+                 site.name + ": " +
+                     world.catalog.process_types[world.processes[unit.process.v].type].name +
+                     ", " + slot.name + " failed (random)");
       }
     }
   }

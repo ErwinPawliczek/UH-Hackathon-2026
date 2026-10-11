@@ -1515,3 +1515,81 @@ TEST_CASE("M18: with the flag absent or false the run is the same run") {
   CHECK(off->state().order.size() == plain->state().order.size());
   CHECK(off->stateHash() == plain->stateHash());
 }
+
+TEST_CASE("M19: unit_outage by unit index takes down exactly the unit asked for") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  const World& w = sim->world();
+  const auto send = [&](const json& cmd) { return json::parse(sim->command(cmd.dump())); };
+
+  // The fuel depot's four demand blocks share one unit key.
+  const auto unitOf = [&](const char* process_key) {
+    for (uint32_t u = 0; u < w.units.size(); ++u)
+      if (w.catalog.process_types[w.processes[w.units[u].process.v].type].key == process_key) return u;
+    return static_cast<uint32_t>(w.units.size());
+  };
+  const uint32_t jet = unitOf("FUEL_DEPOT_JET"), gasoline = unitOf("FUEL_DEPOT_GASOLINE");
+  const uint32_t diesel = unitOf("FUEL_DEPOT_DIESEL"), lpg = unitOf("FUEL_DEPOT_LPG");
+  REQUIRE(jet < w.units.size());
+  REQUIRE(gasoline < w.units.size());
+  const auto keyOf = [&](uint32_t u) {
+    return w.catalog.process_types[w.processes[w.units[u].process.v].type].units[w.units[u].slot].key;
+  };
+  REQUIRE(keyOf(jet) == keyOf(gasoline));  // which is why the key cannot tell them apart
+  REQUIRE(jet != gasoline);
+
+  sim->step(96);
+  // By key the first match goes down, as before: not the jet block.
+  REQUIRE(send({{"type", "unit_outage"}, {"site", "FUEL_DEPOT"}, {"unit", keyOf(jet)},
+                {"trains", 1}, {"duration_h", 2}})
+              .at("ok") == true);
+  sim->step(1);
+  const uint32_t first = std::min({jet, gasoline, diesel, lpg});
+  CHECK(sim->state().unit[first].trains_down == 1);
+  sim->step(16);  // repaired
+  for (const uint32_t u : {jet, gasoline, diesel, lpg}) CHECK(sim->state().unit[u].trains_down == 0);
+
+  // By index, with no site: exactly the jet block, for two days.
+  REQUIRE(send({{"type", "unit_outage"}, {"unit_index", jet}, {"trains", 1}, {"duration_h", 48}})
+              .at("ok") == true);
+  sim->step(1);
+  CHECK(sim->state().unit[jet].trains_down == 1);
+  for (const uint32_t u : {gasoline, diesel, lpg}) CHECK(sim->state().unit[u].trains_down == 0);
+  const uint32_t jet_proc = w.units[jet].process.v, gasoline_proc = w.units[gasoline].process.v;
+  sim->step(8);
+  CHECK(sim->state().proc[jet_proc].rate_t_h == 0.0);       // the jet customers are off
+  CHECK(sim->state().proc[gasoline_proc].rate_t_h > 0.0);   // gasoline is not
+  // The log names the process as well as the unit, so the four read apart.
+  bool named = false;
+  for (const LogEntry& e : sim->recorder().log)
+    if (e.type == "unit_failed" && e.tick == sim->state().tick - 8 &&
+        e.text.find("City jet fuel demand") != std::string::npos &&
+        e.text.find(w.catalog.process_types[w.processes[jet_proc].type].units[w.units[jet].slot].name) !=
+            std::string::npos)
+      named = true;
+  CHECK(named);
+  sim->step(48 * 4);
+  CHECK(sim->state().unit[jet].trains_down == 0);  // and it comes back
+  bool repaired = false;
+  for (const LogEntry& e : sim->recorder().log)
+    if (e.type == "unit_repaired" && e.text.find("City jet fuel demand") != std::string::npos)
+      repaired = true;
+  CHECK(repaired);
+
+  // The index wins over a key, and must belong to the site when one is named.
+  REQUIRE(send({{"type", "unit_outage"}, {"site", "FUEL_DEPOT"}, {"unit", "NO-SUCH-UNIT"},
+                {"unit_index", jet}, {"trains", 1}, {"duration_h", 1}})
+              .at("ok") == true);
+  sim->step(1);
+  CHECK(sim->state().unit[jet].trains_down == 1);
+  const json wrong_site = send({{"type", "unit_outage"}, {"site", "REFINERY"}, {"unit_index", jet},
+                                {"trains", 1}, {"duration_h", 1}});
+  CHECK(wrong_site.at("ok") == false);
+  CHECK(wrong_site.at("error").get<std::string>().find("is not at REFINERY") != std::string::npos);
+  // Bad indexes and a missing unit are refused with a reason.
+  CHECK(send({{"type", "unit_outage"}, {"unit_index", w.units.size()}, {"trains", 1}}).at("ok") == false);
+  CHECK(send({{"type", "unit_outage"}, {"unit_index", -1}, {"trains", 1}}).at("ok") == false);
+  CHECK(send({{"type", "unit_outage"}, {"unit_index", "7"}, {"trains", 1}}).at("ok") == false);
+  CHECK(send({{"type", "unit_outage"}, {"site", "FUEL_DEPOT"}, {"trains", 1}}).at("ok") == false);
+  CHECK(send({{"type", "unit_outage"}, {"unit_index", jet}}).at("ok") == false);  // no trains
+}

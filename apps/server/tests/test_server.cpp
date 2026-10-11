@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <set>
 #include <string>
 #include <thread>
 
@@ -497,6 +498,53 @@ TEST_CASE("place_order over HTTP: booked, replayed by a rewind, kept by the fore
   const json f = json::parse(post("/api/sim/" + a + "/forecast", R"({"days":2})").body);
   CHECK(f.at("disruptions") == 0);
   CHECK(f.at("with") == f.at("without"));
+}
+
+TEST_CASE("unit_outage by unit_index: the world JSON's unit index, forgotten by a rewind") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  const auto world = cli.Get("/api/sim/" + id + "/world");
+  REQUIRE(world);
+  // Every unit in the world JSON carries its own index; find the jet block.
+  int jet = -1;
+  std::set<int> seen;
+  const json world_doc = json::parse(world->body);
+  for (const json& site : world_doc.at("sites"))
+    for (const json& proc : site.at("processes"))
+      for (const json& unit : proc.at("units")) {
+        CHECK(seen.insert(unit.at("index").get<int>()).second);  // no two units share one
+        if (proc.at("key") == "FUEL_DEPOT_JET") jet = unit.at("index").get<int>();
+      }
+  REQUIRE(jet >= 0);
+  const auto post = [&cli](const std::string& path, const std::string& body) {
+    auto res = cli.Post(path, body, "application/json");
+    REQUIRE(res);
+    return *res;
+  };
+  post("/api/sim/" + id + "/step", R"({"ticks":96})");
+  const std::string outage =
+      json{{"type", "unit_outage"}, {"unit_index", jet}, {"trains", 1}, {"duration_h", 240}}.dump();
+  CHECK(json::parse(post("/api/sim/" + id + "/command", outage).body).at("ok") == true);
+  post("/api/sim/" + id + "/step", R"({"ticks":8})");
+  const auto events = cli.Get("/api/sim/" + id + "/events?since=0");
+  REQUIRE(events);
+  int failures = 0;
+  for (const json& e : json::parse(events->body))
+    if (e.at("type") == "unit_failed") {
+      ++failures;
+      CHECK(e.at("text").get<std::string>().find("City jet fuel demand") != std::string::npos);
+    }
+  CHECK(failures == 1);
+
+  // It is a disruption like any other: the forecast counts it, a rewind forgets it.
+  CHECK(json::parse(post("/api/sim/" + id + "/forecast", R"({"days":5})").body).at("disruptions") == 1);
+  REQUIRE(post("/api/sim/" + id + "/rewind", R"({"tick":96})").status == 200);
+  post("/api/sim/" + id + "/step", R"({"ticks":8})");
+  const auto after = cli.Get("/api/sim/" + id + "/events?since=0");
+  REQUIRE(after);
+  for (const json& e : json::parse(after->body)) CHECK(e.at("type") != "unit_failed");
+  CHECK(json::parse(post("/api/sim/" + id + "/forecast", R"({"days":5})").body).at("disruptions") == 0);
 }
 
 TEST_CASE("world json: fleet manifest without a fabricated shuttle schedule") {
