@@ -1728,7 +1728,7 @@ function header(x0, width, page) {
     const inner = b.icon === "play" ? `<path class="hb-icon-fill" d="M${cx - 5} ${cy - 8}L${cx + 8} ${cy}L${cx - 5} ${cy + 8}Z"/>`
       : b.icon === "out" ? `<path class="hb-icon" d="M${cx - 6} ${cy + 6}L${cx + 6} ${cy - 6}M${cx - 2} ${cy - 6}H${cx + 6}V${cy + 2}"/>`
       : `<text class="hb-text" x="${cx}" y="${cy}" text-anchor="middle" dy="0.35em">${b.label}</text>`;
-    return `<a href="${b.href}"${b.external ? ' target="_blank" rel="noopener"' : ""} aria-label="${b.aria}"${b.current ? ' aria-current="page"' : ""}><g class="hb hb-${b.variant}">${fill}<path class="hb-edge" d="${outline(b.cells, x0)}"/>${inner}</g></a>`;
+    return `<a href="${b.href}" aria-label="${b.aria}"${b.current ? ' aria-current="page"' : ""}><g class="hb hb-${b.variant}">${fill}<path class="hb-edge" d="${outline(b.cells, x0)}"/>${inner}</g></a>`;
   };
   const nav = btn(N.demo);
   return `<g class="site-head">${mark}${name}${nav}</g>`;
