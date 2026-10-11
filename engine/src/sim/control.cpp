@@ -112,10 +112,12 @@ void stepControl(const World& world, State& state, const std::vector<TankSignals
       // Source path: supply curve × shock, throttled by product-room signal.
       const double shock = shockFactor(state, proc.site.v, EventDef::Type::SupplyShock);
       double target = proc.design_rate_t_h * scheduleFactor(world, proc, state.tick) * shock;
-      if (computeRMax(world, proc, state) <= kRateEps) target = 0.0;  // units down
+      const double source_max = computeRMax(world, proc, state);
+      if (source_max <= kRateEps) target = 0.0;  // units down
       for (const TankId t : views[p].products) target *= signals[t.v].h;
       ps.status = ProcStatus::Running;
       ps.rate_t_h = rampToward(ps.rate_t_h, target, proc.design_rate_t_h, type.ramp_per_h, dt_h);
+      if (ps.rate_t_h > source_max) ps.rate_t_h = source_max;  // lost trains cap it at once
       d = {ps.rate_t_h, ps.status, target, 1.0, target};
       continue;
     }
@@ -216,6 +218,11 @@ void stepControl(const World& world, State& state, const std::vector<TankSignals
         logEvent(rec, state.tick, "process_restart", site.key, type.key,
                  site.name + ": " + type.name + " restarted at minimum rate");
     }
+
+    // A plant cannot pass more than its online trains allow. The ramp limits
+    // how fast the rate follows the governor; a lost train is a physical cap
+    // and takes effect at once.
+    if (ps.rate_t_h > r_max) ps.rate_t_h = r_max;
 
     d = {ps.rate_t_h, ps.status, r_max, g, desired};
   }
