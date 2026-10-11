@@ -12,8 +12,8 @@ import { loadSeat, saveSeat, type Seat } from './playLogic';
 
 /** Real milliseconds between polls of the scores. */
 export const SCORES_MS = 1000;
-/** Control changes go out at most twice a second. */
-export const SEND_MS = 500;
+/** Control changes go out a few times a second. */
+export const SEND_MS = 150;
 
 export interface PlayState {
   code: string | null;

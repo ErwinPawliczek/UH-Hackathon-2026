@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import type { WorldSpec } from '../engine/world';
 import { useSim } from '../store/sim';
-import { siteOwners } from '../store/roomTypes';
+import { siteOwners, siteOwnerColors, ownedName } from '../store/roomTypes';
 import { siteBadgeSvg } from '../ui/siteIcons';
 import type { SiteAnchor } from './siteClusters';
 
@@ -67,6 +67,8 @@ export class SiteLabels {
   /** The owner line of each label, and what it shows now. */
   private readonly owners: HTMLElement[] = [];
   private readonly ownerShown: string[] = [];
+  private readonly titles: HTMLElement[] = [];
+  private readonly siteNames: string[] = [];
   /** The styled box inside each label: badge and name in a row. */
   private readonly boxes: HTMLElement[] = [];
 
@@ -110,6 +112,8 @@ export class SiteLabels {
       name.textContent = '';
       name.append(title, owner);
       this.owners.push(owner);
+      this.titles.push(title);
+      this.siteNames.push(site.name);
       this.ownerShown.push('');
       box.appendChild(name);
       el.appendChild(box);
@@ -149,23 +153,31 @@ export class SiteLabels {
   private syncOwners(): void {
     const st = useSim.getState();
     if (st.room === null && this.ownerShown.every((v) => v === '')) return;
-    const names = siteOwners(st.room, st.world?.sites.length ?? 0);
+    const n = st.world?.sites.length ?? 0;
+    const names = siteOwners(st.room, n);
+    const colors = siteOwnerColors(st.room, n);
     for (let i = 0; i < this.labels.length; i++) {
       const site = this.labelSite[i];
       const mine = st.room !== null && st.mySite === site;
-      const text = st.room === null ? '' : mine ? `${names[site] ?? 'You'} · yours` : names[site] ?? '';
-      const key = `${mine ? '*' : ''}${text}`;
+      const who = st.room === null ? null : names[site] ?? null;
+      const color = who === null ? null : colors[site] ?? '#1764d6';
+      const key = `${mine ? '*' : ''}${who ?? ''}|${color ?? ''}`;
       if (key === this.ownerShown[i]) continue;
       this.ownerShown[i] = key;
+      // the owner comes first, in their colour: "Maya's Oil field"
+      const title = this.titles[i];
+      title.textContent = ownedName(who, this.siteNames[i]);
+      title.style.color = color ?? '';
+      title.style.fontWeight = color === null ? '' : '700';
       const el = this.owners[i];
-      el.textContent = text;
-      el.style.display = text === '' ? 'none' : 'block';
-      el.style.color = mine ? '#0f54ba' : '#5f656c';
-      el.style.fontWeight = mine ? '600' : '500';
+      el.textContent = mine ? 'yours' : '';
+      el.style.display = mine ? 'block' : 'none';
+      el.style.color = color ?? '';
+      el.style.fontWeight = '600';
       const box = this.boxes[i];
-      box.dataset.owned = text === '' ? '' : mine ? 'mine' : 'other';
-      box.style.boxShadow = mine ? '0 0 0 2px #1764d6' : '';
-      box.style.padding = text === '' ? '1px 7px 1px 2px' : '3px 7px 3px 2px';
+      box.dataset.owned = who === null ? '' : mine ? 'mine' : 'other';
+      box.style.boxShadow = color === null ? '' : `0 0 0 ${mine ? 3 : 2}px ${color}`;
+      box.style.padding = mine ? '3px 7px 3px 2px' : '1px 7px 1px 2px';
       this.shown[i] = -1; // the state colours are laid over again below
     }
   }

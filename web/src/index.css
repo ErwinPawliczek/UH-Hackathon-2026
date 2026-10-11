@@ -483,3 +483,9 @@ h2 {
   from { opacity: 1; }
   to { opacity: 0; }
 }
+
+/* Host screen, "Players only": hide the labels of plants nobody runs. */
+:root[data-players-only='1'] .site-label-box:not([data-owned='mine']):not([data-owned='other']),
+:root[data-players-only='1'] .pipeline-labels {
+  display: none !important;
+}

@@ -32,9 +32,12 @@ export function nudgeSpeed(speed: number, dir: 1 | -1): number {
   return clampSpeed(next) ?? speed;
 }
 
-export function SpeedControl() {
-  const speed = useSim((s) => s.speed);
-  const setSpeed = useSim((s) => s.setSpeed);
+/** With `onSet`, the field shows `value` and reports changes instead of driving the local clock (the host of a room). */
+export function SpeedControl({ value, onSet }: { value?: number; onSet?: (speed: number) => void } = {}) {
+  const ownSpeed = useSim((s) => s.speed);
+  const setOwnSpeed = useSim((s) => s.setSpeed);
+  const speed = value ?? ownSpeed;
+  const setSpeed = onSet ?? setOwnSpeed;
   // null while not editing: the field then shows the store's value
   const [draft, setDraft] = useState<string | null>(null);
   // Escape leaves the field too, and that blur must not apply what was typed.

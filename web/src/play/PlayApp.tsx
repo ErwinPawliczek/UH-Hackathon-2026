@@ -9,10 +9,11 @@
 // Mobile first (360 x 740 and up, portrait); every touch target is at least
 // 44 px tall. The map is the app's own SceneCanvas, fed by polling.
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { SceneCanvas } from '../scene/SceneCanvas';
 import { useSim } from '../store/sim';
 import { SiteBadge } from '../ui/SiteIcon';
+import { ownedName, playerColor } from '../store/roomTypes';
 import { Sparkline } from '../ui/charts/Sparkline';
 import { fmtMomentWords } from '../ui/format';
 import { eventLabel } from '../ui/eventKinds';
@@ -22,7 +23,7 @@ import {
 } from './playLogic';
 import { openRoom, roomSource } from '../store/room';
 import { mockRoom, mockRoomWanted } from '../store/roomMock';
-import type { RoomInfo, RoomSite } from '../store/roomTypes';
+import type { RoomInfo } from '../store/roomTypes';
 import { mePlayer, startScoresLoop, usePlay } from './playStore';
 
 type Menu = 'leaderboard' | 'economy' | 'log' | 'how' | null;
@@ -105,7 +106,7 @@ function Sheet({ open, onToggle, peek, children }: { open: boolean; onToggle: ()
   );
 }
 
-/** Screen 2: pick a plant, by tapping the map or from the list. */
+/** Screen 2: pick a plant. One tap on the map or the list asks, in that row, to confirm. */
 function LobbySheet({ room }: { room: RoomInfo }) {
   const world = useSim((s) => s.world);
   const selected = useSim((s) => s.selected);
@@ -115,55 +116,87 @@ function LobbySheet({ room }: { room: RoomInfo }) {
   const error = usePlay((s) => s.error);
   const me = room.players.find((p) => p.id === seat?.playerId) ?? null;
   const [open, setOpen] = useState(true);
+  const [busy, setBusy] = useState(false);
   const nameOf = (id: string | null) => room.players.find((p) => p.id === id)?.name ?? 'someone';
-  const tapped = selected !== null && selected.kind === 'site' ? room.sites.find((s) => s.index === selected.index) : undefined;
+  const asked = selected !== null && selected.kind === 'site' ? selected.index : null;
   const mine = me?.site ?? null;
-  const shown: RoomSite | undefined = tapped ?? room.sites.find((s) => s.index === mine);
-  const free = room.sites.filter((s) => s.playable && s.owner === null);
+  const mySite = room.sites.find((s) => s.index === mine);
+  const plants = room.sites.filter((s) => s.playable);
+  const free = plants.filter((s) => s.owner === null).length;
+  const askedRow = useRef<HTMLLIElement | null>(null);
+  // a tap on the map opens the sheet at that plant's row
+  useEffect(() => {
+    if (asked === null || mine !== null) return;
+    setOpen(true);
+    askedRow.current?.scrollIntoView({ block: 'nearest' });
+  }, [asked, mine]);
+
+  const take = (site: number | null) => {
+    setBusy(true);
+    void claim(site).finally(() => { setBusy(false); select(null); });
+  };
+
+  if (mySite !== undefined && world !== null) {
+    return (
+      <section className="relative z-10 shrink-0 border-t-2 border-blue bg-panel px-4 py-4" data-testid="play-chosen">
+        <div className="label text-blue-strong">Your plant</div>
+        <div className="mt-2 flex items-center gap-3">
+          <SiteBadge preset={mySite.preset} icon={28} />
+          <div className="min-w-0 flex-1">
+            <div className="text-xl font-semibold leading-tight" style={{ color: playerColor(room, me?.id ?? null) ?? undefined }}>{ownedName(me?.name, mySite.name)}</div>
+            <div className="text-xs text-muted">{makesWords(world, mySite.index)}</div>
+          </div>
+        </div>
+        <p className="mt-3 text-sm text-ink" role="status">
+          <span className="font-semibold">You are in.</span> {room.phase === 'lobby' ? 'Waiting for the host to start.' : 'Starting…'} {othersWords(room, me?.id ?? null)}
+        </p>
+        {room.phase === 'lobby' && (
+          <button type="button" className="btn mt-3" style={TOUCH} onClick={() => take(null)} disabled={busy} data-testid="play-release">
+            {busy ? 'One moment…' : 'Change plant'}
+          </button>
+        )}
+        {error !== null && <p className="mt-2 text-sm text-alarm" role="alert">{error}</p>}
+      </section>
+    );
+  }
 
   return (
     <Sheet
       open={open}
       onToggle={() => setOpen(!open)}
-      peek={mine !== null
-        ? <span className="text-sm text-ink"><span className="font-semibold">Waiting for the host to start.</span> {othersWords(room, me?.id ?? null)}</span>
-        : <span className="text-sm font-semibold text-ink">Pick a plant</span>}
+      peek={<span className="text-sm font-semibold text-ink">Pick a plant <span className="font-normal text-muted">· {free} free · tap one</span></span>}
     >
-      {shown !== undefined && world !== null && (
-        <div className="chamfer chamfer-sm mb-3 flex items-start gap-3 p-3" style={{ '--chamfer-fill': 'var(--white)' } as React.CSSProperties} data-testid="play-tapped">
-          <SiteBadge preset={shown.preset} icon={24} />
-          <div className="min-w-0 flex-1">
-            <div className="text-base font-semibold leading-tight text-ink">{shown.name}</div>
-            <div className="text-xs text-muted">{makesWords(world, shown.index)}</div>
-            <div className="mt-2">
-              {shown.owner === me?.id ? (
-                <button type="button" className="btn" style={TOUCH} onClick={() => void claim(null)} data-testid="play-release">Yours. Let it go</button>
-              ) : shown.owner !== null ? (
-                <span className="text-sm text-ink" data-testid="play-taken">Taken by {nameOf(shown.owner)}</span>
-              ) : !shown.playable ? (
-                <span className="text-sm text-muted">A customer: nobody runs this one.</span>
-              ) : (
-                <button type="button" className="btn btn-primary" style={TOUCH} onClick={() => void claim(shown.index)} data-testid="play-take">Take this plant</button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
       {error !== null && <p className="mb-2 text-sm text-alarm" role="alert">{error}</p>}
-      <div className="label mb-1">{free.length} free plant{free.length === 1 ? '' : 's'}</div>
       <ul className="divide-y divide-line" data-testid="play-free">
-        {free.map((s) => (
-          <li key={s.index}>
-            <button
-              type="button"
-              className={`flex min-h-[44px] w-full cursor-pointer items-center gap-2 px-1 text-left text-sm text-ink ${shown?.index === s.index ? 'bg-blue-soft' : ''}`}
-              onClick={() => select({ kind: 'site', index: s.index })}
-            >
-              <SiteBadge preset={s.preset} />
-              <span className="min-w-0 flex-1 truncate">{s.name}</span>
-            </button>
-          </li>
-        ))}
+        {plants.map((s) => {
+          const taken = s.owner !== null;
+          const asking = asked === s.index && !taken;
+          return (
+            <li key={s.index} ref={asked === s.index ? askedRow : undefined}>
+              {asking ? (
+                <div className="flex min-h-[56px] items-center gap-2 bg-blue-soft px-2 py-2" data-testid="play-confirm">
+                  <SiteBadge preset={s.preset} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-ink">Run {s.name}?</span>
+                    {world !== null && <span className="block truncate text-xs text-muted">{makesWords(world, s.index)}</span>}
+                  </span>
+                  <button type="button" className="btn" style={TOUCH} onClick={() => select(null)} disabled={busy}>No</button>
+                  <button type="button" className="btn btn-primary" style={TOUCH} onClick={() => take(s.index)} disabled={busy} data-testid="play-take">{busy ? 'Taking…' : 'Confirm'}</button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className={`flex min-h-[44px] w-full items-center gap-2 px-2 text-left text-sm ${taken ? 'text-muted' : 'cursor-pointer text-ink'}`}
+                  onClick={() => select({ kind: 'site', index: s.index })}
+                  disabled={taken}
+                >
+                  <SiteBadge preset={s.preset} />
+                  <span className="min-w-0 flex-1 truncate" style={taken ? { color: playerColor(room, s.owner) ?? undefined, fontWeight: 600 } : undefined} data-testid={taken ? 'play-taken' : undefined}>{taken ? ownedName(nameOf(s.owner), s.name) : s.name}</span>
+                </button>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </Sheet>
   );
@@ -322,20 +355,33 @@ function Panel({ title, onClose, children }: { title: string; onClose: () => voi
 
 function Leaderboard({ mySite }: { mySite: number | null }) {
   const scores = usePlay((s) => s.scores);
+  const room = useSim((s) => s.room);
+  const [board, setBoard] = useState<'profit' | 'damage'>('profit');
   if (scores.length === 0) return <p className="text-sm text-muted">No scores yet: they start when the host starts the clock.</p>;
+  const rows = board === 'profit'
+    ? [...scores].sort((a, b) => b.profitUsd - a.profitUsd)
+    : scores.filter((s) => s.owner !== null).sort((a, b) => (b.damageUsd ?? 0) - (a.damageUsd ?? 0));
   return (
-    <ol className="divide-y divide-line" data-testid="play-leaderboard">
-      {[...scores].sort((a, b) => a.rank - b.rank).map((s) => (
-        <li key={s.site} className={`flex min-h-[44px] items-center gap-3 px-1 text-sm ${s.site === mySite ? 'bg-blue-soft' : ''}`}>
-          <span className="data w-7 text-muted">{s.rank}</span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-ink">{s.name}</span>
-            <span className="block truncate text-xs text-muted">{s.ownerName ?? 'no one: runs itself'}</span>
-          </span>
-          <span className="data font-semibold text-ink">{fmtProfit(s.profitUsd)}</span>
-        </li>
-      ))}
-    </ol>
+    <div>
+      <div className="mb-3 flex gap-2" role="tablist">
+        {([['profit', 'Profit'], ['damage', 'Damage to economy']] as const).map(([key, label]) => (
+          <button key={key} type="button" role="tab" aria-selected={board === key} className={`btn ${board === key ? 'btn-active' : ''}`} style={TOUCH} onClick={() => setBoard(key)} data-testid={`play-board-${key}`}>{label}</button>
+        ))}
+      </div>
+      {board === 'damage' && <p className="mb-2 text-xs text-muted">Sales customers lost because of what each player did, compared with the same run without them.</p>}
+      {rows.length === 0 && <p className="text-sm text-muted">Nobody has taken a plant yet.</p>}
+      <ol className="divide-y divide-line" data-testid="play-leaderboard">
+        {rows.map((s, i) => (
+          <li key={s.site} className={`flex min-h-[44px] items-center gap-3 px-1 text-sm ${s.site === mySite ? 'bg-blue-soft' : ''}`}>
+            <span className="data w-7 text-muted">{i + 1}</span>
+            <span className="min-w-0 flex-1 truncate font-semibold" style={{ color: playerColor(room, s.owner) ?? undefined }}>
+              {s.owner !== null ? ownedName(s.ownerName, s.name) : <span className="font-normal text-muted">{s.name}</span>}
+            </span>
+            <span className={`data font-semibold ${board === 'damage' ? 'text-alarm' : 'text-ink'}`}>{fmtProfit(board === 'damage' ? s.damageUsd ?? 0 : s.profitUsd)}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
@@ -392,7 +438,7 @@ const HOW = [
   'You run one plant. Everyone else runs theirs; the rest run themselves.',
   'Price: ask more and you earn more per tonne but sell less. Ask less and you sell more.',
   'Rate: make less and you buy less feed. Units can be taken down and brought back.',
-  'The host runs the clock and sets off trouble. Most profit when it ends wins.',
+  'The host runs the clock and sets off trouble. There are two boards: most profit, and most damage to the economy.',
 ];
 
 export function PlayApp() {
