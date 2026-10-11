@@ -16,6 +16,7 @@ import {
   rateOf, tankLive, unitLive, type FlowTankNode, type FlowUnitNode, type Flowsheet,
 } from './flowsheet';
 
+import { blueRamp } from './charts/palette';
 import { TICKS_PER_DAY, TICKS_PER_HOUR } from './charts/scale';
 
 export { TICKS_PER_DAY, TICKS_PER_HOUR };
@@ -160,6 +161,56 @@ export function unitRows(sheet: Flowsheet, snap: Snapshot, hist: Histories): Ana
         series: withNow({ ticks: rate.ticks, values: rate.values.map((v) => v * u.inletTph) }, now, live.inletTph),
       };
     });
+}
+
+/** One line of a "Into the plant" / "Out of the plant" chart. */
+export interface FlowLine {
+  label: string;
+  color: string;
+  /** line width in px: the sum is heavier than its parts */
+  width: number;
+  series: Series;
+  /** t/h now, and at design rate */
+  now: number;
+  design: number;
+  /** the total over every chemical, not a chemical itself */
+  sum: boolean;
+}
+
+/** Ink black: the sum line must not be taken for one more chemical. */
+const SUM_COLOR = '#0a0a0a';
+
+/**
+ * The lines of one flow chart: every chemical in `rows` (all "in" rows or
+ * all "out" rows) as its own line in a shade of blue, and their total as a
+ * heavier black line named `sumLabel`. Shades are fixed by design flow: the
+ * largest stream is the darkest, the smallest the lightest, so a line keeps
+ * its colour however the plant is running and whichever lines are shown. A
+ * single chemical is its own total, so it gets no separate sum line.
+ */
+export function flowLines(rows: AnalyticsRow[], sumLabel: string): FlowLine[] {
+  const ordered = [...rows].sort((a, b) => (b.design ?? 0) - (a.design ?? 0) || a.label.localeCompare(b.label));
+  const shades = blueRamp(ordered.length); // light → dark
+  const parts: FlowLine[] = ordered.map((r, i) => ({
+    label: r.label,
+    color: shades[ordered.length - 1 - i], // largest flow darkest
+    width: 2,
+    series: r.series,
+    now: r.now,
+    design: r.design ?? 0,
+    sum: false,
+  }));
+  if (parts.length < 2) return parts;
+  const total: FlowLine = {
+    label: sumLabel,
+    color: SUM_COLOR,
+    width: 3,
+    series: weightedSum(parts.map((p) => ({ series: p.series, weight: 1 }))),
+    now: parts.reduce((acc, p) => acc + p.now, 0),
+    design: parts.reduce((acc, p) => acc + p.design, 0),
+    sum: true,
+  };
+  return [total, ...parts];
 }
 
 export interface Headline {

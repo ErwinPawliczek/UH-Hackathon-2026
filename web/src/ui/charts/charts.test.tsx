@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { LineChart } from './LineChart';
 import { Sparkline } from './Sparkline';
-import { CHART_COLORS, CHART_OTHER, seriesColor } from './palette';
+import { CHART_COLORS, CHART_OTHER, blueRamp, seriesColor } from './palette';
 import { dayMarks, fmtDay, fmtTick, fmtValue, linePath, linear, nearestIndex, niceCeil, timeMarks, valueMarks } from './scale';
 
 describe('chart scales', () => {
@@ -87,6 +87,46 @@ describe('chart colours', () => {
     expect(seriesColor(CHART_COLORS.length)).toBe(CHART_OTHER);
     expect(CHART_COLORS).not.toContain('#d1372f'); // alarm red stays reserved for alarms
   });
+
+  // relative luminance (WCAG) of a #rrggbb colour
+  const luminance = (hex: string) => {
+    const [r, g, b] = [1, 3, 5].map((i) => {
+      const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrast = (a: string, b: string) => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((p, q) => q - p);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+
+  it.each([2, 3, 6, 9])("shades a ramp of %i blues from light to very dark, each step apart from the next", (n) => {
+    const ramp = blueRamp(n);
+    expect(ramp).toHaveLength(n);
+    expect(new Set(ramp).size).toBe(n);
+    for (const c of ramp) {
+      expect(c).toMatch(/^#[0-9a-f]{6}$/);
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+      expect(b).toBeGreaterThan(g); // blue all the way: no step drifts to grey, green or violet
+      expect(g).toBeGreaterThanOrEqual(r);
+    }
+    // darker at every step, and by enough to tell neighbours apart
+    for (let i = 1; i < n; i++) expect(contrast(ramp[i - 1], ramp[i])).toBeGreaterThan(1.12);
+    // the lightest still shows on the panel; the darkest is a navy close to black
+    expect(contrast(ramp[0], '#f7f8f9')).toBeGreaterThan(2);
+    expect(luminance(ramp[n - 1])).toBeLessThan(0.02);
+    expect(luminance(ramp[0])).toBeGreaterThan(luminance(ramp[n - 1]));
+  });
+
+  it("keeps the ends of the ramp where they are however many steps lie between, and gives one step a mid blue", () => {
+    expect(blueRamp(2)[0]).toBe(blueRamp(9)[0]);
+    expect(blueRamp(2)[1]).toBe(blueRamp(9)[8]);
+    expect(blueRamp(0)).toEqual([]);
+    const [only] = blueRamp(1);
+    expect(luminance(only)).toBeLessThan(luminance(blueRamp(9)[0]));
+    expect(luminance(only)).toBeGreaterThan(luminance(blueRamp(9)[8]));
+  });
 });
 
 describe('LineChart', () => {
@@ -122,6 +162,48 @@ describe('LineChart', () => {
     expect(html).toContain(CHART_COLORS[0]);
     expect(html).toContain(CHART_COLORS[1]);
     expect(html).toContain('fill-opacity="0.14"'); // the min–max band
+  });
+
+  it("draws a heavier line where a series asks for one, and keeps every legend entry plain text unless lines can be switched", () => {
+    const html = renderToStaticMarkup(
+      <LineChart
+        unit="t/h"
+        x={x}
+        series={[
+          { label: 'Sum of all outputs', color: '#0a0a0a', width: 3, values: [3, 4, 5, 6] },
+          { label: 'Chlorine', color: '#01163a', values: [2, 3, 3, 4] },
+          { label: 'Caustic soda', color: '#6ea8ff', values: [1, 1, 2, 2] },
+        ]}
+        testId="c"
+      />,
+    );
+    expect(html.match(/<path[^>]*stroke="#0a0a0a"[^>]*stroke-width="3"/g)).toHaveLength(1);
+    expect(html.match(/<path[^>]*stroke-width="2"/g)).toHaveLength(2);
+    expect(html).not.toContain('<button');
+    expect(html).not.toContain('aria-pressed');
+  });
+
+  it("makes each legend entry a switch for its line when lines can be switched off", () => {
+    const html = renderToStaticMarkup(
+      <LineChart
+        unit="t/h"
+        x={x}
+        toggleable
+        series={[
+          { label: 'Sum of all outputs', color: '#0a0a0a', width: 3, values: [3, 4, 5, 6] },
+          { label: 'Chlorine', color: '#01163a', values: [2, 3, 3, 4] },
+          { label: 'Caustic soda', color: '#6ea8ff', values: [1, 1, 2, 2] },
+        ]}
+        testId="c"
+      />,
+    );
+    // one switch per line, all on to begin with, each saying what a click does
+    expect(html.match(/<button[^>]*aria-pressed="true"/g)).toHaveLength(3);
+    expect(html).toContain('title="Hide Chlorine"');
+    expect(html).not.toContain('line-through');
+    // every line is drawn, with its latest value beside its name
+    expect(html.match(/<path[^>]*fill="none"/g)).toHaveLength(3);
+    expect(html).toMatch(/Caustic soda<\/span><span[^>]*>2</);
   });
 
   it('in days mode marks whole days and never a fraction', () => {

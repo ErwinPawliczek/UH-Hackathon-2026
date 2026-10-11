@@ -11,7 +11,9 @@
 // plotted values for screen readers.
 //
 // Series colours come from charts/palette in fixed order unless a series
-// brings its own. More than seven series should be folded by the caller.
+// brings its own. More than seven series should be folded by the caller,
+// unless they are one family shaded with blueRamp. With `toggleable` each
+// legend entry is a switch that hides or shows its line.
 
 import { useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { CHART_INK, seriesColor } from './palette';
@@ -27,6 +29,8 @@ export interface ChartSeries {
   /** optional band drawn behind the line, e.g. the lowest and highest across plants */
   min?: number[];
   max?: number[];
+  /** line width in px; 2 by default — a total drawn over its parts can be heavier */
+  width?: number;
 }
 
 export interface LineChartProps {
@@ -54,6 +58,12 @@ export interface LineChartProps {
   area?: boolean;
   /** number formatting for marks and readouts */
   format?: (v: number) => string;
+  /**
+   * Let the reader switch lines off and on by clicking their legend entry.
+   * A hidden line leaves the plot, the readout and the value axis's range;
+   * the others keep their colours.
+   */
+  toggleable?: boolean;
   testId?: string;
 }
 
@@ -61,19 +71,30 @@ const M = { top: 10, right: 46, bottom: 22, left: 40 };
 
 export function LineChart({
   series, x, xUnit = 'ticks', unit, title, width = 560, height = 180, yMin = 0, yMax, refLines = [],
-  area = false, format = fmtValue, testId,
+  area = false, format = fmtValue, toggleable = false, testId,
 }: LineChartProps) {
   const [hoverX, setHoverX] = useState<number | null>(null);
+  const [off, setOff] = useState<ReadonlySet<string>>(new Set());
 
-  const drawn = series
+  // every series keeps its colour whether or not others are shown
+  const listed = series
     .map((s, i) => ({ ...s, xs: s.x ?? x ?? s.values.map((_, k) => k), color: s.color ?? seriesColor(i) }))
     .filter((s) => s.values.length > 0 && s.xs.length > 0);
-  const allX = drawn.flatMap((s) => s.xs);
+  const drawn = toggleable ? listed.filter((s) => !off.has(s.label)) : listed;
+  const toggle = (label: string) => {
+    const next = new Set(off);
+    if (next.has(label)) next.delete(label);
+    else next.add(label);
+    setOff(next);
+  };
   const allY = drawn.flatMap((s) => [...s.values, ...(s.max ?? []), ...(s.min ?? [])]).filter(Number.isFinite);
-  const empty = drawn.length === 0 || allX.length === 0;
+  const empty = listed.length === 0 || listed.every((s) => s.xs.length === 0);
+  const allOff = !empty && drawn.length === 0;
 
-  const x0 = empty ? 0 : Math.min(...allX);
-  const x1 = empty ? 1 : Math.max(...allX);
+  // the time axis follows everything listed, so switching a line off does not move it
+  const listedX = listed.flatMap((s) => s.xs);
+  const x0 = empty ? 0 : Math.min(...listedX);
+  const x1 = empty ? 1 : Math.max(...listedX);
   const top = yMax ?? niceCeil(Math.max(yMin + 1e-9, ...allY, ...refLines.map((r) => r.value)));
   const sx = linear(x0, x1 === x0 ? x0 + 1 : x1, M.left, width - M.right);
   const sy = linear(yMin, top, height - M.bottom, M.top);
@@ -108,7 +129,7 @@ export function LineChart({
   };
 
   const tipLeft = at === null ? 0 : sx(at);
-  const single = drawn.length === 1 ? drawn[0] : null;
+  const single = listed.length === 1 && drawn.length === 1 ? drawn[0] : null;
   const sample = (n: number) => {
     // up to n evenly spread rows of the first series' x, for the screen-reader table
     const xs = spine;
@@ -118,19 +139,40 @@ export function LineChart({
 
   return (
     <figure className="m-0" data-testid={testId}>
-      {(title !== undefined || drawn.length > 1) && (
+      {(title !== undefined || listed.length > 1) && (
         <figcaption className="mb-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs">
           {title !== undefined && <span className="font-semibold text-ink">{title}</span>}
           <span className="text-muted">{unit}</span>
-          {drawn.length > 1 && (
+          {listed.length > 1 && (
             <span className="flex flex-wrap gap-x-3 gap-y-0.5" data-testid={testId === undefined ? undefined : `${testId}-legend`}>
-              {drawn.map((s) => (
-                <span key={s.label} className="inline-flex items-center gap-1.5 text-muted">
-                  <span aria-hidden="true" className="inline-block h-0.5 w-3.5 rounded-sm" style={{ backgroundColor: s.color }} />
-                  {s.label}
-                  <span className="data text-ink">{format(s.values[s.values.length - 1])}</span>
-                </span>
-              ))}
+              {listed.map((s) => {
+                const shown = !toggleable || !off.has(s.label);
+                const entry = (
+                  <>
+                    <span
+                      aria-hidden="true"
+                      className="inline-block w-3.5 rounded-sm"
+                      style={{ height: Math.max(2, s.width ?? 2), backgroundColor: shown ? s.color : CHART_INK.axis }}
+                    />
+                    <span className={shown ? '' : 'line-through'}>{s.label}</span>
+                    <span className={`data ${shown ? 'text-ink' : 'text-muted'}`}>{format(s.values[s.values.length - 1])}</span>
+                  </>
+                );
+                return toggleable ? (
+                  <button
+                    key={s.label}
+                    type="button"
+                    className="inline-flex cursor-pointer items-center gap-1.5 text-muted hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-blue"
+                    aria-pressed={shown}
+                    title={shown ? `Hide ${s.label}` : `Show ${s.label}`}
+                    onClick={() => toggle(s.label)}
+                  >
+                    {entry}
+                  </button>
+                ) : (
+                  <span key={s.label} className="inline-flex items-center gap-1.5 text-muted">{entry}</span>
+                );
+              })}
             </span>
           )}
         </figcaption>
@@ -192,7 +234,7 @@ export function LineChart({
                     stroke="none"
                   />
                 )}
-                <path d={linePath(s.xs, s.values, sx, sy)} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+                <path d={linePath(s.xs, s.values, sx, sy)} fill="none" stroke={s.color} strokeWidth={s.width ?? 2} strokeLinejoin="round" strokeLinecap="round" />
                 {last >= 0 && Number.isFinite(s.values[last]) && (
                   <circle cx={sx(s.xs[last])} cy={sy(s.values[last])} r={4} fill={s.color} stroke={CHART_INK.surface} strokeWidth={2} />
                 )}
@@ -216,6 +258,11 @@ export function LineChart({
           {empty && (
             <text x={(M.left + width - M.right) / 2} y={(M.top + height - M.bottom) / 2} textAnchor="middle" fontSize={11} fill={CHART_INK.muted}>
               No history yet — the first point arrives after one simulated hour.
+            </text>
+          )}
+          {allOff && (
+            <text x={(M.left + width - M.right) / 2} y={(M.top + height - M.bottom) / 2} textAnchor="middle" fontSize={11} fill={CHART_INK.muted}>
+              Every line is switched off — click a name above to show it.
             </text>
           )}
 
@@ -252,7 +299,7 @@ export function LineChart({
               <div key={r.label} className="flex items-center gap-1.5 whitespace-nowrap">
                 <span aria-hidden="true" className="inline-block h-0.5 w-3 rounded-sm" style={{ backgroundColor: r.color }} />
                 <span className="data font-semibold text-ink">{format(r.value)}{unit === '' ? '' : ` ${unit}`}</span>
-                {drawn.length > 1 && <span className="text-muted">{r.label}</span>}
+                {listed.length > 1 && <span className="text-muted">{r.label}</span>}
               </div>
             ))}
           </div>

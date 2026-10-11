@@ -5,12 +5,13 @@ import { describe, expect, it } from 'vitest';
 import fixture from './__fixtures__/flowsheetSites.json';
 import type { Snapshot } from '../engine/snapshot';
 import type { WorldSpec } from '../engine/world';
+import { blueRamp } from './charts/palette';
 import {
   STRAIGHT, buildFlowsheet, edgePath, fmtHours, fmtTph, labelWidth, streamLabel, tankLive, unitLive,
   type FlowTankNode, type FlowUnitNode, type Flowsheet,
 } from './flowsheet';
 import {
-  headline, plantRows, sampleTick, since, toSeries, unitRows, weightedSum, withNow, type Histories,
+  flowLines, headline, plantRows, sampleTick, since, toSeries, unitRows, weightedSum, withNow, type Histories,
 } from './siteSeries';
 
 const world = { ...(fixture as unknown as WorldSpec), pipelines: [] } as WorldSpec;
@@ -329,6 +330,58 @@ describe('analytics rows', () => {
     expect(rows.some((r) => (r.group === 'in' || r.group === 'out') && r.label === 'Vacuum gasoil')).toBe(false);
     expect(rows.filter((r) => r.group === 'level')).toHaveLength(13);
     expect(rows.find((r) => r.id === `level-${tank(s, 'VGO').tank}`)?.now).toBeCloseTo(70, 3);
+  });
+
+  it("draws every output as its own shade of blue, the largest darkest, under a heavier black sum", () => {
+    const out = plantRows(s, world, snap, hist, streamLabel).filter((r) => r.group === 'out');
+    expect(out).toHaveLength(9);
+    const lines = flowLines(out, 'Sum of all outputs');
+    expect(lines).toHaveLength(10);
+    const [sum, ...parts] = lines;
+    expect(sum).toMatchObject({ label: 'Sum of all outputs', color: '#0a0a0a', width: 3, sum: true });
+    expect(parts.every((l) => l.width === 2 && !l.sum)).toBe(true);
+    // ordered by design flow, shaded dark to light in that order
+    const designs = parts.map((l) => l.design);
+    expect(designs).toEqual([...designs].sort((a, b) => b - a));
+    expect(parts.map((l) => l.color)).toEqual([...blueRamp(9)].reverse());
+    expect(parts[0].color).toBe(blueRamp(9)[8]);
+    expect(parts[8].color).toBe(blueRamp(9)[0]);
+    // the sum is the sum: at design, with distillation at half, and right now
+    expect(sum.series.ticks).toEqual([4, 8, 10]);
+    sum.series.values.forEach((v, i) => {
+      expect(v).toBeCloseTo(parts.reduce((acc, l) => acc + l.series.values[i], 0), 6);
+    });
+    expect(sum.series.values[1]).toBeLessThan(sum.series.values[0]);
+    expect(sum.now).toBeCloseTo(out.reduce((acc, r) => acc + r.now, 0), 6);
+    expect(sum.design).toBeCloseTo(designs.reduce((acc, v) => acc + v, 0), 6);
+    // colours go by design flow, not by how the plant runs today
+    const slow = flowLines(plantRows(s, world, snapAt(0.3, 0.7, 10), hist, streamLabel).filter((r) => r.group === 'out'), 'Sum of all outputs');
+    expect(slow.map((l) => [l.label, l.color])).toEqual(lines.map((l) => [l.label, l.color]));
+  });
+
+  it("gives a single chemical no sum line, and a customer or a source only the side it has", () => {
+    const rows = plantRows(s, world, snap, hist, streamLabel);
+    const into = flowLines(rows.filter((r) => r.group === 'in'), 'Sum of all inputs');
+    expect(into.map((l) => l.label)).toEqual(['Crude oil']); // one input: it is its own total
+    expect(into[0].sum).toBe(false);
+    expect(into[0].color).toBe(blueRamp(1)[0]);
+    expect(flowLines([], 'Sum of all inputs')).toEqual([]);
+
+    const flex = sheetOf('CRACKER_FLEX');
+    const flexRows = plantRows(flex, world, snapAt(1, 0.7, 10), new Map(), streamLabel);
+    expect(flowLines(flexRows.filter((r) => r.group === 'in'), 'Sum of all inputs')).toHaveLength(3 + 1);
+    expect(flowLines(flexRows.filter((r) => r.group === 'out'), 'Sum of all outputs')).toHaveLength(6 + 1);
+
+    const chlor = plantRows(sheetOf('CHLOR_ALKALI'), world, snapAt(1, 0.7, 10), new Map(), streamLabel);
+    expect(flowLines(chlor.filter((r) => r.group === 'in'), 'Sum of all inputs')).toHaveLength(1);
+    expect(flowLines(chlor.filter((r) => r.group === 'out'), 'Sum of all outputs')).toHaveLength(2 + 1);
+
+    const depot = plantRows(sheetOf('FUEL_DEPOT'), world, snapAt(1, 0.7, 10), new Map(), streamLabel);
+    expect(depot.filter((r) => r.group === 'out')).toHaveLength(0);
+    expect(depot.filter((r) => r.group === 'in').length).toBeGreaterThan(0);
+    const field = plantRows(sheetOf('OIL_FIELD'), world, snapAt(1, 0.7, 10), new Map(), streamLabel);
+    expect(field.filter((r) => r.group === 'in')).toHaveLength(0);
+    expect(field.filter((r) => r.group === 'out').length).toBeGreaterThan(0);
   });
 
   it('gives each unit its throughput: process rate x everything it takes in', () => {

@@ -4,13 +4,20 @@
 //      title bar: there is no separate title strip above it.
 //   2. Process flow diagram — tanks, units and the streams between them, with
 //      live numbers on every one (Flowsheet.tsx); it scrolls sideways for a
-//      big site and can be widened with the expand button.
+//      big site and can be widened with the Widen button.
 //   3. Analytics, with a two-way switch:
-//        Plant — the site as a whole: every material going in and coming out
-//                in t/h, every tank's level, and the headline numbers now;
+//        Plant — the site as a whole: the headline numbers now, then two
+//                charts over the chosen time window (24 h, 7 days, all):
+//                "Into the plant" and "Out of the plant", each with a line
+//                per chemical in shades of blue (largest flow darkest) and
+//                their sum as a heavier black line. They are stacked at the
+//                window's default width and side by side once it is widened;
+//                a customer or a source has only the one that applies. Then
+//                every stream and tank as a list; pick a tank to chart its
+//                level.
 //        Units — inside the process: each unit's throughput, load against
-//                the capacity of its trains, heat and power.
-//      Pick a row to chart it over the chosen time window (24 h, 7 days, all).
+//                the capacity of its trains, heat and power. Pick a row to
+//                chart it.
 //
 // A draggable window that follows the selection: it opens when a site is
 // picked and closing it clears the selection.
@@ -37,11 +44,20 @@ import {
 } from './flowsheet';
 import { presetLabel } from './siteIcons';
 import {
-  WINDOWS, headline, plantRows, since, unitRows, type AnalyticsRow, type Histories, type History,
+  WINDOWS, flowLines, headline, plantRows, since, unitRows, type AnalyticsRow, type Histories, type History,
 } from './siteSeries';
 
 export const SITE_WINDOW_ID = 'site';
 const WIDTH = 640;
+/** Least width (px) at which a flow chart with its legend is still legible; below twice this the two are stacked. */
+const FLOW_CHART_MIN = 430;
+/** Gap between the two flow charts when they sit side by side, and what the window adds around its content. */
+const FLOW_CHART_GAP = 16;
+const WINDOW_CHROME = 44;
+/** Width of a window whose two flow charts sit side by side. */
+const SIDE_BY_SIDE_WIDTH = 2 * FLOW_CHART_MIN + FLOW_CHART_GAP + WINDOW_CHROME;
+/** Axis and readout numbers for flows: t/h, with a plain 0 at the foot of the axis. */
+const fmtFlow = (v: number) => (v === 0 ? '0' : fmtTph(v));
 /** Real milliseconds at least between two history refreshes while the run races ahead. */
 const REFRESH_MIN_MS = 1500;
 
@@ -140,7 +156,7 @@ const pct = (now: number, design: number | null) => (design !== null && design >
 
 /** A table of analytics rows; the chosen row is the one charted. */
 function RowTable({
-  rows, groups, chosen, onChoose, fromTick, unitsMode,
+  rows, groups, chosen, onChoose, fromTick, unitsMode, canChoose = () => true,
 }: {
   rows: AnalyticsRow[];
   groups: { key: AnalyticsRow['group']; title: string }[];
@@ -148,6 +164,8 @@ function RowTable({
   onChoose: (id: string) => void;
   fromTick: number;
   unitsMode: boolean;
+  /** which rows can be picked for the chart; the rest are listed only */
+  canChoose?: (row: AnalyticsRow) => boolean;
 }) {
   return (
     <table className="w-full border-collapse text-[11px]" data-testid="analytics-table">
@@ -181,9 +199,9 @@ function RowTable({
               return (
                 <tr
                   key={r.id}
-                  className={`cursor-pointer border-t border-line hover:bg-panel-2 ${chosen === r.id ? 'bg-blue-soft' : ''}`}
-                  onClick={() => onChoose(r.id)}
-                  aria-selected={chosen === r.id}
+                  className={`border-t border-line ${canChoose(r) ? 'cursor-pointer hover:bg-panel-2' : ''} ${chosen === r.id ? 'bg-blue-soft' : ''}`}
+                  onClick={canChoose(r) ? () => onChoose(r.id) : undefined}
+                  aria-selected={canChoose(r) ? chosen === r.id : undefined}
                   data-testid={`analytics-row-${r.id}`}
                 >
                   <td className="px-2 py-1 text-ink">
@@ -225,10 +243,61 @@ function chartTitle(r: AnalyticsRow): string {
   return `${r.label} throughput — ${r.node?.unit.name ?? ''}`;
 }
 
-function Analytics({ sheet, world, snap, hist }: { sheet: Flowsheet; world: WorldSpec; snap: Snapshot; hist: Histories }) {
+/** Whether the site both takes materials in and sends materials out (a customer or a source does only one). */
+export function hasBothFlows(sheet: Flowsheet): boolean {
+  const tanks = sheet.nodes.filter((nd) => nd.kind === 'tank');
+  return tanks.some((t) => t.role === 'feed') && tanks.some((t) => t.role === 'product');
+}
+
+/**
+ * One of the two flow charts of the Plant view: every chemical going into
+ * the plant, or every one coming out, in shades of blue (the largest flow
+ * darkest), with their total as a heavier black line. Clicking a name in
+ * the legend switches that line off and on.
+ */
+function FlowChart({
+  title, sumLabel, rows, fromTick, width, testId,
+}: {
+  title: string;
+  sumLabel: string;
+  rows: AnalyticsRow[];
+  fromTick: number;
+  width: number;
+  testId: string;
+}) {
+  const lines = flowLines(rows, sumLabel);
+  const only = lines.length === 1 ? lines[0] : null;
+  return (
+    <LineChart
+      title={only === null ? title : `${title}: ${only.label}`}
+      unit="t/h"
+      width={width}
+      height={190}
+      series={lines.map((l) => {
+        const s = since(l.series, fromTick);
+        return { label: l.label, color: l.color, width: l.width, values: s.values, x: s.ticks };
+      })}
+      refLines={only === null ? [] : [{ value: only.design, label: 'design' }]}
+      format={fmtFlow}
+      toggleable={only === null}
+      testId={testId}
+    />
+  );
+}
+
+function Analytics({
+  sheet, world, snap, hist, width,
+}: {
+  sheet: Flowsheet;
+  world: WorldSpec;
+  snap: Snapshot;
+  hist: Histories;
+  /** room for charts, in px: two flow charts sit side by side when it allows */
+  width: number;
+}) {
   const [mode, setMode] = useState<'plant' | 'units'>('plant');
   const [windowKey, setWindowKey] = useState('7d');
-  const [chosenPlant, setChosenPlant] = useState<string | null>(null);
+  const [chosenLevel, setChosenLevel] = useState<string | null>(null);
   const [chosenUnit, setChosenUnit] = useState<string | null>(null);
 
   const now = Number(snap.tick);
@@ -236,10 +305,18 @@ function Analytics({ sheet, world, snap, hist }: { sheet: Flowsheet; world: Worl
   const fromTick = span === null ? 0 : Math.max(0, now - span);
 
   const rows = mode === 'plant' ? plantRows(sheet, world, snap, hist, streamLabel) : unitRows(sheet, snap, hist);
-  const chosenId = mode === 'plant' ? chosenPlant : chosenUnit;
-  const chosen = rows.find((r) => r.id === chosenId) ?? rows[0];
   const head = headline(sheet, world, snap);
+  const going = rows.filter((r) => r.group === 'in');
+  const coming = rows.filter((r) => r.group === 'out');
+  // Side by side when each chart still gets a legible width; stacked otherwise.
+  const both = going.length > 0 && coming.length > 0;
+  const sideBySide = both && width >= 2 * FLOW_CHART_MIN + FLOW_CHART_GAP;
+  const flowWidth = sideBySide ? Math.floor((width - FLOW_CHART_GAP) / 2) : width;
 
+  // the chart under the list: a picked tank level (Plant) or unit (Units)
+  const chosen = mode === 'plant'
+    ? rows.find((r) => r.id === chosenLevel && r.group === 'level')
+    : rows.find((r) => r.id === chosenUnit) ?? rows[0];
   const series = chosen === undefined ? null : since(chosen.series, fromTick);
   const refs = chosen === undefined || chosen.unit === '%'
     ? []
@@ -249,6 +326,20 @@ function Analytics({ sheet, world, snap, hist }: { sheet: Flowsheet; world: Worl
         ? [{ value: chosen.capacity, label: 'capacity' }]
         : []),
     ];
+  const picked = chosen === undefined || series === null ? null : (
+    <LineChart
+      title={chartTitle(chosen)}
+      unit={chosen.unit}
+      width={width}
+      height={170}
+      series={[{ label: chosen.label, values: series.values, x: series.ticks }]}
+      refLines={refs}
+      yMax={chosen.unit === '%' ? 100 : undefined}
+      area
+      format={(v) => (chosen.unit === '%' ? `${Math.round(v)}` : fmtFlow(v))}
+      testId="analytics-chart"
+    />
+  );
 
   return (
     <section data-testid="site-analytics">
@@ -269,29 +360,26 @@ function Analytics({ sheet, world, snap, hist }: { sheet: Flowsheet; world: Worl
       </div>
 
       {mode === 'plant' && (
-        <div className="mb-3 flex gap-2" data-testid="site-headline">
-          <Tile label="Throughput" value={`${Math.round(head.throughput * 100)}%`} note="of design, now" />
-          <Tile label="Feed cover" value={fmtHours(head.feedCoverH)} note={head.feedTank === null ? 'nothing drawn' : `${streamLabel(head.feedTank)} runs out first`} />
-          <Tile label="Product room" value={fmtHours(head.productRoomH)} note={head.productTank === null ? 'nothing made' : `${streamLabel(head.productTank)} fills first`} />
-        </div>
+        <>
+          <div className="mb-3 flex gap-2" data-testid="site-headline">
+            <Tile label="Throughput" value={`${Math.round(head.throughput * 100)}%`} note="of design, now" />
+            <Tile label="Feed cover" value={fmtHours(head.feedCoverH)} note={head.feedTank === null ? 'nothing drawn' : `${streamLabel(head.feedTank)} runs out first`} />
+            <Tile label="Product room" value={fmtHours(head.productRoomH)} note={head.productTank === null ? 'nothing made' : `${streamLabel(head.productTank)} fills first`} />
+          </div>
+          {/* what goes in and what comes out, over the same time window; a customer or a source has only one of the two */}
+          {/* side by side the two share a baseline, so their time axes line up whatever the legends take */}
+          <div className={`mb-3 flex gap-4 ${sideBySide ? 'flex-row items-end' : 'flex-col'}`} data-testid="plant-flows" data-layout={sideBySide ? 'side-by-side' : 'stacked'}>
+            {going.length > 0 && (
+              <FlowChart title="Into the plant" sumLabel="Sum of all inputs" rows={going} fromTick={fromTick} width={flowWidth} testId="plant-in-chart" />
+            )}
+            {coming.length > 0 && (
+              <FlowChart title="Out of the plant" sumLabel="Sum of all outputs" rows={coming} fromTick={fromTick} width={flowWidth} testId="plant-out-chart" />
+            )}
+          </div>
+        </>
       )}
 
-      {chosen !== undefined && series !== null && (
-        <div className="mb-3">
-          <LineChart
-            title={chartTitle(chosen)}
-            unit={chosen.unit}
-            width={WIDTH - 40}
-            height={170}
-            series={[{ label: chosen.label, values: series.values, x: series.ticks }]}
-            refLines={refs}
-            yMax={chosen.unit === '%' ? 100 : undefined}
-            area
-            format={(v) => (chosen.unit === '%' ? `${Math.round(v)}` : fmtTph(v))}
-            testId="analytics-chart"
-          />
-        </div>
-      )}
+      {mode === 'units' && picked !== null && <div className="mb-3">{picked}</div>}
 
       <RowTable
         rows={rows}
@@ -299,13 +387,15 @@ function Analytics({ sheet, world, snap, hist }: { sheet: Flowsheet; world: Worl
           ? [{ key: 'in', title: 'Going in' }, { key: 'out', title: 'Coming out' }, { key: 'level', title: 'Tank levels' }]
           : [{ key: 'unit', title: 'Units' }]}
         chosen={chosen?.id ?? null}
-        onChoose={mode === 'plant' ? setChosenPlant : setChosenUnit}
+        onChoose={mode === 'plant' ? (id) => setChosenLevel(id === chosenLevel ? null : id) : setChosenUnit}
         fromTick={fromTick}
         unitsMode={mode === 'units'}
+        canChoose={(r) => mode === 'units' || r.group === 'level'}
       />
+      {mode === 'plant' && picked !== null && <div className="mt-3">{picked}</div>}
       <p className="mt-2 text-[11px] text-muted">
         {mode === 'plant'
-          ? 'Each flow is the sum over the plant\'s processes of their rate times that stream\'s design t/h. Click a row to chart it.'
+          ? 'Each flow is the sum over the plant\'s processes of their rate times that stream\'s design t/h; shades run from the smallest stream (lightest) to the largest (darkest). Click a name in a chart to hide or show its line, and a tank level in the list to chart it.'
           : 'A unit\'s throughput is its process\'s rate times everything the unit takes in at design; load is that against the capacity of the trains online. Click a row to chart it.'}
       </p>
     </section>
@@ -345,7 +435,11 @@ export function SiteWindow() {
 
   const state = stateWords(sheet, world, snap, siteIdx);
   const viewport = typeof window === 'undefined' ? 1366 : window.innerWidth;
-  const width = wide && sheet !== null ? Math.max(WIDTH, Math.min(viewport - 32, sheet.width + 44)) : WIDTH;
+  // Widening makes room for the whole diagram and, for a plant with both
+  // inputs and outputs, for its two flow charts side by side.
+  const wideWidth = sheet === null ? WIDTH : Math.max(sheet.width + WINDOW_CHROME, hasBothFlows(sheet) ? SIDE_BY_SIDE_WIDTH : 0);
+  const canWiden = wideWidth > WIDTH;
+  const width = wide && canWiden ? Math.max(WIDTH, Math.min(viewport - 32, wideWidth)) : WIDTH;
 
   const failUnit = sendCommand === null
     ? null
@@ -377,7 +471,7 @@ export function SiteWindow() {
       open
       onClose={() => select(null)}
       at={{ x: Math.max(16, viewport - WIDTH - 16), y: 64 }}
-      actions={sheet !== null && sheet.width + 44 > WIDTH ? (
+      actions={canWiden ? (
         <button type="button" className="btn" onClick={() => setWide(!wide)} aria-pressed={wide} data-testid="site-window-wide">
           {wide ? 'Narrow' : 'Widen'}
         </button>
@@ -434,7 +528,7 @@ export function SiteWindow() {
               </p>
               {failure !== null && <p className="mt-1 text-alarm" role="alert">{failure}</p>}
             </section>
-            <Analytics sheet={sheet} world={world} snap={snap} hist={hist} />
+            <Analytics sheet={sheet} world={world} snap={snap} hist={hist} width={width - WINDOW_CHROME} />
           </>
         )}
       </div>

@@ -5,7 +5,7 @@ import fixture from './__fixtures__/flowsheetSites.json';
 import type { Snapshot } from '../engine/snapshot';
 import type { WorldSpec } from '../engine/world';
 import { buildFlowsheet, type FlowUnitNode } from './flowsheet';
-import { scrollToFirstAlarm, stateWords } from './SiteWindow';
+import { hasBothFlows, scrollToFirstAlarm, stateWords } from './SiteWindow';
 
 const world = { ...(fixture as unknown as WorldSpec), pipelines: [] } as WorldSpec;
 const siteIdx = world.sites.findIndex((s) => s.key === 'REFINERY');
@@ -64,5 +64,13 @@ describe('scrollToFirstAlarm', () => {
     expect(cdu.x).toBeLessThan(fcc.x); // the CDU is further left, so it is the one shown
     expect(scrollToFirstAlarm(sheet, s, 600)).toBeCloseTo(Math.max(0, cdu.x + cdu.w / 2 - 300), 6);
     expect(scrollToFirstAlarm(sheet, s, 5000)).toBe(0); // a view wider than the diagram does not scroll
+  });
+});
+
+describe('hasBothFlows', () => {
+  it("is true for a plant, and false for a customer or a source, which have one flow chart", () => {
+    const sheetOf = (key: string) => buildFlowsheet(world, world.sites.findIndex((x) => x.key === key));
+    for (const key of ['REFINERY', 'CRACKER_FLEX', 'CHLOR_ALKALI']) expect(hasBothFlows(sheetOf(key)!)).toBe(true);
+    for (const key of ['FUEL_DEPOT', 'OIL_FIELD']) expect(hasBothFlows(sheetOf(key)!)).toBe(false);
   });
 });
