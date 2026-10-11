@@ -270,10 +270,40 @@ bool spanStillHeld(const State& state, const EventDef& def) {
 
 }  // namespace
 
+namespace {
+
+bool isShock(const EventDef& d) {
+  return d.type == EventDef::Type::SupplyShock || d.type == EventDef::Type::DemandShock;
+}
+
+// "10 days", "1 day", "36 hours".
+std::string spanText(uint64_t ticks) {
+  const uint64_t hours = static_cast<uint64_t>(std::llround(static_cast<double>(ticks) * kTickHours));
+  if (hours >= 24 && hours % 24 == 0)
+    return std::to_string(hours / 24) + (hours == 24 ? " day" : " days");
+  return std::to_string(hours) + (hours == 1 ? " hour" : " hours");
+}
+
+// A shock starting: "Gas field: output cut to 50% for 10 days".
+void logShockStart(const World& world, const State& state, Recorder& rec, const EventDef& def) {
+  const bool supply = def.type == EventDef::Type::SupplyShock;
+  const long pct = std::lround(def.multiplier * 100.0);
+  const std::string what = supply ? "output" : "demand";
+  const std::string verb = def.multiplier < 1.0 ? " cut to " : " raised to ";
+  logEvent(rec, state.tick, supply ? "supply_shock" : "demand_shock", world.sites[def.site].key, "",
+           world.sites[def.site].name + ": " + what + verb + std::to_string(pct) + "% for " +
+               spanText(def.end_tick > def.start_tick ? def.end_tick - def.start_tick : 0));
+}
+
+}  // namespace
+
 void stepEvents(const World& world, State& state, Recorder& rec) {
   // Promote pending events whose start tick has arrived.
   for (const EventDef& def : state.pending)
-    if (def.start_tick <= state.tick) state.active.push_back(def);
+    if (def.start_tick <= state.tick) {
+      state.active.push_back(def);
+      if (isShock(def) && def.end_tick > state.tick) logShockStart(world, state, rec, def);
+    }
   state.pending.erase(std::remove_if(state.pending.begin(), state.pending.end(),
                                      [&](const EventDef& d) { return d.start_tick <= state.tick; }),
                       state.pending.end());
@@ -328,6 +358,18 @@ void stepEvents(const World& world, State& state, Recorder& rec) {
                  std::string(what) + " reopened near " + world.sites[def.site].name);
       }
     }
+  // A shock ending says so, unless another of its kind still holds the site.
+  for (const EventDef& def : state.active) {
+    if (!isShock(def) || def.end_tick > state.tick || def.end_tick <= def.start_tick) continue;
+    bool still = false;
+    for (const EventDef& other : state.active)
+      still = still || (&other != &def && other.type == def.type && other.site == def.site &&
+                        other.end_tick > state.tick);
+    if (still) continue;
+    const bool supply = def.type == EventDef::Type::SupplyShock;
+    logEvent(rec, state.tick, "shock_ended", world.sites[def.site].key, "",
+             world.sites[def.site].name + ": " + (supply ? "output" : "demand") + " back to normal");
+  }
   state.active.erase(std::remove_if(state.active.begin(), state.active.end(),
                                     [&](const EventDef& d) { return d.end_tick <= state.tick; }),
                      state.active.end());
