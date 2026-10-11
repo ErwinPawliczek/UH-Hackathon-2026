@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PetroGrid map builder</title>
+<link rel="icon" type="image/svg+xml" href="/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,500;125,700;125,800&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Tokens: design/v3/simulation-style.md, as in web/src/index.css. */
+:root{
+  --blue:#1764d6;--blue-strong:#0f54ba;--blue-light:#79aef2;--blue-soft:#e8f0fc;
+  --ink:#0a0a0a;--muted:#5f656c;--dim:#9aa0a6;--white:#ffffff;
+  --panel:#f7f8f9;--panel-2:#f0f2f4;--line:#e4e7ea;--line-2:#cdd2d7;--alarm:#d1372f;
+  --land:#f1f3f5;--water:#dde9f8;--lane:#b9bec4;
+  --f-display:"Archivo","Arial Narrow",Arial,sans-serif;
+  --f-body:"Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;overflow:hidden}
+body{font:14px/1.45 var(--f-body);color:var(--ink);background:var(--white);display:grid;grid-template-rows:48px minmax(0,1fr);grid-template-columns:minmax(0,1fr) 332px}
+button,select,input{font:inherit;color:inherit}
+
+/* Top bar with the zigzag hanging under it. */
+header{grid-column:1/3;position:relative;z-index:6;display:flex;align-items:center;gap:8px;padding:0 16px;background:var(--panel)}
+header .zig{position:absolute;left:0;right:0;top:100%;height:8px;pointer-events:none;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='8'%3E%3Cpath d='M0 0H20V0.5L10 6.27L0 0.5Z' fill='%23f7f8f9'/%3E%3Cpath d='M-10 6.27L0 0.5L10 6.27L20 0.5L30 6.27' fill='none' stroke='%23cdd2d7'/%3E%3C/svg%3E") repeat-x}
+.mark{display:flex;align-items:center;gap:8px;text-decoration:none;color:var(--ink)}
+.mark img{width:20px;height:20px}
+.wordmark{font-family:var(--f-display);font-stretch:125%;font-weight:700;font-size:16px;line-height:1}
+.wordmark b{color:var(--blue);font-weight:700}
+.title{font-family:var(--f-mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 10px 0 4px}
+.gap{flex:1}
+.sep{width:1px;height:22px;background:var(--line-2);margin:0 4px}
+
+/* Hexagon buttons: the outline and fill are two clipped layers behind the label. */
+.btn{--hex-h:28px;--hex-d:calc(var(--hex-h)*.2887);--btn-line:var(--line-2);--btn-fill:var(--panel-2);--btn-ring:1px;
+  position:relative;isolation:isolate;display:inline-flex;align-items:center;justify-content:center;height:var(--hex-h);min-width:calc(var(--hex-h)*1.1547);
+  padding:0 calc(var(--hex-d) + 6px);border:0;background:transparent;font-size:12px;line-height:1;white-space:nowrap;cursor:pointer;flex-shrink:0;text-decoration:none;color:var(--ink)}
+.btn::before,.btn::after{content:"";position:absolute;z-index:-1;clip-path:polygon(var(--d) 0,calc(100% - var(--d)) 0,100% 50%,calc(100% - var(--d)) 100%,var(--d) 100%,0 50%)}
+.btn::before{--d:var(--hex-d);inset:0;background:var(--btn-line)}
+.btn::after{--d:calc((var(--hex-h) - 2*var(--btn-ring))*.2887);inset:var(--btn-ring) calc(var(--btn-ring)*1.155);background:var(--btn-fill)}
+.btn:hover:not(:disabled){--btn-fill:var(--line)}
+.btn:disabled{cursor:not-allowed;opacity:.4}
+.btn:focus-visible{outline:none;--btn-line:var(--blue);--btn-ring:2px}
+.btn[aria-pressed=true]{--btn-line:var(--blue);--btn-fill:var(--blue-soft);color:var(--blue-strong)}
+.btn-primary{--btn-line:var(--blue);--btn-fill:var(--blue);color:var(--white)}
+.btn-primary:hover:not(:disabled){--btn-line:var(--blue-strong);--btn-fill:var(--blue-strong)}
+.btn kbd{font:11px var(--f-mono);color:var(--dim);margin-left:5px}
+.btn[aria-pressed=true] kbd{color:var(--blue)}
+
+main{position:relative;overflow:hidden;background:var(--white)}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#status{position:absolute;left:12px;bottom:10px;font:12px var(--f-mono);color:var(--muted);background:rgba(255,255,255,.88);padding:2px 6px}
+#hint{position:absolute;left:12px;top:16px;max-width:520px;font-size:12px;color:var(--muted);background:rgba(255,255,255,.88);padding:3px 7px}
+#brushBox{position:absolute;right:12px;top:16px;display:none;align-items:center;gap:6px;font-size:12px;color:var(--muted);background:rgba(255,255,255,.88);padding:3px 7px}
+
+aside{overflow:auto;padding:16px 12px 16px 6px;display:flex;flex-direction:column;gap:10px;background:var(--white)}
+/* Cut-corner panels: outline and fill as two clipped layers, as in the app. */
+.chamfer{--cut:10px;position:relative;isolation:isolate;padding:10px 12px}
+.chamfer::before,.chamfer::after{content:"";position:absolute;z-index:-1;pointer-events:none;
+  clip-path:polygon(var(--c) 0,calc(100% - var(--c)) 0,100% var(--c),100% calc(100% - var(--c)),calc(100% - var(--c)) 100%,var(--c) 100%,0 calc(100% - var(--c)),0 var(--c))}
+.chamfer::before{--c:var(--cut);inset:0;background:var(--line-2)}
+.chamfer::after{--c:calc(var(--cut) - .586px);inset:1px;background:var(--panel)}
+.chamfer.bad::before{background:var(--alarm)}
+.label{font:12px/1.4 var(--f-mono);text-transform:uppercase;letter-spacing:.14em;color:var(--muted);margin:0 0 6px}
+.mono{font-family:var(--f-mono);font-size:12px;font-variant-numeric:tabular-nums}
+.hint{color:var(--muted);font-size:12px;margin:4px 0 0}
+.big{font-family:var(--f-display);font-stretch:112%;font-weight:700;font-size:18px;line-height:1.2;margin:0}
+.big.bad{color:var(--alarm)}
+ul{list-style:none;margin:0;padding:0}
+li{padding:4px 0;border-top:1px solid var(--line);font-size:13px;line-height:1.35}
+li:first-child{border-top:0}
+li.ok::before{content:"✓ ";color:var(--blue)}
+li.no::before{content:"✕ ";color:var(--alarm)}
+li.no{color:var(--ink)}
+.err{display:block;width:100%;text-align:left;border:0;background:none;padding:0;cursor:pointer;color:var(--alarm);font-size:13px;line-height:1.35}
+.err:hover{text-decoration:underline}
+.err[disabled]{cursor:default;text-decoration:none}
+.warn{color:var(--ink)}
+.tag{display:inline-block;font:11px var(--f-mono);border:1px solid var(--line-2);padding:1px 5px;margin:1px 2px 1px 0;background:var(--white)}
+.tag.miss{border-color:var(--alarm);color:var(--alarm)}.tag.done{border-color:var(--blue);color:var(--blue)}
+input[type=text]{width:100%;padding:5px 7px;border:1px solid var(--line-2);border-radius:4px;background:var(--white)}
+select{padding:3px 6px;border:1px solid var(--line-2);border-radius:4px;background:var(--white);font-size:12px}
+.row{display:flex;flex-wrap:wrap;gap:6px}
+#menu{position:absolute;z-index:5;background:var(--white);border:1px solid var(--line-2);padding:4px;min-width:200px;display:none}
+#menu button{display:block;width:100%;text-align:left;border:0;background:none;padding:6px 8px;cursor:pointer;font-size:13px}
+#menu button:hover{background:var(--blue-soft)}#menu .x{color:var(--alarm)}
+/* Scroll bars: copied from web/src/index.css (the cut-corner thumb, blue while in use). */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-track-piece,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+  border: 0;
+}
+
+*::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+*::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  min-width: 32px;
+  /* 2 px of clear strip either side of the 6 px bar: a bigger target than the bar */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  background-origin: padding-box;
+  background-repeat: no-repeat;
+  background-size: 51% 51%;
+  background-position: top left, top right, bottom right, bottom left;
+  background-image:
+    linear-gradient(135deg, transparent 1.5px, #cdd2d7 0),
+    linear-gradient(225deg, transparent 1.5px, #cdd2d7 0),
+    linear-gradient(315deg, transparent 1.5px, #cdd2d7 0),
+    linear-gradient(45deg, transparent 1.5px, #cdd2d7 0);
+}
+
+*::-webkit-scrollbar-thumb:hover,
+*::-webkit-scrollbar-thumb:active,
+[data-scrolling]::-webkit-scrollbar-thumb {
+  background-image:
+    linear-gradient(135deg, transparent 1.5px, #1764d6 0),
+    linear-gradient(225deg, transparent 1.5px, #1764d6 0),
+    linear-gradient(315deg, transparent 1.5px, #1764d6 0),
+    linear-gradient(45deg, transparent 1.5px, #1764d6 0);
+}
+
+/*
+ * Firefox has no scroll bar pseudo-elements: the nearest it offers is a thin
+ * bar on a transparent track, in the same two colours. (Chromium must not
+ * see these properties — it would drop the styling above in their favour.)
+ */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #cdd2d7 transparent;
+  }
+
+  [data-scrolling] {
+    scrollbar-color: #1764d6 transparent;
+  }
+}
+
+#toast{position:absolute;left:50%;bottom:44px;transform:translateX(-50%);background:var(--ink);color:var(--white);font-size:13px;padding:6px 12px;display:none;max-width:70%}
+</style>
+</head>
+<body>
+<header>
+  <a class="mark" href="/" title="Back to the simulation"><img src="/logo.svg" alt=""><span class="wordmark">Petro<b>Grid</b></span></a>
+  <span class="title">Map builder</span>
+  <button class="btn" data-tool="select" aria-pressed="true" title="Move a site, pick a line and drag its points">Select<kbd>V</kbd></button>
+  <button class="btn" data-tool="road" title="Press, drag and release to lay a road">Road<kbd>R</kbd></button>
+  <button class="btn" data-tool="river" title="Press, drag and release to lay a river lane for barges">River lane<kbd>B</kbd></button>
+  <button class="btn" data-tool="sea" title="Press, drag and release to lay a sea lane for ships">Sea lane<kbd>S</kbd></button>
+  <button class="btn" data-tool="water" title="Paint water">Water<kbd>W</kbd></button>
+  <button class="btn" data-tool="land" title="Paint land back over water">Land<kbd>E</kbd></button>
+  <span class="gap"></span>
+  <button class="btn" id="check" title="Ask the engine whether this world can be built and whether it holds for 30 days">Check</button>
+  <button class="btn btn-primary" id="run" disabled title="Check the world first">Run this world</button>
+  <span class="sep"></span>
+  <button class="btn" id="default" title="Throw this layout away and go back to the default world">Default world</button>
+  <a class="btn" href="/" id="back">Back to simulation</a>
+  <span class="zig"></span>
+</header>
+
+<main>
+  <canvas id="cv"></canvas>
+  <div id="hint"></div>
+  <div id="brushBox">Brush <select id="brush"><option value="0">Small (10 km)</option><option value="1" selected>Medium (30 km)</option><option value="2">Large (50 km)</option></select></div>
+  <div id="status"></div><div id="menu"></div><div id="toast" role="status"></div>
+</main>
+
+<aside>
+  <section class="chamfer" id="checkPanel">
+    <h2 class="label">Check</h2>
+    <div id="result"><p class="hint">Not checked yet.</p></div>
+  </section>
+  <section class="chamfer">
+    <h2 class="label">Selected</h2>
+    <div id="sel"><p class="hint">Nothing selected.</p></div>
+  </section>
+  <section class="chamfer">
+    <h2 class="label">Checklist</h2>
+    <ul id="list"></ul>
+  </section>
+  <section class="chamfer">
+    <h2 class="label">Cannot be reached</h2>
+    <ul id="unmet"></ul>
+  </section>
+  <section class="chamfer">
+    <h2 class="label">File</h2>
+    <div class="row"><button class="btn" id="export">Export</button><button class="btn" id="import">Import</button></div>
+    <input type="file" id="file" accept=".json,application/json" hidden>
+    <p class="hint">The layout is saved in this browser as you work. The 22 sites and 9 pipelines are fixed: move and rename sites, re-bend pipelines, and draw roads, lanes and water freely.</p>
+  </section>
+</aside>
+
+<script src="site-icons.js"></script>
+<script>
+/* PetroGrid map builder. A static page: no build step, no libraries.
+   It edits one layout (the format of design/worlds/erwin-world-v1.json), keeps it in localStorage, asks the
+   engine to check it, and hands it to the app to run. The 22 sites and 9 pipelines of the default world are
+   fixed; where they are, what they are called, how the pipelines bend, and all roads, lanes and water are free. */
+
+/* ---------- what each kind of site needs and makes (engine/data/catalog) ---------- */
+const PRESETS = {
+  OIL_FIELD:{kind:'source',needs:[],makes:['CRUDE']},
+  GAS_FIELD:{kind:'source',needs:[],makes:['RAW_GAS']},
+  SALT_MINE:{kind:'source',needs:[],makes:['SALT']},
+  GAS_PLANT:{kind:'plant',needs:['RAW_GAS'],makes:['METHANE','ETHANE','LPG','NAPHTHA']},
+  REFINERY:{kind:'plant',needs:['CRUDE'],makes:['GASOLINE','DIESEL','JET','LPG','NAPHTHA','FUEL_OIL','BENZENE','SOLVENT','PROPYLENE']},
+  STEAM_CRACKER_GAS:{kind:'plant',needs:['ETHANE'],makes:['ETHYLENE','PROPYLENE','BENZENE','GASOLINE','FUEL_OIL','LPG']},
+  STEAM_CRACKER_FLEX:{kind:'plant',needs:['ETHANE'],optional:['LPG','NAPHTHA'],makes:['ETHYLENE','PROPYLENE','BENZENE','GASOLINE','FUEL_OIL','LPG']},
+  CHLOR_ALKALI:{kind:'plant',needs:['SALT'],makes:['CHLORINE','CAUSTIC']},
+  POLYETHYLENE:{kind:'plant',needs:['ETHYLENE'],makes:['PE']},
+  POLYPROPYLENE:{kind:'plant',needs:['PROPYLENE'],makes:['PP']},
+  VINYLS:{kind:'plant',needs:['ETHYLENE','CHLORINE'],makes:['PVC']},
+  STYRENICS:{kind:'plant',needs:['BENZENE','ETHYLENE'],makes:['PS','STYRENE','SOLVENT']},
+  PORT_TERMINAL:{kind:'port',needs:[],optional:['FUEL_OIL'],makes:[],anything:true},
+  FUEL_DEPOT:{kind:'sink',needs:['GASOLINE','DIESEL','JET','LPG'],makes:[]},
+  GAS_GRID:{kind:'sink',needs:['METHANE'],makes:[]},
+  PACKAGING:{kind:'sink',needs:['PE','PP'],makes:[]},
+  CONSTRUCTION:{kind:'sink',needs:['PVC'],makes:[]},
+  CONSUMER_GOODS:{kind:'sink',needs:['PS'],optional:['PP'],makes:[]},
+  PAINTS_COATINGS:{kind:'sink',needs:['SOLVENT','STYRENE'],makes:[]},
+  PROCESS_INDUSTRIES:{kind:'sink',needs:['CAUSTIC'],makes:[]},
+};
+const WORDS = {CRUDE:'crude oil',RAW_GAS:'raw gas',SALT:'salt',METHANE:'methane',ETHANE:'ethane',LPG:'LPG',NAPHTHA:'naphtha',GASOLINE:'gasoline',JET:'jet fuel',DIESEL:'diesel',FUEL_OIL:'fuel oil',SOLVENT:'solvent',BENZENE:'benzene',ETHYLENE:'ethylene',PROPYLENE:'propylene',CHLORINE:'chlorine',CAUSTIC:'caustic soda',STYRENE:'styrene',PE:'polyethylene',PP:'polypropylene',PVC:'PVC',PS:'polystyrene'};
+const word = m => WORDS[m] || String(m).toLowerCase().replace(/_/g,' ');
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+/* which transport each material may use: P pipeline, S ship, B barge, T truck */
+const MAT_MODES = {CRUDE:'PS',RAW_GAS:'P',SALT:'SBT',METHANE:'P',ETHANE:'PS',LPG:'PSBT',NAPHTHA:'PSBT',GASOLINE:'PSBT',JET:'PSBT',DIESEL:'PSBT',FUEL_OIL:'SBT',SOLVENT:'SBT',BENZENE:'SBT',ETHYLENE:'PS',PROPYLENE:'PST',CHLORINE:'PT',CAUSTIC:'SBT',STYRENE:'SBT',PE:'SBT',PP:'SBT',PVC:'SBT',PS:'SBT'};
+const MODES = {
+  /* line styles and colours as on the app's map (web/src/scene/palette.ts) */
+  pipeline:{label:'Pipeline',dash:[],w:2.6,col:'#1764d6'},
+  road:{label:'Road',dash:[6,4],w:1.6,col:'#9aa0a6'},
+  river:{label:'River lane',dash:[14,5],w:2.2,col:'#9dc3ef'},
+  sea:{label:'Sea lane',dash:[2,5],w:2.2,col:'#79aef2'},
+};
+/* pipelines take their material's flow colour: gas blue-light, olefins blue, crude and fuels ink */
+const PIPE_COLOR = {RAW_GAS:'#79aef2',METHANE:'#79aef2',ETHANE:'#79aef2',LPG:'#79aef2',CHLORINE:'#79aef2',ETHYLENE:'#1764d6',PROPYLENE:'#1764d6',CRUDE:'#0a0a0a',NAPHTHA:'#0a0a0a',GASOLINE:'#0a0a0a',JET:'#0a0a0a',DIESEL:'#0a0a0a'};
+const NET_MODES = ['road','river','sea'], CARRY = {road:'T',river:'B',sea:'S'};
+const EDGE = 60, SNAP = 12, W_KM = 600, H_KM = 400, CELL = 10, COLS = W_KM/CELL, ROWS = H_KM/CELL;
+const KEY = 'petrogrid-layout-v2', RUN_KEY = 'petrogrid-run-custom';
+const HINTS = {
+  select:'Drag a site to move it. Click a road, lane or pipeline to pick it, then drag its points. Double-click a pipeline to add a bend. Right-click to erase or remove.',
+  road:'Press, drag and release to lay one straight road. Lay them end to end for bends. Ends snap to sites, to other ends, and onto the middle of a road.',
+  river:'Press, drag and release to lay a river lane for barges, on water. Ends snap to sites within reach and to other river lanes.',
+  sea:'Press, drag and release to lay a sea lane for ships, on water. Ends snap to sites within reach and to other sea lanes.',
+  water:'Paint water with the brush. Right-click water to erase a whole body of it.',
+  land:'Paint land back over water.',
+};
+
+/* ---------- state ---------- */
+const blank = () => ({version:2,wKm:W_KM,hKm:H_KM,cellKm:CELL,water:[],sites:[],network:[],connections:[]});
+let S = blank(), DEFAULT = null, DEFAULT_ACCESS = null;
+let tool = 'select', sel = null, netDraft = null, drag = null, mouse = [0,0], ring = null;
+let lastCheck = null, checkedText = '', checkTimer = null, checking = false;
+const $ = id => document.getElementById(id);
+const clone = o => JSON.parse(JSON.stringify(o));
+const waterSet = () => new Set(S.water.map(([c,r]) => c+','+r));
+const siteById = id => S.sites.find(s => s.id === id);
+const connKey = c => c.from+'>'+c.to+'>'+c.material;
+function toast(text){const t=$('toast');t.textContent=text;t.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>{t.style.display='none';},4200);}
+
+/* Fit any layout to the fixed scope: the default's 22 sites and 9 pipelines, with this layout's positions,
+   names and bends where it has them; its water, roads and lanes as they are (rail is dropped). */
+function conform(obj){
+  const out = blank(), src = obj && typeof obj === 'object' ? obj : {};
+  /* lanes may run up to 60 km past the map edge */
+  const pts = list => Array.isArray(list) ? list.filter(p => Array.isArray(p) && isFinite(p[0]) && isFinite(p[1])).map(p => [Math.max(-EDGE,Math.min(W_KM+EDGE,+p[0])),Math.max(-EDGE,Math.min(H_KM+EDGE,+p[1]))]) : [];
+  out.water = Array.isArray(src.water) ? src.water.filter(c => Array.isArray(c) && c[0]>=0 && c[1]>=0 && c[0]<COLS && c[1]<ROWS).map(c => [c[0]|0,c[1]|0]) : [];
+  const theirs = new Map((Array.isArray(src.sites) ? src.sites : []).map(s => [s.id, s]));
+  let kept = 0;
+  out.sites = DEFAULT.sites.map(d => {const t = theirs.get(d.id), same = t && t.preset === d.preset;
+    if (same) kept++;
+    return {id:d.id, name:same && typeof t.name === 'string' && t.name.trim() ? t.name.trim().slice(0,60) : d.name, preset:d.preset,
+      x:same && isFinite(t.x) ? Math.max(0,Math.min(W_KM,Math.round(t.x))) : d.x, y:same && isFinite(t.y) ? Math.max(0,Math.min(H_KM,Math.round(t.y))) : d.y};});
+  const lines = [...(Array.isArray(src.network) ? src.network : []), ...(Array.isArray(src.connections) ? src.connections.filter(c => c.mode !== 'pipeline') : [])];
+  out.network = lines.filter(n => NET_MODES.includes(n.mode)).map(n => ({mode:n.mode, points:pts(n.points)})).filter(n => n.points.length >= 2);
+  const pipes = new Map((Array.isArray(src.connections) ? src.connections : []).filter(c => c.mode === 'pipeline').map(c => [connKey(c), c]));
+  const at = id => {const s = out.sites.find(x => x.id === id); return [s.x, s.y];};
+  out.connections = DEFAULT.connections.map(d => {const t = pipes.get(connKey(d)); let mid = t ? pts(t.points).slice(1,-1) : [];
+    if (!t) {const a = at(d.from), b = at(d.to); mid = bow(a,b,0).slice(1,-1);}
+    return {from:d.from, to:d.to, mode:'pipeline', material:d.material, points:[at(d.from), ...mid, at(d.to)]};});
+  return {layout:out, kept, extraSites:Math.max(0, theirs.size - kept), extraPipes:[...pipes.keys()].filter(k => !DEFAULT.connections.some(d => connKey(d) === k)).length};
+}
+function load(obj, quiet){const r = conform(obj); S = r.layout; sel = null; netDraft = null; drag = null; ring = null; refresh(true); if (!quiet) save(); queueCheck();
+  if (!quiet && (r.kept < DEFAULT.sites.length || r.extraSites || r.extraPipes)) toast('This world keeps the 22 default sites and 9 pipelines: positions and bends were taken where they matched, the rest left as the default.');}
+function save(){try{localStorage.setItem(KEY, JSON.stringify(S));}catch(e){}}
+
+/* ---------- canvas ---------- */
+const cv = $('cv'), ctx = cv.getContext('2d'); let sc = 1, ox = 0, oy = 0;
+function fit(){const r = cv.parentElement.getBoundingClientRect(), d = window.devicePixelRatio || 1; cv.width = r.width*d; cv.height = r.height*d; ctx.setTransform(d,0,0,d,0,0);
+  sc = Math.min((r.width-48)/W_KM, (r.height-72)/H_KM); ox = (r.width-W_KM*sc)/2; oy = (r.height-H_KM*sc)/2 + 8; draw();}
+const X = x => ox+x*sc, Y = y => oy+y*sc, toKm = e => {const r = cv.getBoundingClientRect(); return [(e.clientX-r.left-ox)/sc, (e.clientY-r.top-oy)/sc];};
+function nearSite(p, reach){let b = null, bd = reach; for (const s of S.sites){const d = Math.hypot(s.x-p[0], s.y-p[1]); if (d < bd){bd = d; b = s;}} return b;}
+const siteAt = p => nearSite(p, 15/sc);
+function segHit(pts, p){let best = null; for (let k = 1; k < pts.length; k++){const a = pts[k-1], q = pts[k], vx = q[0]-a[0], vy = q[1]-a[1], L = vx*vx+vy*vy || 1; let t = ((p[0]-a[0])*vx+(p[1]-a[1])*vy)/L; t = Math.max(0, Math.min(1, t));
+  const x = a[0]+t*vx, y = a[1]+t*vy, d = Math.hypot(x-p[0], y-p[1]); if (!best || d < best.d) best = {d, k, pt:[Math.round(x), Math.round(y)]};} return best;}
+function lineAt(list, p){let b = null, bd = 7/sc; list.forEach((c,i) => {const h = segHit(c.points, p); if (h && h.d < bd){bd = h.d; b = i;}}); return b;}
+function selLine(){return !sel ? null : sel.t === 'conn' ? S.connections[sel.i] : sel.t === 'net' ? S.network[sel.i] : null;}
+function handleAt(p){const c = selLine(); if (!c) return -1; let b = -1, bd = 8/sc; c.points.forEach((q,i) => {const d = Math.hypot(q[0]-p[0], q[1]-p[1]); if (d < bd){bd = d; b = i;}}); return b;}
+/* where an end of a strip lands: a site, the end of a strip of the same kind, or onto the middle of one */
+function snap(p, mode, commit, skip){let best = null, bd = SNAP;
+  for (const s of S.sites){const d = Math.hypot(s.x-p[0], s.y-p[1]); if (d < bd){bd = d; best = [s.x, s.y];}}
+  if (best) return best; bd = SNAP;
+  for (const n of S.network){if (n.mode !== mode) continue; for (const q of n.points){if (q === skip) continue; const d = Math.hypot(q[0]-p[0], q[1]-p[1]); if (d < bd){bd = d; best = [q[0], q[1]];}}}
+  if (best) return best; bd = 9; let hit = null;
+  for (const n of S.network){if (n.mode !== mode || (skip && n.points.includes(skip))) continue; const h = segHit(n.points, p); if (h && h.d < bd){bd = h.d; hit = {n, k:h.k, pt:h.pt};}}
+  if (hit){if (commit) hit.n.points.splice(hit.k, 0, [hit.pt[0], hit.pt[1]]); return hit.pt;}
+  return [Math.max(0, Math.min(W_KM, Math.round(p[0]))), Math.max(0, Math.min(H_KM, Math.round(p[1])))];}
+function bow(a, b, k){const dx = b[0]-a[0], dy = b[1]-a[1], L = Math.hypot(dx,dy) || 1, nx = -dy/L, ny = dx/L, off = (k%2 ? -1 : 1)*(Math.floor(k/2)+1)*Math.min(18, L*.12);
+  return [a, [Math.round(a[0]+dx/3+nx*off), Math.round(a[1]+dy/3+ny*off)], [Math.round(a[0]+dx*2/3+nx*off), Math.round(a[1]+dy*2/3+ny*off)], b];}
+
+/* site icons: the app's own path data, drawn inside a hexagon badge */
+const ICONS = {};
+for (const [key, def] of Object.entries(window.PETROGRID_SITE_ICONS || {})){
+  ICONS[key] = [...def.markup.matchAll(/<path d="([^"]+)" fill="([^"]+)" stroke="([^"]+)"\/>/g)].map(m => ({path:new Path2D(m[1]), fill:m[2] !== 'none', accent:(m[2]+m[3]).includes('accent')}));
+}
+const label = preset => (window.PETROGRID_SITE_ICONS && window.PETROGRID_SITE_ICONS[preset] ? window.PETROGRID_SITE_ICONS[preset].label : preset);
+function hexPath(cx, cy, r){ctx.beginPath(); for (let i = 0; i < 6; i++){const a = Math.PI/3*i; ctx[i ? 'lineTo' : 'moveTo'](cx+r*Math.cos(a), cy+r*Math.sin(a));} ctx.closePath();}
+function badge(preset, x, y, on, bad){const r = 13;
+  hexPath(x, y, r); ctx.fillStyle = bad ? '#d1372f' : '#ffffff'; ctx.fill(); ctx.lineWidth = on ? 2.4 : 1.6; ctx.strokeStyle = bad ? '#d1372f' : on ? '#1764d6' : '#0a0a0a'; ctx.stroke();
+  const strokes = ICONS[preset]; if (!strokes) return;
+  ctx.save(); ctx.translate(x-8, y-8); ctx.scale(16/24, 16/24); ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const s of strokes){const col = bad ? '#ffffff' : s.accent ? '#1764d6' : '#0a0a0a'; if (s.fill){ctx.fillStyle = col; ctx.fill(s.path);} else {ctx.strokeStyle = col; ctx.stroke(s.path);}}
+  ctx.restore();}
+
+function draw(){
+  const r = cv.parentElement.getBoundingClientRect(); ctx.clearRect(0, 0, r.width, r.height);
+  ctx.fillStyle = '#f1f3f5'; ctx.fillRect(X(0), Y(0), W_KM*sc, H_KM*sc);
+  ctx.fillStyle = '#dde9f8'; for (const [c,rw] of S.water) ctx.fillRect(X(c*CELL), Y(rw*CELL), CELL*sc+.5, CELL*sc+.5);
+  ctx.strokeStyle = 'rgba(10,10,10,.05)'; ctx.lineWidth = 1; ctx.beginPath();
+  for (let c = 0; c <= COLS; c += 5){ctx.moveTo(X(c*CELL), Y(0)); ctx.lineTo(X(c*CELL), Y(H_KM));}
+  for (let rw = 0; rw <= ROWS; rw += 5){ctx.moveTo(X(0), Y(rw*CELL)); ctx.lineTo(X(W_KM), Y(rw*CELL));} ctx.stroke();
+  ctx.strokeStyle = '#cdd2d7'; ctx.strokeRect(X(0), Y(0), W_KM*sc, H_KM*sc);
+  S.network.forEach((n,i) => line(n.points, n.mode, sel && sel.t === 'net' && sel.i === i));
+  S.connections.forEach((c,i) => line(c.points, 'pipeline', sel && sel.t === 'conn' && sel.i === i, c.material));
+  if (netDraft) line([netDraft.a, snap(mouse, netDraft.mode, false)], netDraft.mode, true);
+  const picked = selLine();
+  if (picked) picked.points.forEach((q,i) => {const end = sel.t === 'conn' && (i === 0 || i === picked.points.length-1); if (end) return;
+    ctx.beginPath(); ctx.arc(X(q[0]), Y(q[1]), 4.5, 0, 7); ctx.fillStyle = sel.h === i ? '#1764d6' : '#ffffff'; ctx.fill(); ctx.lineWidth = 1.6; ctx.strokeStyle = '#1764d6'; ctx.stroke();});
+  ctx.font = '500 11px "IBM Plex Mono",ui-monospace,Menlo,monospace'; ctx.textBaseline = 'middle';
+  const wrong = new Set(((lastCheck && lastCheck.errors) || []).map(e => e.site).filter(id => id !== null && id !== undefined));
+  for (const s of S.sites){const on = sel && sel.t === 'site' && sel.id === s.id, x = X(s.x), y = Y(s.y), bad = wrong.has(s.id) && checkedText === JSON.stringify(S);
+    const t = s.name.toUpperCase(), w = ctx.measureText(t).width + s.name.length*1.2;
+    ctx.fillStyle = 'rgba(255,255,255,.88)'; ctx.fillRect(x+11, y-9, w+14, 18); ctx.strokeStyle = bad ? '#d1372f' : on ? '#1764d6' : '#e4e7ea'; ctx.lineWidth = 1; ctx.strokeRect(x+11.5, y-8.5, w+13, 17);
+    ctx.fillStyle = bad ? '#d1372f' : on ? '#1764d6' : '#5f656c'; if (ctx.letterSpacing !== undefined) ctx.letterSpacing = '1.2px'; ctx.fillText(t, x+19, y+.5); if (ctx.letterSpacing !== undefined) ctx.letterSpacing = '0px';
+    badge(s.preset, x, y, on, bad);}
+  if (ring){const s = siteById(ring.id); if (s){ctx.beginPath(); ctx.arc(X(s.x), Y(s.y), 24, 0, 7); ctx.lineWidth = 3; ctx.strokeStyle = '#d1372f'; ctx.stroke();}}
+  let roadKm = 0; for (const n of S.network) if (n.mode === 'road') for (let i = 1; i < n.points.length; i++) roadKm += Math.hypot(n.points[i][0]-n.points[i-1][0], n.points[i][1]-n.points[i-1][1]);
+  $('status').textContent = `${Math.max(0,Math.min(W_KM,mouse[0])).toFixed(0)}, ${Math.max(0,Math.min(H_KM,mouse[1])).toFixed(0)} km · ${S.network.length} roads and lanes · ${Math.round(roadKm).toLocaleString('en-US')} km of road`;
+}
+function line(pts, mode, on, mat){const M = MODES[mode]; ctx.save(); ctx.setLineDash(M.dash); ctx.lineWidth = on ? M.w+1.4 : M.w;
+  ctx.strokeStyle = on ? '#1764d6' : mat ? PIPE_COLOR[mat] || '#b9bec4' : M.col; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.beginPath(); pts.forEach((p,i) => ctx[i ? 'lineTo' : 'moveTo'](X(p[0]), Y(p[1]))); ctx.stroke(); ctx.restore();
+  if (pts.length > 1 && mat){const k = Math.floor((pts.length-1)/2), a = pts[k], b = pts[k+1] || a; ctx.save(); ctx.font = '10.5px "Instrument Sans",system-ui,sans-serif'; ctx.textBaseline = 'alphabetic';
+    const t = cap(word(mat))+' pipeline'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.strokeText(t, X((a[0]+b[0])/2)+5, Y((a[1]+b[1])/2)-5); ctx.fillStyle = on ? '#1764d6' : '#3f454c'; ctx.fillText(t, X((a[0]+b[0])/2)+5, Y((a[1]+b[1])/2)-5); ctx.restore();}}
+
+/* ---------- interaction ---------- */
+function setTool(t){tool = t; netDraft = null; document.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === t));
+  cv.style.cursor = t === 'select' ? 'default' : 'crosshair'; $('hint').textContent = HINTS[t]; $('brushBox').style.display = t === 'water' || t === 'land' ? 'flex' : 'none'; draw();}
+document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
+function paint(p, on){const c0 = Math.floor(p[0]/CELL), r0 = Math.floor(p[1]/CELL), R = +$('brush').value, set = waterSet();
+  for (let c = c0-R; c <= c0+R; c++) for (let r = r0-R; r <= r0+R; r++){if (c < 0 || r < 0 || c >= COLS || r >= ROWS) continue; const k = c+','+r;
+    if (on && !set.has(k)){S.water.push([c,r]); set.add(k);} if (!on && set.has(k)){S.water = S.water.filter(([a,b]) => a !== c || b !== r); set.delete(k);}}}
+function moveSite(s, nx, ny){for (const c of S.connections){if (c.from === s.id) c.points[0] = [nx,ny]; if (c.to === s.id) c.points[c.points.length-1] = [nx,ny];}
+  for (const n of S.network) for (const q of n.points) if (q[0] === s.x && q[1] === s.y){q[0] = nx; q[1] = ny;} s.x = nx; s.y = ny;}
+cv.onmousedown = e => {if (e.button !== 0) return; const p = toKm(e); hideMenu();
+  if (tool === 'water' || tool === 'land'){drag = {paint:tool === 'water'}; paint(p, drag.paint); draw(); return;}
+  if (NET_MODES.includes(tool)){netDraft = {mode:tool, a:snap(p, tool, true)}; draw(); return;}
+  /* a site wins over a line's end that sits on it */
+  const s = siteAt(p), h = s ? -1 : handleAt(p), c = selLine();
+  if (h >= 0 && !(sel.t === 'conn' && (h === 0 || h === c.points.length-1))){sel.h = h; drag = {handle:h}; draw(); return;}
+  if (s){sel = {t:'site', id:s.id}; drag = {site:s};}
+  else {let i = lineAt(S.connections, p); if (i !== null) sel = {t:'conn', i}; else {i = lineAt(S.network, p); sel = i === null ? null : {t:'net', i};}}
+  refresh(true);};
+cv.onmousemove = e => {mouse = toKm(e);
+  if (drag && drag.site) moveSite(drag.site, Math.max(0, Math.min(W_KM, Math.round(mouse[0]))), Math.max(0, Math.min(H_KM, Math.round(mouse[1]))));
+  else if (drag && drag.handle !== undefined){const c = selLine(); if (c){const q = c.points[drag.handle]; const to = sel.t === 'net' ? snap(mouse, c.mode, false, q) : [Math.max(0,Math.min(W_KM,Math.round(mouse[0]))), Math.max(0,Math.min(H_KM,Math.round(mouse[1])))]; q[0] = to[0]; q[1] = to[1];}}
+  else if (drag && 'paint' in drag) paint(mouse, drag.paint);
+  draw();};
+window.onmouseup = () => {
+  if (netDraft){const b = snap(mouse, netDraft.mode, true), a = netDraft.a; if (Math.hypot(a[0]-b[0], a[1]-b[1]) >= 4){S.network.push({mode:netDraft.mode, points:[a,b]}); sel = {t:'net', i:S.network.length-1};} netDraft = null; refresh(); return;}
+  if (drag){drag = null; refresh();}};
+function addBend(c, p){const h = segHit(c.points, p); if (!h) return; c.points.splice(h.k, 0, [h.pt[0], h.pt[1]]); sel.h = h.k; refresh();}
+function removeBend(c, i){if (sel.t === 'conn' && c.points.length <= 3){toast('A pipeline keeps at least one bend.'); return;} if (sel.t === 'net' && c.points.length <= 2){S.network.splice(sel.i, 1); sel = null; refresh(); return;} c.points.splice(i, 1); delete sel.h; refresh();}
+cv.ondblclick = e => {if (tool !== 'select') return; const p = toKm(e), i = lineAt(S.connections, p); if (i !== null){sel = {t:'conn', i}; addBend(S.connections[i], p);}};
+
+/* right-click: what can be erased or changed under the pointer */
+const menu = $('menu'); function hideMenu(){menu.style.display = 'none';}
+cv.oncontextmenu = e => {e.preventDefault(); netDraft = null; drag = null; const p = toKm(e), items = [];
+  const h = handleAt(p), cur = selLine();
+  if (cur && h >= 0 && !(sel.t === 'conn' && (h === 0 || h === cur.points.length-1))) items.push(['Remove this bend', () => removeBend(cur, h)]);
+  const ci = lineAt(S.connections, p); if (ci !== null && h < 0){const c = S.connections[ci]; items.push([`Add a bend to the ${word(c.material)} pipeline here`, () => {sel = {t:'conn', i:ci}; addBend(c, p);}, true]);}
+  const ni = lineAt(S.network, p); if (ni !== null){const n = S.network[ni]; items.push([`Erase this ${MODES[n.mode].label.toLowerCase()}`, () => {S.network.splice(S.network.indexOf(n), 1); sel = null;}]);}
+  if (isWater(p)){items.push(['Erase water here (brush size)', () => paint(p, false)]);
+    items.push(['Erase this whole body of water', () => {const set = waterSet(), st = [[Math.floor(p[0]/CELL), Math.floor(p[1]/CELL)]], gone = new Set();
+      while (st.length){const [c,r] = st.pop(), k = c+','+r; if (!set.has(k) || gone.has(k)) continue; gone.add(k); st.push([c+1,r],[c-1,r],[c,r+1],[c,r-1]);} S.water = S.water.filter(([c,r]) => !gone.has(c+','+r));}]);}
+  if (!items.length){hideMenu(); return;}
+  menu.innerHTML = ''; for (const [text, fn, plain] of items){const b = document.createElement('button'); if (!plain) b.className = 'x'; b.textContent = text; b.onclick = () => {fn(); hideMenu(); refresh();}; menu.appendChild(b);}
+  const r = cv.getBoundingClientRect(); menu.style.display = 'block'; menu.style.left = Math.min(e.clientX-r.left, r.width-230)+'px'; menu.style.top = Math.min(e.clientY-r.top, r.height-items.length*34-10)+'px';};
+window.addEventListener('mousedown', e => {if (!menu.contains(e.target)) hideMenu();}, true);
+const KEYS = {v:'select', r:'road', b:'river', s:'sea', w:'water', e:'land'};
+window.onkeydown = e => {if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || e.metaKey || e.ctrlKey) return; const k = e.key.toLowerCase();
+  if (k === 'escape'){netDraft = null; sel = null; ring = null; refresh(true);}
+  else if (k === 'delete' || k === 'backspace'){const c = selLine();
+    if (c && sel.h !== undefined) removeBend(c, sel.h);
+    else if (sel && sel.t === 'net'){S.network.splice(sel.i, 1); sel = null; refresh();}
+    else if (sel && sel.t === 'conn') toast('Pipelines are fixed: re-bend them, but they cannot be removed.');
+    else if (sel && sel.t === 'site') toast('Sites are fixed: move or rename them, but they cannot be removed.');
+    e.preventDefault();}
+  else if (KEYS[k]) setTool(KEYS[k]);};
+
+/* ---------- what reaches what ---------- */
+function access(L){const out = {}; for (const mode of NET_MODES){const pts = [], par = []; const find = i => par[i] === i ? i : (par[i] = find(par[i]));
+  L.network.forEach(n => {if (n.mode !== mode) return; let prev = -1; for (const q of n.points){let idx = pts.findIndex(z => Math.hypot(z[0]-q[0], z[1]-q[1]) <= 4); if (idx < 0){idx = pts.length; pts.push(q); par.push(idx);} if (prev >= 0) par[find(prev)] = find(idx); prev = idx;}});
+  const site = {}; for (const s of L.sites){let b = -1, bd = SNAP+.01; pts.forEach((q,i) => {const d = Math.hypot(q[0]-s.x, q[1]-s.y); if (d < bd){bd = d; b = i;}}); if (b >= 0) site[s.id] = find(b);}
+  out[mode] = {site, pieces:new Set(pts.map((_,i) => find(i))).size};} return out;}
+function canMove(m, a, b, acc){if (S.connections.some(c => c.from === a && c.to === b && c.material === m)) return true;
+  for (const mode in CARRY){if (!(MAT_MODES[m] || '').includes(CARRY[mode])) continue; const A = acc[mode].site[a], B = acc[mode].site[b]; if (A !== undefined && A === B) return true;} return false;}
+function isWater(p){return waterSet().has(Math.floor(p[0]/CELL)+','+Math.floor(p[1]/CELL));}
+function onWater(p, set){for (const s of S.sites) if (Math.hypot(s.x-p[0], s.y-p[1]) <= SNAP) return true; return set.has(Math.floor(p[0]/CELL)+','+Math.floor(p[1]/CELL));}
+const NO_ROAD = ['OIL_FIELD','GAS_FIELD','GAS_GRID'];
+/* the editor's own list of what is wrong, by site: the checklist uses it, and it stands in for the engine's check when the server has none */
+function localProblems(acc){const errors = [], set = waterSet();
+  for (const s of S.sites){
+    if (acc.road.site[s.id] === undefined && !NO_ROAD.includes(s.preset)) errors.push({site:s.id, mode:'road', text:`${s.name} needs a road within ${SNAP} km`});
+    for (const mode of ['river','sea']) if (DEFAULT_ACCESS[mode].site[s.id] !== undefined && acc[mode].site[s.id] === undefined) errors.push({site:s.id, mode, text:`${s.name} needs a ${MODES[mode].label.toLowerCase()} within ${SNAP} km for its berth`});}
+  if (acc.road.pieces > 1) errors.push({site:null, mode:'road', text:`The road network is in ${acc.road.pieces} pieces: join them`});
+  const dry = S.network.filter(n => (n.mode === 'river' || n.mode === 'sea') && n.points.some(p => !onWater(p, set))).length;
+  const warnings = dry ? [{site:null, text:`${dry} river or sea lane${dry === 1 ? ' has' : 's have'} a point on land`}] : [];
+  return {errors, warnings, dry};}
+
+/* ---------- panels ---------- */
+/* A site is on a network only if one of its POINTS is within reach. Where a strip passes a site without one, put a point there. */
+function tieSites(){for (const s of S.sites) for (const mode of NET_MODES){let near = false, hit = null, bd = SNAP;
+  for (const n of S.network){if (n.mode !== mode) continue; if (n.points.some(q => Math.hypot(q[0]-s.x, q[1]-s.y) <= SNAP)){near = true; break;} const h = segHit(n.points, [s.x, s.y]); if (h && h.d < bd){bd = h.d; hit = {n, h};}}
+  if (!near && hit) hit.n.points.splice(hit.h.k, 0, [hit.h.pt[0], hit.h.pt[1]]);}}
+function refresh(noEdit){if (!noEdit){tieSites(); save();} draw(); const acc = access(S);
+  const el = $('sel');
+  if (!sel){el.innerHTML = '<p class="hint">Nothing selected. Click a site, a road, a lane or a pipeline.</p>';}
+  else if (sel.t === 'site'){const s = siteById(sel.id), P = PRESETS[s.preset];
+    const got = m => S.sites.some(o => o.id !== s.id && PRESETS[o.preset].makes.includes(m) && canMove(m, o.id, s.id, acc));
+    const sent = m => S.sites.some(o => o.id !== s.id && (PRESETS[o.preset].anything || PRESETS[o.preset].needs.includes(m) || (PRESETS[o.preset].optional || []).includes(m)) && canMove(m, s.id, o.id, acc));
+    el.innerHTML = `<input type="text" id="nm" maxlength="60" aria-label="Site name" value="${s.name.replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"><p class="hint">${label(s.preset)} · <span class="mono">${s.x}, ${s.y} km</span></p>
+      <p style="margin:8px 0 2px">Reached by<br>${NET_MODES.map(m => `<span class="tag ${acc[m].site[s.id] !== undefined ? 'done' : ''}">${MODES[m].label.toLowerCase()}</span>`).join('')}</p>
+      <p style="margin:8px 0 2px">Needs<br>${P.needs.map(m => `<span class="tag ${got(m) ? 'done' : 'miss'}">${word(m)}</span>`).join('') || '<span class="hint">nothing</span>'}${(P.optional || []).map(m => `<span class="tag ${got(m) ? 'done' : ''}">${word(m)} (optional)</span>`).join('')}</p>
+      <p style="margin:8px 0 2px">Makes<br>${P.makes.map(m => `<span class="tag ${sent(m) ? 'done' : 'miss'}">${word(m)}</span>`).join('') || (P.anything ? '<span class="hint">takes any surplus</span>' : '<span class="hint">nothing</span>')}</p>
+      <p class="hint">Blue: a supplier or customer can reach it. Red: no way there yet.</p>`;
+    $('nm').oninput = e => {s.name = e.target.value.slice(0,60) || label(s.preset); save(); draw(); queueCheck();};}
+  else {const c = selLine(); let len = 0; for (let i = 1; i < c.points.length; i++) len += Math.hypot(c.points[i][0]-c.points[i-1][0], c.points[i][1]-c.points[i-1][1]);
+    if (sel.t === 'conn'){const a = siteById(c.from), b = siteById(c.to); el.innerHTML = `<p style="margin:0"><b>${cap(word(c.material))} pipeline</b></p><p class="hint">${a.name} to ${b.name} · <span class="mono">${len.toFixed(0)} km</span> · ${c.points.length-2} bend${c.points.length === 3 ? '' : 's'}</p><p class="hint">Drag a bend to move it. Double-click the line to add one; right-click a bend to remove it.</p>`;}
+    else el.innerHTML = `<p style="margin:0"><b>${MODES[c.mode].label}</b></p><p class="hint"><span class="mono">${len.toFixed(0)} km</span> · drag its points; Delete erases it.</p>`;}
+  /* checklist, for the fixed scope */
+  const li = [], prob = localProblems(acc);
+  const offRoad = prob.errors.filter(e => e.mode === 'road' && e.site !== null).length;
+  li.push([offRoad === 0, offRoad === 0 ? 'Every site on a road' : `Every site on a road (${offRoad} not)`]);
+  li.push([acc.road.pieces <= 1, acc.road.pieces <= 1 ? 'Road network in one piece' : `Road network in one piece (now ${acc.road.pieces})`]);
+  const lost = prob.errors.filter(e => (e.mode === 'river' || e.mode === 'sea') && e.site !== null).length;
+  li.push([lost === 0, lost === 0 ? 'Berths within reach of their lanes' : `Berths within reach of their lanes (${lost} not)`]);
+  li.push([prob.dry === 0, prob.dry === 0 ? 'River and sea lanes drawn on water' : `River and sea lanes drawn on water (${prob.dry} leave it)`]);
+  const straight = S.connections.filter(c => c.points.length < 3).length;
+  li.push([straight === 0, straight === 0 ? 'Every pipeline has a bend' : `Every pipeline has a bend (${straight} are straight)`]);
+  $('list').innerHTML = li.map(([ok,t]) => `<li class="${ok ? 'ok' : 'no'}">${t}</li>`).join('');
+  const u = []; for (const s of S.sites){const P = PRESETS[s.preset];
+    const n = P.needs.filter(m => !S.sites.some(o => o.id !== s.id && PRESETS[o.preset].makes.includes(m) && canMove(m, o.id, s.id, acc)));
+    const o = P.makes.filter(m => !S.sites.some(q => q.id !== s.id && (PRESETS[q.preset].anything || PRESETS[q.preset].needs.includes(m) || (PRESETS[q.preset].optional || []).includes(m)) && canMove(m, s.id, q.id, acc)));
+    if (n.length) u.push(`<li class="no"><b>${esc(s.name)}</b> cannot get ${n.map(word).join(', ')}</li>`);
+    if (o.length) u.push(`<li><b>${esc(s.name)}</b> cannot ship ${o.map(word).join(', ')}</li>`);}
+  $('unmet').innerHTML = u.join('') || '<li class="ok">Every need can be supplied and every product can ship.</li>';
+  if (!noEdit) queueCheck();
+  showCheck();}
+const esc = t => String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+
+/* ---------- Check: ask the engine; fall back to the editor's own rules when the server has no check ---------- */
+const MOCK = new URLSearchParams(location.search).get('mock');
+function queueCheck(){clearTimeout(checkTimer); if (JSON.stringify(S) !== checkedText){$('run').disabled = true; $('run').title = 'Checking…';} checkTimer = setTimeout(runCheck, 900);}
+async function runCheck(){clearTimeout(checkTimer); const text = JSON.stringify(S); if (checking) return checking;
+  $('check').disabled = true; showCheck('Checking…');
+  checking = (async () => {await null; let res = null, local = false;
+    try {
+      if (MOCK) throw new Error('mock');
+      const r = await fetch('/api/worlds/check', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({layout:JSON.parse(text)})});
+      if (!r.ok) throw new Error('status '+r.status);
+      res = await r.json(); if (typeof res.ok !== 'boolean') throw new Error('unexpected reply');
+    } catch (err){local = true; const prob = localProblems(access(S));
+      res = {ok:prob.errors.length === 0, errors:prob.errors, warnings:prob.warnings, summary:null, trial:null};
+      if (MOCK === 'pass' && res.ok) res.trial = {days:30, service:0.994, pass:true, worst:null, stopped:[]};
+      if (MOCK === 'fail' && res.ok) res.trial = {days:30, service:0.93, pass:false, worst:{name:'Packaging', material:'PE', service:0.91}, stopped:['Polyethylene']};}
+    res.local = local; lastCheck = res; checkedText = text; checking = false; $('check').disabled = false;
+    if (JSON.stringify(S) !== text) queueCheck();
+    draw(); showCheck(); return res;})();
+  return checking;}
+function pct(v){return (Math.floor(v*1000)/10).toFixed(v >= 0.9995 ? 0 : 1).replace(/\.0$/,'')+'%';}
+function trialWords(t){if (!t) return null;
+  if (t.pass) return {ok:true, text:`Holds for ${t.days} days: customers served ${pct(t.service)}`};
+  const parts = []; if (t.worst) parts.push(`${t.worst.name} gets ${pct(t.worst.service)} of its ${word(t.worst.material)}`);
+  if (t.stopped && t.stopped.length) parts.push(`${t.stopped.slice(0,3).join(', ')}${t.stopped.length > 3 ? ` and ${t.stopped.length-3} more` : ''} stop${t.stopped.length === 1 ? 's' : ''}`);
+  return {ok:false, text:`Does not hold: ${parts.join('; ') || `customers served ${pct(t.service)}`}`};}
+function showCheck(busy){const el = $('result'), run = $('run'), panel = $('checkPanel'), c = lastCheck, fresh = c && checkedText === JSON.stringify(S);
+  if (busy && !c){el.innerHTML = `<p class="hint">${busy}</p>`; return;}
+  if (!c){el.innerHTML = '<p class="hint">Not checked yet.</p>'; return;}
+  const t = trialWords(c.trial); let h = '';
+  if (!c.ok) h += `<p class="big bad">${c.errors.length} thing${c.errors.length === 1 ? '' : 's'} to fix</p>`;
+  else if (t) h += `<p class="big ${t.ok ? '' : 'bad'}">${esc(t.text)}</p>`;
+  else h += '<p class="big">This world can be built</p>';
+  if (c.errors.length) h += '<ul style="margin-top:6px">' + c.errors.map((e,i) => `<li><button class="err" data-i="${i}" ${e.site === null || e.site === undefined ? 'disabled' : ''}>${esc(e.text)}</button></li>`).join('') + '</ul>';
+  if (c.warnings && c.warnings.length) h += '<ul style="margin-top:6px">' + c.warnings.map(w => `<li class="warn">${esc(w.text)}</li>`).join('') + '</ul>';
+  if (c.ok && !t) h += `<p class="hint">${c.local ? 'The 30-day trial was not run: the server check is not available, so this is the builder’s own check.' : 'The 30-day trial was not run.'}</p>`;
+  else if (c.local) h += '<p class="hint">The server check is not available: this is the builder’s own check.</p>';
+  if (c.ok && c.summary) h += `<p class="hint mono" style="margin-top:6px">${[['roadKm','km road'],['riverKm','km river'],['seaKm','km sea'],['vehicles','vehicles']].filter(([k]) => isFinite(c.summary[k])).map(([k,u]) => `${Math.round(c.summary[k]).toLocaleString('en-US')} ${u}`).join(' · ')}</p>`;
+  if (!fresh) h += `<p class="hint">${busy || 'Edited since: checking again…'}</p>`;
+  el.innerHTML = h; panel.classList.toggle('bad', !c.ok);
+  el.querySelectorAll('.err:not([disabled])').forEach(b => b.onclick = () => {const e = c.errors[+b.dataset.i]; ring = {id:e.site}; sel = {t:'site', id:e.site}; refresh(true);});
+  run.disabled = !(fresh && c.ok); run.title = !fresh ? 'Checking…' : c.ok ? 'Save this layout and run the simulation on it' : 'Fix what the check found first';}
+$('check').onclick = () => runCheck();
+$('run').onclick = async () => {const c = await runCheck(); if (!c.ok || checkedText !== JSON.stringify(S)){showCheck(); return;}
+  if (c.trial && !c.trial.pass && !confirm('This world builds but does not hold; run it anyway?')) return;
+  save(); try{localStorage.setItem(RUN_KEY, '1');}catch(e){} location.href = '/';};
+$('default').onclick = () => {if (!confirm('Throw this layout away and go back to the default world?')) return;
+  try{localStorage.removeItem(KEY); localStorage.removeItem(RUN_KEY);}catch(e){} lastCheck = null; checkedText = ''; load(clone(DEFAULT), true); toast('Back to the default world.');};
+
+/* ---------- file ---------- */
+$('export').onclick = () => {const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(S, null, 1)], {type:'application/json'})); a.download = 'petrogrid-layout.json'; a.click();};
+$('import').onclick = () => $('file').click();
+$('file').onchange = async e => {const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {load(JSON.parse(await f.text()));} catch (err){toast('That file is not a PetroGrid layout.');}};
+
+/* ---------- start: the working layout if there is one, else the default from the app ---------- */
+(async function start(){setTool('select');
+  try {DEFAULT = await (await fetch('default-layout.json', {cache:'no-cache'})).json();}
+  catch (err){$('result').innerHTML = '<p class="big bad">The default world could not be loaded</p><p class="hint">Reload the page; the builder needs it to know the 22 sites and 9 pipelines.</p>'; return;}
+  DEFAULT_ACCESS = access(DEFAULT);
+  let stored = null; try {stored = JSON.parse(localStorage.getItem(KEY) || 'null');} catch (e){}
+  load(stored || clone(DEFAULT), true);
+  new ResizeObserver(fit).observe(cv.parentElement); fit();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+})();
+</script>
+</body>
+</html>
