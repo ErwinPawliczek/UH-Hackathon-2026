@@ -10,6 +10,8 @@ export interface WindowPlace {
   /** top-left corner in viewport pixels */
   x: number;
   y: number;
+  /** the visitor dragged it here: this position wins over any automatic placement */
+  byUser?: boolean;
 }
 
 export interface WindowsState {
@@ -19,7 +21,10 @@ export interface WindowsState {
   /** Open or close a window; a window opened for the first time appears at `at`. */
   toggle: (id: string, at: { x: number; y: number }) => void;
   close: (id: string) => void;
+  /** The visitor dragged the window here; it stays where they put it from now on. */
   move: (id: string, x: number, y: number) => void;
+  /** Put a window somewhere without the visitor asking (clamping, automatic placement). */
+  place: (id: string, x: number, y: number) => void;
   /** Bring a window to the front. */
   focus: (id: string) => void;
 }
@@ -63,7 +68,7 @@ export const useWindows = create<WindowsState>()((set) => {
         const cur = s.windows[id];
         const open = !(cur?.open ?? false);
         return {
-          windows: { ...s.windows, [id]: { x: cur?.x ?? at.x, y: cur?.y ?? at.y, open } },
+          windows: { ...s.windows, [id]: { ...cur, x: cur?.x ?? at.x, y: cur?.y ?? at.y, open } },
           order: open ? toFront(s.order, id) : s.order,
         };
       }),
@@ -76,7 +81,12 @@ export const useWindows = create<WindowsState>()((set) => {
     // also places a window that was never toggled (one opened by a selection)
     move: (id, x, y) =>
       update((s) => ({
-        windows: { ...s.windows, [id]: { open: s.windows[id]?.open ?? false, x, y } },
+        windows: { ...s.windows, [id]: { open: s.windows[id]?.open ?? false, x, y, byUser: true } },
+        order: s.order,
+      })),
+    place: (id, x, y) =>
+      update((s) => ({
+        windows: { ...s.windows, [id]: { open: s.windows[id]?.open ?? false, byUser: s.windows[id]?.byUser, x, y } },
         order: s.order,
       })),
     focus: (id) => update((s) => ({ windows: s.windows, order: toFront(s.order, id) })),
@@ -101,4 +111,84 @@ export function clampToViewport(
     x: Math.min(maxX, Math.max(0, x)),
     y: Math.min(maxY, Math.max(insets.top, y)),
   };
+}
+
+// ---- placing a window that opens by itself ----
+//
+// A window that follows a selection (a clicked site, a clicked vehicle) opens
+// where it gets in the way least: over as little of the windows already open
+// as possible, and never over the thing just clicked. Once the visitor has
+// dragged it somewhere, that position is kept instead.
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Area two rectangles share, in square pixels. */
+export function overlapArea(a: Rect, b: Rect): number {
+  const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+/** Margin kept from the viewport's sides, and the step of a cascade (a title bar's height). */
+const EDGE = 16;
+const TOP = 64;
+const CASCADE = 44;
+
+/**
+ * Places to try for a window of `size`, in order of preference: the right
+ * column under the top bar, the left column, then a cascade stepping down
+ * and in from each by a title bar's height.
+ */
+export function placementCandidates(viewport: { width: number; height: number }, size: { w: number; h: number }): { x: number; y: number }[] {
+  const right = Math.max(EDGE, viewport.width - size.w - EDGE);
+  const out = [{ x: right, y: TOP }, { x: EDGE, y: TOP }];
+  for (let k = 1; k <= 5; k++) {
+    out.push({ x: Math.max(EDGE, right - k * CASCADE), y: TOP + k * CASCADE });
+    out.push({ x: Math.min(right, EDGE + k * CASCADE), y: TOP + k * CASCADE });
+  }
+  // keep every candidate's title bar on screen
+  return out.filter((c) => c.y <= Math.max(TOP, viewport.height - CASCADE));
+}
+
+/**
+ * The candidate that covers the least of the windows already open, and not
+ * the point just clicked if any other candidate avoids it. Earlier
+ * candidates win ties, so an empty screen gives the first.
+ */
+export function bestPlacement(
+  candidates: { x: number; y: number }[],
+  size: { w: number; h: number },
+  others: Rect[],
+  avoid: { x: number; y: number } | null,
+): { x: number; y: number } | null {
+  let best: { x: number; y: number } | null = null;
+  let bestScore = Infinity;
+  for (const c of candidates) {
+    const rect = { x: c.x, y: c.y, w: size.w, h: size.h };
+    const covered = others.reduce((acc, o) => acc + overlapArea(rect, o), 0);
+    const onClick = avoid !== null && avoid.x >= rect.x && avoid.x <= rect.x + rect.w && avoid.y >= rect.y && avoid.y <= rect.y + rect.h;
+    const score = covered + (onClick ? 1e12 : 0);
+    if (score < bestScore) {
+      best = c;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+/** Where the visitor last pressed, and when — so a window does not open on top of what they clicked. */
+let lastPress: { x: number; y: number; at: number } | null = null;
+
+export function notePress(x: number, y: number, at: number): void {
+  lastPress = { x, y, at };
+}
+
+/** The last press if it was within `withinMs` of `now`, else null. */
+export function recentPress(now: number, withinMs = 1500): { x: number; y: number } | null {
+  return lastPress !== null && now - lastPress.at <= withinMs ? { x: lastPress.x, y: lastPress.y } : null;
 }

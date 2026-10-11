@@ -236,12 +236,14 @@ def main():
     xy = {key_of[i]: (float(s["x"]), float(s["y"])) for i, s in by_id.items()}
 
     # ---------------- processes and tanks per site ----------------
-    def T(m, role, cover, init=None, lead=None):
+    def T(m, role, cover, init=None, lead=None, reject=False):
         t = {"material": m, "role": role, "cover_days": cover, "target_frac": 0.7}
         if init is not None:
             t["init_frac"] = init
         if lead is not None:
             t["lead_time_h"] = lead  # water-fed tanks: a barge or ship takes days, not hours
+        if reject:
+            t["reject_when_full"] = True  # overflow is discarded instead of blocking the plant
         if role == "product" and PRODUCT_GAP_H:
             t["pickup_gap_h"] = PRODUCT_GAP_H
         return t
@@ -261,7 +263,9 @@ def main():
         "SALT_MINE": ([P("SALT_MINING", r["salt"] * SOURCE_MARGIN)], [T("SALT", "product", 10, 0.6)]),
         "GAS_PLANT": ([P("NGL_RECOVERY", r["G"])],
                       [T("RAW_GAS", "feed", 2), T("METHANE", "product", 3, 0.5),
-                       T("ETHANE", "product", 20, 0.3), T("LPG", "product", 20, 0.4),
+                       # A gas plant that cannot place its ethane leaves it in the sales gas
+                       # rather than shutting down, so the city grid keeps its methane.
+                       T("ETHANE", "product", 20, 0.3, reject=True), T("LPG", "product", 20, 0.4),
                        T("NAPHTHA", "product", 60, 0.3)]),
         "REFINERY": ([P("CRUDE_DISTILLATION", r["crude"]), P("REFORMING", r["hn"]),
                       P("FCC", r["vgo"]), P("DIESEL_HDT", r["gasoil"])],

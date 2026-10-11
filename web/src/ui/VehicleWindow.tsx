@@ -223,11 +223,17 @@ export function VehicleWindow() {
       open
       onClose={() => select(null)}
       at={{ x: Math.max(16, (typeof window === 'undefined' ? 1366 : window.innerWidth) - 356), y: 72 }}
+      // the title bar is the header: the kind of vehicle as an icon, and which one
+      header={(
+        <div className="flex items-center gap-2" data-testid="vehicle-header">
+          <ModeIcon cls={veh.cls} />
+          <h2 className="truncate text-base font-bold leading-tight text-ink">{clsLabel} {vehIdx + 1}</h2>
+        </div>
+      )}
     >
       <div className="flex flex-col gap-3 p-3 text-xs" data-testid="vehicle-window">
         {/* the status line: always what, how much and where */}
         <div className="flex items-start gap-2">
-          <ModeIcon cls={veh.cls} />
           <p className="min-w-0 flex-1 text-sm leading-snug text-ink" data-testid="vehicle-status">
             {d !== null ? tripSentence(d, idleAt) : pendingSentence(status, idleAt, failure)}
           </p>

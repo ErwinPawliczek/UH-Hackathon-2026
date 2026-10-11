@@ -333,6 +333,22 @@ h2 {
   --btn-line: var(--ink);
 }
 
+/* Destructive (Fail unit): alarm red, the one place a button is red. */
+.btn-danger {
+  --btn-line: var(--alarm);
+  --btn-fill: var(--alarm);
+  color: var(--white);
+}
+
+.btn-danger:hover:not(:disabled) {
+  --btn-line: #b02d26;
+  --btn-fill: #b02d26;
+}
+
+.btn-danger:focus-visible {
+  --btn-line: var(--ink);
+}
+
 /* Active (a chosen speed, an open window or menu): blue outline on blue-soft. */
 .btn-active,
 .btn-active:hover:not(:disabled) {

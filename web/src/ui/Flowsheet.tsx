@@ -117,15 +117,22 @@ function UnitBlock({
       {node.notes.map((n) => (
         <div key={`${n.dir}-${n.key}`} className="truncate text-[10px] leading-[12px] text-muted">{noteText(n, live.rate)}</div>
       ))}
+      {/* destructive, so red; a unit that already has trains down cannot be failed again */}
       {onAskFail !== null && (
-        <button
-          type="button"
-          className="mt-auto self-start text-[10px] font-medium text-blue underline decoration-dotted underline-offset-2 hover:text-blue-strong"
-          onClick={onAskFail}
-          data-testid={`pfd-fail-${node.unit.key}`}
-        >
-          Fail unit…
-        </button>
+        live.trainsOnline < live.trains ? (
+          <button type="button" className="btn btn-sm mt-auto self-start" disabled data-testid={`pfd-fail-${node.unit.key}`}>
+            Failed
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-sm btn-danger mt-auto self-start"
+            onClick={onAskFail}
+            data-testid={`pfd-fail-${node.unit.key}`}
+          >
+            Fail unit
+          </button>
+        )
       )}
     </div>
   );
@@ -172,7 +179,7 @@ function FailForm({
         aria-label={`Hours ${node.unit.key} stays down`}
       />
       <span className="text-muted">h</span>
-      <button type="button" className="btn btn-primary btn-sm" onClick={() => onFail(trains, hours)} data-testid={`pfd-fail-confirm-${node.unit.key}`}>
+      <button type="button" className="btn btn-danger btn-sm" onClick={() => onFail(trains, hours)} data-testid={`pfd-fail-confirm-${node.unit.key}`}>
         Fail unit
       </button>
       <button type="button" className="btn btn-sm" onClick={onCancel}>Cancel</button>
