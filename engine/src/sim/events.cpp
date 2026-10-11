@@ -1,9 +1,12 @@
 // Chain Reaction — §5.9 events.
 #include "sim/events.h"
 
+#include "sim/words.h"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace crx {
 namespace sim {
@@ -24,6 +27,23 @@ int resolveSite(const World& world, const json& j) {
       if (world.sites[i].key == key) return static_cast<int>(i);
   }
   return -1;
+}
+
+// The site a route node belongs to, or failing that the site closest to it.
+uint32_t nearestSite(const World& world, uint32_t node) {
+  if (node >= world.nodes.size()) return 0;
+  if (world.nodes[node].site >= 0) return static_cast<uint32_t>(world.nodes[node].site);
+  uint32_t best = 0;
+  double best_d = 1e300;
+  for (uint32_t s = 0; s < world.sites.size(); ++s) {
+    const double d = std::hypot(world.sites[s].x_km - world.nodes[node].x_km,
+                                world.sites[s].y_km - world.nodes[node].y_km);
+    if (d < best_d) {
+      best_d = d;
+      best = s;
+    }
+  }
+  return best;
 }
 
 // Resolves a unit key within a site's processes; -1 when absent.
@@ -59,11 +79,27 @@ bool queueEvent(const World& world, const std::string& body, State& state, std::
 
   EventDef def;
   uint64_t duration_h = 0;
+  // unit_outage names its unit by key within the site ('unit') or by the
+  // unit's own index in the world ('unit_index', the index the world JSON
+  // gives each unit). The index is the one that is always unambiguous: a
+  // site can hold several units with the same key (the fuel depot's four
+  // demand blocks are all FD-OUT), and the key picks the first.
+  int unit_by_index = -1;
   if (type == "unit_outage") {
     def.type = EventDef::Type::UnitOutage;
-    if (!j.contains("unit") || !j["unit"].is_string() || !j.contains("trains") ||
+    const bool has_key = j.contains("unit") && j["unit"].is_string();
+    if (j.contains("unit_index")) {
+      if (!j["unit_index"].is_number_unsigned() ||
+          j["unit_index"].get<uint64_t>() >= world.units.size()) {
+        error = "unit_outage: 'unit_index' must be a unit index from 0 to " +
+                std::to_string(world.units.empty() ? 0 : world.units.size() - 1);
+        return false;
+      }
+      unit_by_index = static_cast<int>(j["unit_index"].get<uint64_t>());
+    }
+    if ((!has_key && unit_by_index < 0) || !j.contains("trains") ||
         !j["trains"].is_number_unsigned()) {
-      error = "unit_outage: need 'unit' (key) and 'trains'";
+      error = "unit_outage: need 'unit' (key) or 'unit_index', and 'trains'";
       return false;
     }
     def.trains = j["trains"].get<uint32_t>();
@@ -75,34 +111,65 @@ bool queueEvent(const World& world, const std::string& body, State& state, std::
     def.type = EventDef::Type::SupplyShock;
   } else if (type == "route_break") {
     def.type = EventDef::Type::RouteBreak;
-    if (!j.contains("site2") ||
-        (!j["site2"].is_number_unsigned() && !j["site2"].is_string())) {
-      error = "route_break: need 'site' and 'site2' (site keys or indices)";
-      return false;
+    if (j.contains("edge")) {
+      // One route edge by its index (the position of the route in the world
+      // JSON): the form that works on any network, where most edges join
+      // junctions rather than two sites.
+      if (!j["edge"].is_number_unsigned() || j["edge"].get<uint64_t>() >= world.edges.size()) {
+        error = "route_break: 'edge' must be a route index from 0 to " +
+                std::to_string(world.edges.empty() ? 0 : world.edges.size() - 1);
+        return false;
+      }
+      def.edge = j["edge"].get<uint32_t>();
+    } else {
+      if (!j.contains("site2") ||
+          (!j["site2"].is_number_unsigned() && !j["site2"].is_string())) {
+        error = "route_break: need 'edge' (a route index), or 'site' and 'site2' (site keys "
+                "or indices)";
+        return false;
+      }
+      const int s2 = resolveSite(world, j["site2"]);
+      if (s2 < 0) {
+        error = "route_break: unresolvable site2";
+        return false;
+      }
+      def.site2 = static_cast<uint32_t>(s2);
     }
-    const int s2 = resolveSite(world, j["site2"]);
-    if (s2 < 0) {
-      error = "route_break: unresolvable site2";
-      return false;
-    }
-    def.site2 = static_cast<uint32_t>(s2);
   } else {
     error = "event: unknown type '" + type + "'";
     return false;
   }
 
-  if (!j.contains("site")) {
-    error = "event: missing 'site'";
-    return false;
+  if (def.edge != UINT32_MAX && !j.contains("site")) {
+    // An edge break needs no site; the log files it under the site nearest
+    // the edge's first end.
+    def.site = nearestSite(world, world.edges[def.edge].a);
+  } else if (unit_by_index >= 0 && !j.contains("site")) {
+    // A unit named by index brings its own site.
+    def.site = world.processes[world.units[static_cast<size_t>(unit_by_index)].process.v].site.v;
+  } else {
+    if (!j.contains("site")) {
+      error = "event: missing 'site'";
+      return false;
+    }
+    const int site = resolveSite(world, j["site"]);
+    if (site < 0) {
+      error = "event: unresolvable site";
+      return false;
+    }
+    def.site = static_cast<uint32_t>(site);
   }
-  const int site = resolveSite(world, j["site"]);
-  if (site < 0) {
-    error = "event: unresolvable site";
-    return false;
-  }
-  def.site = static_cast<uint32_t>(site);
-  if (j.contains("unit") && j["unit"].is_string())
+  if (unit_by_index >= 0) {
+    // The index wins over a key; with a site given it must be that site's unit.
+    if (world.processes[world.units[static_cast<size_t>(unit_by_index)].process.v].site.v != def.site) {
+      error = "unit_outage: unit " + std::to_string(unit_by_index) + " is not at " +
+              world.sites[def.site].key;
+      return false;
+    }
+    def.unit = unit_by_index;
+  } else if (j.contains("unit") && j["unit"].is_string()) {
     def.unit = resolveUnit(world, static_cast<int>(def.site), j["unit"].get<std::string>());
+  }
   if (j.contains("multiplier") && j["multiplier"].is_number())
     def.multiplier = j["multiplier"].get<double>();
   if (j.contains("duration_h") && j["duration_h"].is_number())
@@ -136,9 +203,10 @@ void applyOutage(const World& world, State& state, Recorder& rec, const EventDef
     const ProcessType& type =
         world.catalog.process_types[world.processes[unit.process.v].type];
     takeDown(world, state, static_cast<uint32_t>(def.unit), def.trains, def.end_tick);
+    // Process and unit both: several units at a site can share a name.
     logEvent(rec, state.tick, "unit_failed", site.key, type.units[unit.slot].key,
-             site.name + ": " + type.units[unit.slot].name + " failed (" +
-                 std::to_string(def.trains) + " train(s) down)");
+             site.name + ": " + processWithin(site.name, type.name) + ", " +
+                 type.units[unit.slot].name + " failed (" + trainsDownText(def.trains) + ")");
     return;
   }
 
@@ -147,7 +215,7 @@ void applyOutage(const World& world, State& state, Recorder& rec, const EventDef
   for (uint32_t p = procs.begin; p < rangeEnd(procs); ++p)
     for (uint32_t u = world.processes[p].units.begin; u < rangeEnd(world.processes[p].units); ++u)
       takeDown(world, state, u, 255, def.end_tick);
-  logEvent(rec, state.tick, "site_shutdown", site.key, "", site.name + ": site shut down by operator");
+  logEvent(rec, state.tick, "site_shutdown", site.key, "", site.name + ": the whole site was shut down");
 }
 
 // Restores trains whose repair tick matches the expiring event.
@@ -164,13 +232,21 @@ void expireOutage(const World& world, State& state, Recorder& rec, const EventDe
       us.trains_down = 0;
       us.back_at_tick = 0;
       logEvent(rec, state.tick, "unit_repaired", site.key, type.units[unit.slot].key,
-               site.name + ": " + type.units[unit.slot].name + " repaired");
+               site.name + ": " + processWithin(site.name, type.name) + ", " +
+                   type.units[unit.slot].name + " repaired");
     }
 }
 
 // Toggles every edge between two sites' nodes (all modes) and bumps the
 // graph version so path caches rebuild (§5.9 route_break).
 void setSpanEdges(const World& world, State& state, const EventDef& def, bool open) {
+  if (def.edge != UINT32_MAX) {  // one edge, named by index
+    if (def.edge < state.edge_open.size() && state.edge_open[def.edge] != (open ? 1 : 0)) {
+      state.edge_open[def.edge] = open ? 1 : 0;
+      state.graph_version += 1;
+    }
+    return;
+  }
   if (def.site2 >= world.sites.size()) return;
   for (uint32_t e = 0; e < world.edges.size(); ++e) {
     const RouteEdge& edge = world.edges[e];
@@ -188,6 +264,8 @@ void setSpanEdges(const World& world, State& state, const EventDef& def, bool op
 bool spanStillHeld(const State& state, const EventDef& def) {
   for (const EventDef& d : state.active) {
     if (d.type != EventDef::Type::RouteBreak || &d == &def) continue;
+    if (d.edge != def.edge) continue;  // edge breaks hold edges, span breaks hold spans
+    if (def.edge != UINT32_MAX && d.end_tick > state.tick) return true;
     if (d.site == def.site && d.site2 == def.site2 && d.end_tick > state.tick) return true;
   }
   return false;
@@ -195,10 +273,56 @@ bool spanStillHeld(const State& state, const EventDef& def) {
 
 }  // namespace
 
+namespace {
+
+bool isShock(const EventDef& d) {
+  return d.type == EventDef::Type::SupplyShock || d.type == EventDef::Type::DemandShock;
+}
+
+// "10 days", "1 day", "36 hours".
+std::string spanText(uint64_t ticks) {
+  const uint64_t hours = static_cast<uint64_t>(std::llround(static_cast<double>(ticks) * kTickHours));
+  if (hours >= 24 && hours % 24 == 0)
+    return std::to_string(hours / 24) + (hours == 24 ? " day" : " days");
+  return std::to_string(hours) + (hours == 1 ? " hour" : " hours");
+}
+
+// The stretch a route_break closes, the same words when it closes and when
+// it reopens: "River lane between Salt mine and Chlor-alkali", "Road near
+// Vinyls", or for the site-to-site form "Route between A and B".
+std::string routeText(const World& world, const EventDef& def) {
+  if (def.edge == UINT32_MAX) {
+    const std::string b = def.site2 < world.sites.size() ? world.sites[def.site2].name : "?";
+    return "Route between " + world.sites[def.site].name + " and " + b;
+  }
+  const RouteEdge& edge = world.edges[def.edge];
+  const char* what = edge.mode == crx::Mode::River ? "River lane"
+                     : edge.mode == crx::Mode::Sea ? "Sea lane" : "Road";
+  const std::string a = world.sites[nearestSite(world, edge.a)].name;
+  const std::string b = world.sites[nearestSite(world, edge.b)].name;
+  return std::string(what) + (a == b ? " near " + a : " between " + a + " and " + b);
+}
+
+// A shock starting: "Gas field: output cut to 50% for 10 days".
+void logShockStart(const World& world, const State& state, Recorder& rec, const EventDef& def) {
+  const bool supply = def.type == EventDef::Type::SupplyShock;
+  const long pct = std::lround(def.multiplier * 100.0);
+  const std::string what = supply ? "output" : "demand";
+  const std::string verb = def.multiplier < 1.0 ? " cut to " : " raised to ";
+  logEvent(rec, state.tick, supply ? "supply_shock" : "demand_shock", world.sites[def.site].key, "",
+           world.sites[def.site].name + ": " + what + verb + std::to_string(pct) + "% for " +
+               spanText(def.end_tick > def.start_tick ? def.end_tick - def.start_tick : 0));
+}
+
+}  // namespace
+
 void stepEvents(const World& world, State& state, Recorder& rec) {
   // Promote pending events whose start tick has arrived.
   for (const EventDef& def : state.pending)
-    if (def.start_tick <= state.tick) state.active.push_back(def);
+    if (def.start_tick <= state.tick) {
+      state.active.push_back(def);
+      if (isShock(def) && def.end_tick > state.tick) logShockStart(world, state, rec, def);
+    }
   state.pending.erase(std::remove_if(state.pending.begin(), state.pending.end(),
                                      [&](const EventDef& d) { return d.start_tick <= state.tick; }),
                       state.pending.end());
@@ -212,9 +336,9 @@ void stepEvents(const World& world, State& state, Recorder& rec) {
     def.applied = true;
     if (def.type == EventDef::Type::RouteBreak) {
       setSpanEdges(world, state, def, false);
-      logEvent(rec, state.tick, "route_break", world.sites[def.site].key, "",
-               world.sites[def.site].key + " - " + world.sites[def.site2].key +
-                   ": route closed for repairs");
+      logEvent(rec, state.tick, "route_break", world.sites[def.site].key,
+               def.edge != UINT32_MAX ? std::to_string(def.edge) : std::string(),
+               routeText(world, def) + " closed for " + spanText(def.end_tick - def.start_tick));
     } else {
       applyOutage(world, state, rec, def);
     }
@@ -231,8 +355,24 @@ void stepEvents(const World& world, State& state, Recorder& rec) {
   // same span is still active.
   for (const EventDef& def : state.active)
     if (def.type == EventDef::Type::RouteBreak && def.end_tick <= state.tick &&
-        !spanStillHeld(state, def))
+        !spanStillHeld(state, def)) {
       setSpanEdges(world, state, def, true);
+      logEvent(rec, state.tick, "route_reopened", world.sites[def.site].key,
+               def.edge != UINT32_MAX ? std::to_string(def.edge) : std::string(),
+               routeText(world, def) + " reopened");
+    }
+  // A shock ending says so, unless another of its kind still holds the site.
+  for (const EventDef& def : state.active) {
+    if (!isShock(def) || def.end_tick > state.tick || def.end_tick <= def.start_tick) continue;
+    bool still = false;
+    for (const EventDef& other : state.active)
+      still = still || (&other != &def && other.type == def.type && other.site == def.site &&
+                        other.end_tick > state.tick);
+    if (still) continue;
+    const bool supply = def.type == EventDef::Type::SupplyShock;
+    logEvent(rec, state.tick, "shock_ended", world.sites[def.site].key, "",
+             world.sites[def.site].name + ": " + (supply ? "output" : "demand") + " back to normal");
+  }
   state.active.erase(std::remove_if(state.active.begin(), state.active.end(),
                                     [&](const EventDef& d) { return d.end_tick <= state.tick; }),
                      state.active.end());
@@ -263,7 +403,8 @@ void stepEvents(const World& world, State& state, Recorder& rec) {
     us.back_at_tick = 0;
     const Site& site = world.sites[world.processes[unit.process.v].site.v];
     logEvent(rec, state.tick, "unit_repaired", site.key, type.units[unit.slot].key,
-             site.name + ": " + type.units[unit.slot].name + " repaired");
+             site.name + ": " + processWithin(site.name, type.name) + ", " +
+                 type.units[unit.slot].name + " repaired");
   }
 
   // Optional random failures (§5.9): Bernoulli per tick at trains·dt/mtbf.
@@ -281,7 +422,10 @@ void stepEvents(const World& world, State& state, Recorder& rec) {
                  state.tick + static_cast<uint64_t>(mttr / kTickHours));
         const Site& site = world.sites[world.processes[unit.process.v].site.v];
         logEvent(rec, state.tick, "unit_failed", site.key, slot.key,
-                 site.name + ": " + slot.name + " failed (random)");
+                 site.name + ": " +
+                     processWithin(site.name,
+                                   world.catalog.process_types[world.processes[unit.process.v].type].name) +
+                     ", " + slot.name + " failed on its own (" + trainsDownText(1) + ")");
       }
     }
   }

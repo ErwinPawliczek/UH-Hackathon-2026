@@ -1,70 +1,184 @@
-// Top bar: brand, sim clock, playback controls, and the seed/scenario
-// pickers. Engine choice has no UI — visitors run the hosted engine; the
+// Top bar: brand, sim clock, playback and speed controls, and the scenario
+// picker. Engine choice and seed have no UI — visitors run the hosted engine
+// on a fixed seed (?seed= overrides it for testing); the
 // in-page stub is selected only via ?engine= for tests and local development.
+//
+// The scenario control is one button named "Scenario" that opens a list. On
+// the hosted engine it triggers a real disruption: picking an entry sends
+// that engine command to the live session at once, the entry stays ticked
+// for the rest of the run and the button shows its name. On the in-page stub
+// it is the stub-era scripted-scenario setting (a session restart).
 
-import { useSim, SPEEDS, TICKS_PER_DAY } from '../store/sim';
+import { useId } from 'react';
+import { useSim } from '../store/sim';
 import { SCENARIOS } from '../engine/events';
+import { activeScenarios, scenariosFor, type EngineScenario } from '../engine/scenarios';
+import { DropdownMenu } from './DropdownMenu';
+import { SpeedControl } from './SpeedControl';
 import { fmtClock } from './format';
+import { LOG_WINDOW_AT, LOG_WINDOW_ID } from './EventLog';
+import { REWIND_WINDOW_AT, REWIND_WINDOW_ID } from './RewindWindow';
+import { SITES_WINDOW_AT, SITES_WINDOW_ID } from './SitesKey';
+import { ECONOMY_WINDOW_AT, ECONOMY_WINDOW_ID } from './EconomyWindow';
+import { useWindows } from './windows';
+
+/**
+ * Text on the scenario button: its own name until a disruption is triggered,
+ * then the latest one's name (and how many more are running with it).
+ */
+export function scenarioButtonLabel(scenarios: EngineScenario[], triggered: string[]): string {
+  const latest = scenarios.find((s) => s.key === triggered[triggered.length - 1]);
+  if (latest === undefined) return 'Scenario';
+  return triggered.length > 1 ? `${latest.label} +${triggered.length - 1}` : latest.label;
+}
+
+/** Zigzag period and depth in px: the lower edges of 20 px wide pointy-top hexagons. */
+export const CHAIN_PERIOD = 20;
+export const CHAIN_DEPTH = CHAIN_PERIOD / (2 * Math.sqrt(3)); // ≈ 5.77: every bend is 120°
+
+/**
+ * The top bar's bottom edge, drawn as a carbon chain: the lower edges of a
+ * row of pointy-top hexagons side by side — a skeletal-formula zigzag with
+ * 120° bends — as a hairline in the border colour, with the bar's fill
+ * following the zigzag above it. It hangs below the bar's 48 px box, so
+ * nothing inside the bar moves; an SVG pattern keeps it crisp at any width.
+ */
+function ChainEdge() {
+  const id = useId();
+  const top = 0.5; // half a pixel down: the hairline's upper bends sit on the bar's edge
+  const low = (top + CHAIN_DEPTH).toFixed(2);
+  const h = Math.ceil(top + CHAIN_DEPTH + 1);
+  // One period, drawn half a period past each side so the bends at the tile
+  // edges are whole on both tiles.
+  const zigzag = `M${-CHAIN_PERIOD / 2} ${low} L0 ${top} L${CHAIN_PERIOD / 2} ${low} L${CHAIN_PERIOD} ${top} L${CHAIN_PERIOD * 1.5} ${low}`;
+  return (
+    <svg
+      className="pointer-events-none absolute inset-x-0 top-full block w-full"
+      height={h}
+      aria-hidden="true"
+      data-testid="chain-edge"
+    >
+      <defs>
+        <pattern id={id} width={CHAIN_PERIOD} height={h} patternUnits="userSpaceOnUse">
+          <path d={`M0 0 H${CHAIN_PERIOD} V${top} L${CHAIN_PERIOD / 2} ${low} L0 ${top} Z`} fill="var(--panel)" />
+          <path d={zigzag} fill="none" stroke="var(--line-2)" strokeWidth="1" strokeLinejoin="miter" />
+        </pattern>
+      </defs>
+      <rect width="100%" height={h} fill={`url(#${id})`} />
+    </svg>
+  );
+}
 
 export function TopBar() {
   const playing = useSim((s) => s.playing);
-  const speed = useSim((s) => s.speed);
-  const seed = useSim((s) => s.seed);
+  const started = useSim((s) => s.started);
   const scenario = useSim((s) => s.scenario);
   const tick = useSim((s) => s.snap?.tick);
   const error = useSim((s) => s.error);
+  const backendKind = useSim((s) => s.backendKind);
+  const world = useSim((s) => s.world);
+  const triggeredAll = useSim((s) => s.triggered);
+  const triggeredAt = useSim((s) => s.triggeredAt);
+  const live = useSim((s) => s.sendCommand !== null);
+  const logOpen = useWindows((s) => s.windows[LOG_WINDOW_ID]?.open === true);
+  const rewindOpen = useWindows((s) => s.windows[REWIND_WINDOW_ID]?.open === true);
+  const sitesOpen = useWindows((s) => s.windows[SITES_WINDOW_ID]?.open === true);
+  const economyOpen = useWindows((s) => s.windows[ECONOMY_WINDOW_ID]?.open === true);
+  const canRewind = useSim((s) => s.rewindTo !== null) && Number(tick ?? 0) > 0;
 
-  const { togglePlay, setSpeed, setSeed, setScenario } = useSim.getState();
+  const { togglePlay, setScenario, triggerScenario } = useSim.getState();
+  const engineScenarios = backendKind === 'http' ? scenariosFor(world) : [];
+  // a scenario whose duration has passed is over: the button goes back to "Scenario" and its entry can be picked again
+  const triggered = activeScenarios(engineScenarios, triggeredAll, triggeredAt, Number(tick ?? 0));
 
   return (
-    <header className="pointer-events-auto absolute inset-x-0 top-0 z-10 flex h-12 items-center gap-2 border-b border-line bg-panel px-4">
+    // z-[60]: above every floating window (they stack from 20 up, see DraggableWindow),
+    // so a menu opened from the bar — Scenario — is never hidden under a window
+    // that sits just below it. Windows cannot be dragged over the bar itself.
+    <header className="pointer-events-auto absolute inset-x-0 top-0 z-[60] flex h-12 items-center gap-1 bg-panel px-2 lg:gap-2 lg:px-4" data-testid="top-bar">
+      <ChainEdge />
       <span className="flex items-center gap-2" data-testid="wordmark">
         <img src="/logo.svg" alt="PetroGrid mark" width={20} height={20} />
-        <span className="wordmark text-base leading-none">
+        {/* on a narrow screen the mark stands for the name, so the controls fit */}
+        <span className="wordmark hidden text-base leading-none lg:inline">
           Petro<span className="text-blue">Grid</span>
         </span>
       </span>
 
-      <span className="data ml-2 min-w-28 rounded-sm bg-panel-2 px-2 py-1" data-testid="clock">
+      <span className="data min-w-24 rounded-sm lg:ml-2 lg:min-w-28 bg-panel-2 px-2 py-1" data-testid="clock">
         {tick === undefined ? '—' : fmtClock(Number(tick))}
       </span>
 
-      <button className={`btn ${playing ? 'btn-active' : ''}`} onClick={togglePlay} data-testid="play-pause">
-        {playing ? '⏸ Pause' : '▶ Play'}
+      {/* Start and Resume are the call to action (primary); Pause, while running, reads as the active state. */}
+      <button className={`btn ${playing ? 'btn-active' : 'btn-primary'}`} onClick={togglePlay} data-testid="play-pause">
+        {!started ? <>▶ Start<span className="hidden lg:inline"> simulation</span></> : playing ? '⏸ Pause' : '▶ Resume'}
       </button>
 
-      <div className="flex items-center gap-1" role="group" aria-label="Simulation speed">
-        {SPEEDS.map((s) => (
-          <button key={s} className={`btn ${speed === s ? 'btn-active' : ''}`} onClick={() => setSpeed(s)}>
-            {s}×
-          </button>
-        ))}
-      </div>
+      <SpeedControl />
 
-      <label className="ml-2 flex items-center gap-2">
-        <span className="label">Seed</span>
-        <input
-          id="seed-input"
-          name="seed"
-          type="number"
-          className="field w-20"
-          value={seed}
-          min={0}
-          onChange={(e) => setSeed(Number(e.target.value) || 0)}
-          data-testid="seed-input"
+      {/* One control: the button is named "Scenario" and opens the list. */}
+      {backendKind === 'http' ? (
+        <DropdownMenu
+          label={scenarioButtonLabel(engineScenarios, triggered)}
+          items={engineScenarios.map((s, i) => ({
+            key: s.key,
+            label: s.label,
+            checked: triggered.includes(s.key),
+            disabled: triggered.includes(s.key),
+            // route closures follow the plant scenarios, under their own divider
+            heading: s.group === 'routes' && engineScenarios[i - 1]?.group !== 'routes' ? 'Routes' : undefined,
+          }))}
+          disabled={!live || engineScenarios.length === 0}
+          emptyText="No scenarios for this world"
+          onPick={(key) => {
+            const picked = engineScenarios.find((s) => s.key === key);
+            if (picked !== undefined) void triggerScenario(picked);
+          }}
+          testId="scenario-select"
         />
-      </label>
+      ) : (
+        <DropdownMenu
+          label={scenario === 'none' ? 'Scenario' : SCENARIOS.find((s) => s.key === scenario)?.label ?? 'Scenario'}
+          items={SCENARIOS.map((s) => ({ key: s.key, label: s.label, checked: s.key === scenario }))}
+          onPick={setScenario}
+          testId="scenario-select"
+        />
+      )}
 
-      <label className="flex items-center gap-2">
-        <span className="label">Scenario</span>
-        <select id="scenario-select" name="scenario" className="field" value={scenario} onChange={(e) => setScenario(e.target.value)} data-testid="scenario-select">
-          {SCENARIOS.map((s) => (
-            <option key={s.key} value={s.key}>{s.label}</option>
-          ))}
-        </select>
-      </label>
-
-      <span className="data ml-auto text-muted">{Math.floor(Number(tick ?? 0) / TICKS_PER_DAY)}/60 d</span>
+      {/* floating windows: each toggle opens or closes one draggable panel */}
+      <button
+        className={`btn ml-auto ${rewindOpen ? 'btn-active' : ''}`}
+        onClick={() => useWindows.getState().toggle(REWIND_WINDOW_ID, REWIND_WINDOW_AT)}
+        disabled={!canRewind && !rewindOpen}
+        aria-pressed={rewindOpen}
+        data-testid="rewind-toggle"
+      >
+        ↶ Back<span className="hidden lg:inline"> in time</span>
+      </button>
+      <button
+        className={`btn ${sitesOpen ? 'btn-active' : ''}`}
+        onClick={() => useWindows.getState().toggle(SITES_WINDOW_ID, SITES_WINDOW_AT)}
+        aria-pressed={sitesOpen}
+        data-testid="sites-toggle"
+      >
+        Sites
+      </button>
+      <button
+        className={`btn ${economyOpen ? 'btn-active' : ''}`}
+        onClick={() => useWindows.getState().toggle(ECONOMY_WINDOW_ID, ECONOMY_WINDOW_AT)}
+        aria-pressed={economyOpen}
+        data-testid="economy-toggle"
+      >
+        Economy
+      </button>
+      <button
+        className={`btn ${logOpen ? 'btn-active' : ''}`}
+        onClick={() => useWindows.getState().toggle(LOG_WINDOW_ID, LOG_WINDOW_AT)}
+        aria-pressed={logOpen}
+        data-testid="log-toggle"
+      >
+        Log
+      </button>
 
       {error !== null && (
         <span

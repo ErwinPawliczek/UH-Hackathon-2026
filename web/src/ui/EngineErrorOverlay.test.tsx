@@ -16,12 +16,13 @@ describe('EngineErrorOverlay markup', () => {
     expect(html).toContain('Engine unavailable');
     expect(html).toContain('Cannot reach the hosted engine (Failed to fetch)');
     expect(html).toContain('data-testid="retry-engine"');
-    expect(html).toContain('Retry');
+    expect(html).toContain('Try again');
+    expect(html).not.toMatch(/stub|fallback/);
   });
 
-  it('stays flat in the v3 style: hairline panel, no shadows or gradients', () => {
+  it('stays flat in the v3 style: hairline cut-corner panel, no shadows or gradients', () => {
     const html = markup('down');
-    expect(html).toContain('class="panel'); // .panel = hairline border-line + bg-panel
+    expect(html).toContain('class="chamfer'); // .chamfer = hairline outline + panel fill, corners cut at 45 degrees
     expect(html).not.toContain('shadow');
     expect(html).not.toContain('gradient');
   });

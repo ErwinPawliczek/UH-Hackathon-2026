@@ -119,7 +119,10 @@ void edgePose(const World& world, uint32_t edge_id, double pos_km, bool reverse,
   const RouteEdge& edge = world.edges[edge_id];
   const Range<uint32_t> pts = edge.polyline;
   // Walk the polyline accumulating arc length; a straight edge has two points.
+  // pos_km counts from the end the vehicle entered by: travelling b→a it
+  // is measured back from the b-end of the stored polyline.
   double remaining = std::max(0.0, std::min(pos_km, edge.length_km));
+  if (reverse) remaining = edge.length_km - remaining;
   double ax = world.polyline_xy[2 * pts.begin], ay = world.polyline_xy[2 * pts.begin + 1];
   double bx = ax, by = ay;
   for (uint32_t i = pts.begin + 1; i < rangeEnd(pts); ++i) {

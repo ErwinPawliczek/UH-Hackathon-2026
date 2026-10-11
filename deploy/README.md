@@ -1,4 +1,4 @@
-# Deploy — Chain Reaction hosted demo
+# Deploying the PetroGrid demo
 
 How the `crx-server` binary is packaged and how the demo gets a public URL
 under the custom domain. Nothing here is deployed automatically yet: there is

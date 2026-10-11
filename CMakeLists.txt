@@ -20,6 +20,7 @@ add_library(crx_engine STATIC
   engine/src/sim/control.cpp
   engine/src/sim/dispatch.cpp
   engine/src/sim/events.cpp
+  engine/src/sim/inspect.cpp
   engine/src/sim/pipelines.cpp
   engine/src/sim/production.cpp
   engine/src/sim/procurement.cpp
@@ -29,7 +30,10 @@ add_library(crx_engine STATIC
   engine/src/sim/sim.cpp
   engine/src/sim/sixsite.cpp
   engine/src/sim/validate.cpp
-  engine/src/sim/world.cpp)
+  engine/src/sim/window.cpp
+  engine/src/sim/words.cpp
+  engine/src/sim/world.cpp
+  engine/src/sim/worldfile.cpp)
 target_include_directories(crx_engine PUBLIC engine/include engine/src)
 target_compile_definitions(crx_engine PRIVATE
   CRX_DATA_DIR="${CMAKE_SOURCE_DIR}/engine/data/catalog")
@@ -39,6 +43,10 @@ target_compile_options(crx_engine PRIVATE
 
 add_executable(crx-cli engine/apps/cli/main.cpp)
 target_link_libraries(crx-cli PRIVATE crx_engine)
+
+# Diagnostic runner: N-day run with per-tick sampling and a PASS/FAIL verdict.
+add_executable(crx-report engine/apps/cli/report.cpp)
+target_link_libraries(crx-report PRIVATE crx_engine)
 
 enable_testing()
 add_executable(crx_tests engine/tests/test_core.cpp)
@@ -52,6 +60,18 @@ add_test(NAME sim COMMAND crx_sim_tests)
 add_executable(crx_logistics_tests engine/tests/test_logistics.cpp)
 target_link_libraries(crx_logistics_tests PRIVATE crx_engine doctest::doctest)
 add_test(NAME logistics COMMAND crx_logistics_tests)
+
+add_executable(crx_mapworld_tests engine/tests/test_mapworld.cpp)
+target_link_libraries(crx_mapworld_tests PRIVATE crx_engine doctest::doctest)
+target_compile_definitions(crx_mapworld_tests PRIVATE
+  CRX_WORLDS_DIR="${CMAKE_SOURCE_DIR}/engine/data/worlds")
+add_test(NAME mapworld COMMAND crx_mapworld_tests)
+
+# 60-day gate for the default world: service >= 95% at days 7, 30 and 60, every
+# customer above 90% in every window, and no plant starved of feed after day 1.
+add_test(NAME mapworld_60d COMMAND crx-report
+  --config "{\"seed\":42,\"world\":\"erwin-world-v1\"}"
+  --days 60 --checkpoints 7,30,60 --min-service 0.95 --min-sink-service 0.9 --quiet)
 
 # ---- crx-server: HTTP host over the C ABI (§7.4) ----
 FetchContent_Declare(httplib
@@ -77,6 +97,10 @@ target_link_libraries(crx_catalog_tests PRIVATE crx_engine doctest::doctest)
 target_compile_definitions(crx_catalog_tests PRIVATE
   CRX_CATALOG_DIR="${CMAKE_SOURCE_DIR}/engine/data/catalog")
 add_test(NAME catalog COMMAND crx_catalog_tests)
+
+add_executable(crx_api_world_tests engine/tests/test_api_world.cpp)
+target_link_libraries(crx_api_world_tests PRIVATE crx_engine doctest::doctest)
+add_test(NAME api_world COMMAND crx_api_world_tests)
 
 # ---- crx-worldgen: template layout generator (§6) ----
 add_library(crx_worldgen STATIC

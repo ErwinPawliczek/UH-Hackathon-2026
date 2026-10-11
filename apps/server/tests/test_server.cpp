@@ -11,8 +11,12 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <fstream>
+#include <set>
+#include <map>
+#include <cctype>
 #include <string>
 #include <thread>
 
@@ -133,6 +137,532 @@ TEST_CASE("command posts through to the engine and fork copies the run") {
   REQUIRE(forkSnapshot);
   CHECK(std::memcmp(forkSnapshot->body.data(), "CRXS", 4) == 0);
   CHECK(tickOf(forkSnapshot->body) == 10);
+}
+
+TEST_CASE("rewind rebuilds an earlier tick exactly and forgets what came after") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const auto post = [&cli](const std::string& path, const std::string& body) {
+    auto res = cli.Post(path, body, "application/json");
+    REQUIRE(res);
+    return *res;
+  };
+  const auto snapshotAt = [&post](const std::string& id) {
+    return post("/api/sim/" + id + "/step", R"({"ticks":0})").body;
+  };
+  const std::string outage =
+      R"({"type":"unit_outage","site":"STEAM_CRACKER","unit":"SC-CGC","trains":1,"duration_h":48})";
+
+  // Run A: 40 ticks, an outage, 60 more ticks.
+  const std::string a = createSession(cli, R"({"seed":7})");
+  post("/api/sim/" + a + "/step", R"({"ticks":40})");
+  CHECK(json::parse(post("/api/sim/" + a + "/command", outage).body).at("ok") == true);
+  post("/api/sim/" + a + "/step", R"({"ticks":60})");
+
+  // Back to tick 70, after the outage was issued: identical to a run that
+  // did the same things and stopped at 70.
+  const auto back = post("/api/sim/" + a + "/rewind", R"({"tick":70})");
+  CHECK(back.status == 200);
+  CHECK(json::parse(back.body).at("tick") == 70);
+  const std::string b = createSession(cli, R"({"seed":7})");
+  post("/api/sim/" + b + "/step", R"({"ticks":40})");
+  post("/api/sim/" + b + "/command", outage);
+  post("/api/sim/" + b + "/step", R"({"ticks":30})");
+  CHECK(tickOf(snapshotAt(a)) == 70);
+  CHECK(snapshotAt(a) == snapshotAt(b));
+
+  // Back to tick 40, the moment the outage was issued: the outage is
+  // forgotten, so running on matches a run that never had it.
+  CHECK(post("/api/sim/" + a + "/rewind", R"({"tick":40})").status == 200);
+  post("/api/sim/" + a + "/step", R"({"ticks":60})");
+  const std::string c = createSession(cli, R"({"seed":7})");
+  post("/api/sim/" + c + "/step", R"({"ticks":100})");
+  CHECK(snapshotAt(a) == snapshotAt(c));
+  CHECK(snapshotAt(a) != post("/api/sim/" + b + "/step", R"({"ticks":30})").body);
+
+  // A fork can go back into its parent's past.
+  const std::string f = json::parse(post("/api/sim/" + b + "/fork", "").body).at("id");
+  CHECK(post("/api/sim/" + f + "/rewind", R"({"tick":70})").status == 200);
+  const std::string d = createSession(cli, R"({"seed":7})");
+  post("/api/sim/" + d + "/step", R"({"ticks":40})");
+  post("/api/sim/" + d + "/command", outage);
+  post("/api/sim/" + d + "/step", R"({"ticks":30})");
+  CHECK(snapshotAt(f) == snapshotAt(d));
+
+  // Refusals: the future, malformed bodies, unknown sessions.
+  CHECK(post("/api/sim/" + a + "/rewind", R"({"tick":101})").status == 400);
+  CHECK(post("/api/sim/" + a + "/rewind", R"({"tick":-1})").status == 400);
+  CHECK(post("/api/sim/" + a + "/rewind", R"({"ticks":5})").status == 400);
+  CHECK(post("/api/sim/" + a + "/rewind", "not json").status == 400);
+  CHECK(post("/api/sim/nope/rewind", R"({"tick":0})").status == 404);
+  CHECK(tickOf(snapshotAt(a)) == 100);
+}
+
+TEST_CASE("forecast: with and without the disruptions, cost and countdown, session untouched") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const auto post = [&cli](const std::string& path, const std::string& body) {
+    auto res = cli.Post(path, body, "application/json");
+    REQUIRE(res);
+    return *res;
+  };
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  post("/api/sim/" + id + "/step", R"({"ticks":960})");  // day 10
+
+  // Nothing broken: the two futures are the same run.
+  const auto calm = post("/api/sim/" + id + "/forecast", R"({"days":30})");
+  REQUIRE(calm.status == 200);
+  const json quiet = json::parse(calm.body);
+  CHECK(quiet.at("tick") == 960);
+  CHECK(quiet.at("to_tick") == 960 + 30 * 96);
+  CHECK(quiet.at("disruptions") == 0);
+  CHECK(quiet.at("countdown").empty());
+  for (const auto& item : quiet.at("delta").items()) CHECK(item.value().get<double>() == 0.0);
+  CHECK(quiet.at("with") == quiet.at("without"));
+  CHECK(quiet.at("with").at("customers").size() == 15);
+
+  // Ethane cracker compressor down for ten days.
+  CHECK(json::parse(post("/api/sim/" + id + "/command",
+                         R"({"type":"unit_outage","site":"CRACKER_ETHANE","unit":"SC-CGC",)"
+                         R"("trains":1,"duration_h":240})")
+                        .body)
+            .at("ok") == true);
+  const std::string before = post("/api/sim/" + id + "/step", R"({"ticks":0})").body;
+  const auto first = post("/api/sim/" + id + "/forecast", R"({"days":30})");
+  const auto second = post("/api/sim/" + id + "/forecast", R"({"days":30})");
+  REQUIRE(first.status == 200);
+  CHECK(first.body == second.body);  // repeatable
+  CHECK(post("/api/sim/" + id + "/step", R"({"ticks":0})").body == before);  // run untouched
+
+  const json f = json::parse(first.body);
+  CHECK(f.at("disruptions") == 1);
+  CHECK(f.at("delta").at("cost_usd").get<double>() > 0.0);
+  CHECK(f.at("delta").at("shutdown_h").get<double>() >= 240.0);
+  CHECK(f.at("without").at("totals").at("shutdown_h").get<double>() == 0.0);
+  CHECK(f.at("without") == quiet.at("without"));  // "without" is the run nobody broke
+  bool pe_stops = false;
+  uint64_t last_tick = 0;
+  for (const json& c : f.at("countdown")) {
+    CHECK(c.at("tick").get<uint64_t>() >= last_tick);  // soonest first
+    last_tick = c.at("tick").get<uint64_t>();
+    CHECK(c.at("hours_from_now").get<double>() == doctest::Approx((last_tick - 960) * 0.25));
+    if (c.at("site") == "POLYETHYLENE" && c.at("kind") == "shuts_down") pe_stops = true;
+  }
+  CHECK(pe_stops);
+
+  // Default window, bounds and refusals.
+  CHECK(json::parse(post("/api/sim/" + id + "/forecast", "").body).at("days") == 30);
+  CHECK(json::parse(post("/api/sim/" + id + "/forecast", R"({"days":1})").body).at("to_tick") ==
+        960 + 96);
+  CHECK(post("/api/sim/" + id + "/forecast", R"({"days":0})").status == 400);
+  CHECK(post("/api/sim/" + id + "/forecast", R"({"days":121})").status == 400);
+  CHECK(post("/api/sim/" + id + "/forecast", R"({"days":"ten"})").status == 400);
+  CHECK(post("/api/sim/" + id + "/forecast", "not json").status == 400);
+  CHECK(post("/api/sim/nope/forecast", R"({"days":5})").status == 404);
+
+  // The six-site world forecasts too.
+  const std::string six = createSession(cli, R"({"seed":42})");
+  post("/api/sim/" + six + "/step", R"({"ticks":200})");
+  CHECK(post("/api/sim/" + six + "/forecast", R"({"days":10})").status == 200);
+}
+
+TEST_CASE("vehicle: where it is going, where from, and what it holds") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42})");
+  const auto get = [&](const std::string& query) {
+    auto res = cli.Get("/api/sim/" + id + "/vehicle" + query);
+    REQUIRE(res);
+    return *res;
+  };
+  const auto world = cli.Get("/api/sim/" + id + "/world");
+  REQUIRE(world);
+  const json sites = json::parse(world->body).at("sites");
+
+  // At rest: no order, no path.
+  const json parked = json::parse(get("?index=0").body);
+  CHECK(parked.at("status") == "idle");
+  CHECK(parked.at("cls") == "TRUCK_TANK");
+  CHECK(parked.at("capacityT") == 25);
+  CHECK(parked.at("order").is_null());
+  CHECK(parked.at("cargo").is_null());
+  CHECK(parked.at("legDestination").is_null());
+  CHECK(parked.at("path").empty());
+  CHECK(parked.at("at").at("site").is_number());
+
+  // Run until a truck is on the road with cargo aboard (the fuel-oil lane
+  // from the cracker to the port), an hour at a time.
+  json moving;
+  for (int hour = 0; hour < 24 * 30 && moving.is_null(); ++hour) {
+    REQUIRE(cli.Post("/api/sim/" + id + "/step", R"({"ticks":4})", "application/json"));
+    for (int v = 0; v < 2 && moving.is_null(); ++v) {
+      const json doc = json::parse(get("?index=" + std::to_string(v)).body);
+      if (doc.at("status") == "to_dropoff" && doc.at("path").size() >= 2) moving = doc;
+    }
+  }
+  REQUIRE(!moving.is_null());
+  const json& order = moving.at("order");
+  CHECK(order.at("material") == "FUEL_OIL");
+  CHECK(order.at("from").at("key") == "STEAM_CRACKER");
+  CHECK(order.at("to").at("key") == "PORT_TERMINAL");
+  CHECK(order.at("tonnes").get<double>() > 0.0);
+  CHECK(order.at("tonnes").get<double>() <= 25.0);
+  CHECK(order.at("etaTick").get<uint64_t>() >= order.at("createdTick").get<uint64_t>());
+  CHECK(order.at("priceUsdT").get<double>() > 0.0);
+  CHECK(order.at("freightUsd").get<double>() > 0.0);
+  // Loaded and on its way: the cargo is the order's lot, bound for the buyer.
+  CHECK(moving.at("cargo").at("material") == "FUEL_OIL");
+  CHECK(moving.at("cargo").at("tonnes").get<double>() ==
+        doctest::Approx(order.at("tonnes").get<double>()));
+  CHECK(moving.at("legDestination").at("key") == "PORT_TERMINAL");
+
+  // The path starts where the vehicle is, ends at the destination site, and
+  // its length is the distance left.
+  const json& path = moving.at("path");
+  CHECK(path.front() == moving.at("position"));
+  const json& port = sites.at(order.at("to").at("site").get<size_t>());
+  CHECK(path.back().at(0).get<double>() == doctest::Approx(port.at("x").get<double>()));
+  CHECK(path.back().at(1).get<double>() == doctest::Approx(port.at("y").get<double>()));
+  double length = 0;
+  for (size_t i = 1; i < path.size(); ++i)
+    length += std::hypot(path[i].at(0).get<double>() - path[i - 1].at(0).get<double>(),
+                         path[i].at(1).get<double>() - path[i - 1].at(1).get<double>());
+  CHECK(length == doctest::Approx(moving.at("remainingKm").get<double>()).epsilon(1e-6));
+  CHECK(moving.at("remainingKm").get<double>() > 0.0);
+  CHECK(moving.at("remainingKm").get<double>() <= moving.at("tripKm").get<double>() + 1e-9);
+
+  // Refusals.
+  CHECK(get("").status == 400);
+  CHECK(get("?index=abc").status == 400);
+  CHECK(get("?index=2").status == 400);  // the six-site world has two trucks
+  auto unknown = cli.Get("/api/sim/nope/vehicle?index=0");
+  REQUIRE(unknown);
+  CHECK(unknown->status == 404);
+}
+
+TEST_CASE("economy: the run so far in time buckets, cut back by a rewind") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  const auto economy = [&](const std::string& query) {
+    auto res = cli.Get("/api/sim/" + id + "/economy" + query);
+    REQUIRE(res);
+    return *res;
+  };
+
+  // Before the first tick there is nothing to show.
+  CHECK(json::parse(economy("").body).at("buckets") == 0);
+
+  REQUIRE(cli.Post("/api/sim/" + id + "/step", R"({"ticks":1000})", "application/json"));
+  const json daily = json::parse(economy("").body);  // default bucket: a day
+  CHECK(daily.at("bucketH") == 24);
+  CHECK(daily.at("tick") == 1000);
+  CHECK(daily.at("buckets") == 11);  // ten full days and a part
+  CHECK(!daily.at("materials").empty());
+  CHECK(daily.at("materials")[0].at("orderedT").size() == 11);
+  CHECK(daily.at("totals").at("energyUsd").size() == 11);
+  CHECK(daily.at("plants")[0].at("rateMax").size() == 11);
+  CHECK(json::parse(economy("?bucket_h=6").body).at("buckets") == 42);
+  CHECK(json::parse(economy("?bucket_h=168").body).at("buckets") == 2);
+
+  // A rewind shortens the history to the moment gone back to.
+  REQUIRE(cli.Post("/api/sim/" + id + "/rewind", R"({"tick":300})", "application/json"));
+  const json earlier = json::parse(economy("").body);
+  CHECK(earlier.at("tick") == 300);
+  CHECK(earlier.at("buckets") == 4);
+  CHECK(earlier.at("totals").at("demandT").size() == 4);
+
+  CHECK(economy("?bucket_h=0").status == 400);
+  CHECK(economy("?bucket_h=169").status == 400);
+  CHECK(economy("?bucket_h=day").status == 400);
+  auto unknown = cli.Get("/api/sim/nope/economy");
+  REQUIRE(unknown);
+  CHECK(unknown->status == 404);
+}
+
+TEST_CASE("sourcing: the buying tanks, one tank's options, and refusals") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  REQUIRE(cli.Post("/api/sim/" + id + "/step", R"({"ticks":480})", "application/json"));
+  const auto get = [&](const std::string& query) {
+    auto res = cli.Get("/api/sim/" + id + "/sourcing" + query);
+    REQUIRE(res);
+    return *res;
+  };
+  const std::string before =
+      cli.Post("/api/sim/" + id + "/step", R"({"ticks":0})", "application/json")->body;
+
+  const auto list = get("");
+  CHECK(list.status == 200);
+  CHECK(json::parse(list.body).at("tanks").size() == 20);
+
+  const auto one = get("?site=VINYLS&material=CHLORINE");
+  CHECK(one.status == 200);
+  const json doc = json::parse(one.body);
+  CHECK(doc.at("tick") == 480);
+  CHECK(doc.at("tank").at("name") == "Vinyls (VCM + PVC)");
+  REQUIRE(doc.at("options").size() == 1);  // chlorine has one maker and goes by pressurised truck
+  CHECK(doc.at("options")[0].at("seller") == "CHLOR_ALKALI");
+  CHECK(doc.at("options")[0].at("cls") == "TRUCK_PRESS");
+  CHECK(doc.at("options")[0].at("usual") == true);
+  CHECK(get("?site=11&material=CHLORINE").body == one.body);  // site by index
+
+  CHECK(get("?site=NOPE&material=PE").status == 400);
+  CHECK(get("?site=VINYLS&material=NOPE").status == 400);
+  CHECK(get("?site=VINYLS").status == 400);
+  CHECK(get("?material=PE").status == 400);
+  auto unknown = cli.Get("/api/sim/nope/sourcing");
+  REQUIRE(unknown);
+  CHECK(unknown->status == 404);
+
+  // Asking never moves the run.
+  CHECK(cli.Post("/api/sim/" + id + "/step", R"({"ticks":0})", "application/json")->body == before);
+}
+
+TEST_CASE("route_break by edge: the index is the route's position in the world JSON") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  const auto world = cli.Get("/api/sim/" + id + "/world");
+  REQUIRE(world);
+  const json routes = json::parse(world->body).at("routes");
+  REQUIRE(routes.size() == 88);
+  size_t river = routes.size();
+  for (size_t i = 0; i < routes.size() && river == routes.size(); ++i)
+    if (routes[i].at("mode") == "river") river = i;
+  REQUIRE(river < routes.size());
+
+  const auto command = [&](const json& cmd) {
+    auto res = cli.Post("/api/sim/" + id + "/command", cmd.dump(), "application/json");
+    REQUIRE(res);
+    return json::parse(res->body);
+  };
+  CHECK(command({{"type", "route_break"}, {"edge", river}, {"duration_h", 48}}).at("ok") == true);
+  CHECK(command({{"type", "route_break"}, {"edge", routes.size()}, {"duration_h", 48}}).at("ok") ==
+        false);
+  REQUIRE(cli.Post("/api/sim/" + id + "/step", R"({"ticks":8})", "application/json"));
+  const auto events = cli.Get("/api/sim/" + id + "/events?since=0");
+  REQUIRE(events);
+  bool closed = false;
+  for (const json& e : json::parse(events->body))
+    if (e.at("type") == "route_break" && e.at("unit") == std::to_string(river))
+      closed = e.at("text").get<std::string>().rfind("River lane ", 0) == 0 &&
+               e.at("text").get<std::string>().find(" closed for 2 days") != std::string::npos;
+  CHECK(closed);
+
+  // A rewind to before the closure forgets it, like any other disruption.
+  REQUIRE(cli.Post("/api/sim/" + id + "/rewind", R"({"tick":0})", "application/json"));
+  REQUIRE(cli.Post("/api/sim/" + id + "/step", R"({"ticks":8})", "application/json"));
+  const auto after = cli.Get("/api/sim/" + id + "/events?since=0");
+  REQUIRE(after);
+  for (const json& e : json::parse(after->body)) CHECK(e.at("type") != "route_break");
+}
+
+TEST_CASE("place_order over HTTP: booked, replayed by a rewind, kept by the forecast") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const auto post = [&cli](const std::string& path, const std::string& body) {
+    auto res = cli.Post(path, body, "application/json");
+    REQUIRE(res);
+    return *res;
+  };
+  const std::string order =
+      R"({"type":"place_order","site":"STYRENICS","material":"BENZENE","seller":"REFINERY",)"
+      R"("cls":"TRUCK_TANK","tonnes":25})";
+  const std::string cfg = R"({"seed":42,"world":"erwin-world-v1"})";
+
+  const std::string a = createSession(cli, cfg);
+  post("/api/sim/" + a + "/step", R"({"ticks":100})");
+  const json reply = json::parse(post("/api/sim/" + a + "/command", order).body);
+  REQUIRE(reply.at("ok") == true);
+  CHECK(reply.at("order").at("tonnes") == 25.0);
+  post("/api/sim/" + a + "/step", R"({"ticks":20})");
+
+  // The refusal carries its reason and books nothing.
+  const json bad = json::parse(
+      post("/api/sim/" + a + "/command",
+           R"({"type":"place_order","site":"STYRENICS","material":"BENZENE","seller":"REFINERY",)"
+           R"("cls":"TRUCK_BULK","tonnes":25})")
+          .body);
+  CHECK(bad.at("ok") == false);
+  CHECK(bad.at("blocked") == "not_possible");
+
+  // A rewind to after the order replays it: same as a run that placed it and stopped there.
+  CHECK(post("/api/sim/" + a + "/rewind", R"({"tick":110})").status == 200);
+  const std::string b = createSession(cli, cfg);
+  post("/api/sim/" + b + "/step", R"({"ticks":100})");
+  post("/api/sim/" + b + "/command", order);
+  post("/api/sim/" + b + "/step", R"({"ticks":10})");
+  CHECK(post("/api/sim/" + a + "/step", R"({"ticks":0})").body ==
+        post("/api/sim/" + b + "/step", R"({"ticks":0})").body);
+
+  // It is not a disruption: with none issued, the forecast's two futures are one.
+  const json f = json::parse(post("/api/sim/" + a + "/forecast", R"({"days":2})").body);
+  CHECK(f.at("disruptions") == 0);
+  CHECK(f.at("with") == f.at("without"));
+}
+
+TEST_CASE("unit_outage by unit_index: the world JSON's unit index, forgotten by a rewind") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  const auto world = cli.Get("/api/sim/" + id + "/world");
+  REQUIRE(world);
+  // Every unit in the world JSON carries its own index; find the jet block.
+  int jet = -1;
+  std::set<int> seen;
+  const json world_doc = json::parse(world->body);
+  for (const json& site : world_doc.at("sites"))
+    for (const json& proc : site.at("processes"))
+      for (const json& unit : proc.at("units")) {
+        CHECK(seen.insert(unit.at("index").get<int>()).second);  // no two units share one
+        if (proc.at("key") == "FUEL_DEPOT_JET") jet = unit.at("index").get<int>();
+      }
+  REQUIRE(jet >= 0);
+  const auto post = [&cli](const std::string& path, const std::string& body) {
+    auto res = cli.Post(path, body, "application/json");
+    REQUIRE(res);
+    return *res;
+  };
+  post("/api/sim/" + id + "/step", R"({"ticks":96})");
+  const std::string outage =
+      json{{"type", "unit_outage"}, {"unit_index", jet}, {"trains", 1}, {"duration_h", 240}}.dump();
+  CHECK(json::parse(post("/api/sim/" + id + "/command", outage).body).at("ok") == true);
+  post("/api/sim/" + id + "/step", R"({"ticks":8})");
+  const auto events = cli.Get("/api/sim/" + id + "/events?since=0");
+  REQUIRE(events);
+  int failures = 0;
+  for (const json& e : json::parse(events->body))
+    if (e.at("type") == "unit_failed") {
+      ++failures;
+      CHECK(e.at("text").get<std::string>().find("City jet fuel demand") != std::string::npos);
+    }
+  CHECK(failures == 1);
+
+  // It is a disruption like any other: the forecast counts it, a rewind forgets it.
+  CHECK(json::parse(post("/api/sim/" + id + "/forecast", R"({"days":5})").body).at("disruptions") == 1);
+  REQUIRE(post("/api/sim/" + id + "/rewind", R"({"tick":96})").status == 200);
+  post("/api/sim/" + id + "/step", R"({"ticks":8})");
+  const auto after = cli.Get("/api/sim/" + id + "/events?since=0");
+  REQUIRE(after);
+  for (const json& e : json::parse(after->body)) CHECK(e.at("type") != "unit_failed");
+  CHECK(json::parse(post("/api/sim/" + id + "/forecast", R"({"days":5})").body).at("disruptions") == 0);
+}
+
+TEST_CASE("sourcing after a closure: the cut-off tank stays listed and says route_closed") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  const auto post = [&cli](const std::string& path, const std::string& body) {
+    auto res = cli.Post(path, body, "application/json");
+    REQUIRE(res);
+    return *res;
+  };
+  const auto get = [&](const std::string& query) {
+    auto res = cli.Get("/api/sim/" + id + "/sourcing" + query);
+    REQUIRE(res);
+    return json::parse(res->body);
+  };
+  post("/api/sim/" + id + "/step", R"({"ticks":480})");
+  CHECK(get("").at("tanks").size() == 20);
+
+  // Find the road edges into Vinyls by closing each road in turn on a fork
+  // until the chlorine option reports a closed route; then do it for real.
+  const json routes = json::parse(cli.Get("/api/sim/" + id + "/world")->body).at("routes");
+  int cutting = -1;
+  for (size_t e = 0; e < routes.size() && cutting < 0; ++e) {
+    if (routes[e].at("mode") != "road") continue;
+    const std::string fork = json::parse(post("/api/sim/" + id + "/fork", "").body).at("id");
+    post("/api/sim/" + fork + "/command",
+         json{{"type", "route_break"}, {"edge", e}, {"duration_h", 240}}.dump());
+    post("/api/sim/" + fork + "/step", R"({"ticks":2})");
+    auto res = cli.Get("/api/sim/" + fork + "/sourcing?site=VINYLS&material=CHLORINE");
+    REQUIRE(res);
+    const json doc = json::parse(res->body);
+    if (doc.at("options").size() == 1 && doc.at("options")[0].at("blocked") == "route_closed")
+      cutting = static_cast<int>(e);
+    cli.Delete("/api/sim/" + fork);
+  }
+  REQUIRE(cutting >= 0);
+  post("/api/sim/" + id + "/command",
+       json{{"type", "route_break"}, {"edge", cutting}, {"duration_h", 240}}.dump());
+  post("/api/sim/" + id + "/step", R"({"ticks":2})");
+
+  CHECK(get("").at("tanks").size() == 20);  // nobody dropped out of the list
+  const json doc = get("?site=VINYLS&material=CHLORINE");
+  REQUIRE(doc.at("options").size() == 1);
+  CHECK(doc.at("options")[0].at("feasible_now") == false);
+  CHECK(doc.at("options")[0].at("blocked") == "route_closed");
+  CHECK(doc.at("options")[0].at("blocked_reason") == "the road to this site is closed");
+  const json refused = json::parse(
+      post("/api/sim/" + id + "/command",
+           R"({"type":"place_order","site":"VINYLS","material":"CHLORINE","seller":"CHLOR_ALKALI",)"
+           R"("cls":"TRUCK_PRESS","tonnes":20})")
+          .body);
+  CHECK(refused.at("ok") == false);
+  CHECK(refused.at("blocked") == "route_closed");
+  CHECK(refused.at("error") == "place_order: the road to this site is closed");
+}
+
+TEST_CASE("snapshot site status: 5 marks a site held back by a shock") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  const auto post = [&cli](const std::string& path, const std::string& body) {
+    auto res = cli.Post(path, body, "application/json");
+    REQUIRE(res);
+    return *res;
+  };
+  const json world = json::parse(cli.Get("/api/sim/" + id + "/world")->body);
+  size_t gas_field = world.at("sites").size();
+  for (size_t i = 0; i < world.at("sites").size(); ++i)
+    if (world.at("sites")[i].at("key") == "GAS_FIELD") gas_field = i;
+  REQUIRE(gas_field < world.at("sites").size());
+  // Snapshot (§7.3): magic, version, tick, count, then {scalars, offset} per
+  // array; array 4 is one status byte per site.
+  const auto siteStatus = [&](const std::string& snap, size_t site) {
+    uint32_t offset = 0;
+    std::memcpy(&offset, snap.data() + 20 + 4 * 8 + 4, sizeof offset);
+    return static_cast<int>(static_cast<uint8_t>(snap[offset + site]));
+  };
+  CHECK(siteStatus(post("/api/sim/" + id + "/step", R"({"ticks":8})").body, gas_field) == 0);
+  post("/api/sim/" + id + "/command",
+       R"({"type":"supply_shock","site":"GAS_FIELD","multiplier":0.5,"duration_h":24})");
+  CHECK(siteStatus(post("/api/sim/" + id + "/step", R"({"ticks":4})").body, gas_field) == 5);
+  CHECK(siteStatus(post("/api/sim/" + id + "/step", R"({"ticks":100})").body, gas_field) == 0);
+}
+
+TEST_CASE("world json: every unit and process stream has a plain name") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  const json world = json::parse(cli.Get("/api/sim/" + id + "/world")->body);
+  std::map<std::string, std::string> names;
+  for (const json& site : world.at("sites"))
+    for (const json& proc : site.at("processes")) {
+      for (const char* side : {"in", "out"})
+        for (const json& st : proc.at(side)) names[st.at("key").get<std::string>()] = st.at("name");
+      for (const json& unit : proc.at("units"))
+        for (const char* side : {"in", "out"})
+          for (const json& st : unit.at(side)) {
+            const std::string key = st.at("key"), name = st.at("name");
+            names[key] = name;
+            CHECK(!name.empty());
+            if (key != "LPG" && key != "PVC") CHECK(name != key);  // never a raw key (these two are words)
+            CHECK(name.find('_') == std::string::npos);
+            CHECK(std::isupper(static_cast<unsigned char>(name[0])) != 0);
+          }
+    }
+  CHECK(names.at("edc") == "Ethylene dichloride");
+  CHECK(names.at("hcl") == "Hydrogen chloride");
+  CHECK(names.at("eb") == "Ethylbenzene");
+  CHECK(names.at("wet_cl2") == "Wet chlorine gas");
+  CHECK(names.at("ygrade") == "Mixed gas liquids");
+  CHECK(names.at("resid") == "Atmospheric residue");
+  CHECK(names.at("AIR_O2") == "Air");
+  CHECK(names.at("PE") == "Polyethylene");
+  CHECK(names.at("CAUSTIC") == "Caustic soda");
 }
 
 TEST_CASE("world json: fleet manifest without a fabricated shuttle schedule") {

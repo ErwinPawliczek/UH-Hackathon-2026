@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { decode, NO_ETA, NO_ROUTE } from '../engine/snapshot';
 import { encodeStub } from '../engine/stub';
 import { stubWorld } from '../engine/world';
-import { vehicleLive } from './vehicleLive';
+import { standingAt, vehicleLive } from './vehicleLive';
 
 const world = stubWorld(42);
 
@@ -60,5 +60,14 @@ describe('vehicleLive', () => {
     const live = vehicleLive(world, s, 0);
     expect(live.from).toBe('—');
     expect(live.to).toBe('—');
+  });
+});
+
+describe('standingAt', () => {
+  it('names the site an idle vehicle is parked at, and nothing when it is far from any', () => {
+    const site = world.sites[1];
+    expect(standingAt(world, { x: site.x, y: site.y })).toBe(site.name);
+    expect(standingAt(world, { x: site.x + 6, y: site.y - 4 })).toBe(site.name);
+    expect(standingAt(world, { x: -500, y: -500 })).toBeNull();
   });
 });

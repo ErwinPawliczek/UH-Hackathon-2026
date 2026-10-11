@@ -68,19 +68,360 @@ h2 {
   font-stretch: 125%;
 }
 
+/*
+ * Scroll bars: only the bar itself, nothing else. No track, no track
+ * background, no arrows, no corner square — a thin bar (6 px, in a 10 px
+ * strip so it is easy to grab) with the same 45 degree cut corners as the
+ * windows, vertical and horizontal alike. Hairline grey at rest; PetroGrid
+ * blue while the pointer is over it or dragging it, and while the content is
+ * moving (ui/scrollState.ts sets [data-scrolling] on a scrolling element).
+ *
+ * This styles the browser's own scroll bar, so every scrolling area gets it
+ * with no markup: window bodies, lists, the flow diagram's sideways scroll,
+ * menus, the page. clip-path does not apply to a scroll bar's parts, so the
+ * cut corners are four corner gradients. Colours are literal: custom
+ * properties do not reach these pseudo-elements reliably.
+ */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-track-piece,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+  border: 0;
+}
+
+*::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+*::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  min-width: 32px;
+  /* 2 px of clear strip either side of the 6 px bar: a bigger target than the bar */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  background-origin: padding-box;
+  background-repeat: no-repeat;
+  background-size: 51% 51%;
+  background-position: top left, top right, bottom right, bottom left;
+  background-image:
+    linear-gradient(135deg, transparent 1.5px, #cdd2d7 0),
+    linear-gradient(225deg, transparent 1.5px, #cdd2d7 0),
+    linear-gradient(315deg, transparent 1.5px, #cdd2d7 0),
+    linear-gradient(45deg, transparent 1.5px, #cdd2d7 0);
+}
+
+*::-webkit-scrollbar-thumb:hover,
+*::-webkit-scrollbar-thumb:active,
+[data-scrolling]::-webkit-scrollbar-thumb {
+  background-image:
+    linear-gradient(135deg, transparent 1.5px, #1764d6 0),
+    linear-gradient(225deg, transparent 1.5px, #1764d6 0),
+    linear-gradient(315deg, transparent 1.5px, #1764d6 0),
+    linear-gradient(45deg, transparent 1.5px, #1764d6 0);
+}
+
+/*
+ * Firefox has no scroll bar pseudo-elements: the nearest it offers is a thin
+ * bar on a transparent track, in the same two colours. (Chromium must not
+ * see these properties — it would drop the styling above in their favour.)
+ */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #cdd2d7 transparent;
+  }
+
+  [data-scrolling] {
+    scrollbar-color: #1764d6 transparent;
+  }
+}
+
+/*
+ * A scrolling area that must not jump sideways when its bar appears keeps
+ * the bar's strip reserved from the start.
+ */
+.scroll-steady {
+  scrollbar-gutter: stable;
+}
+
+/*
+ * Windows and the cards inside them have no rounded corners: each corner is
+ * cut off at 45 degrees, the same distance along x and y, small enough that
+ * the shape still reads as a rectangle — an echo of the hexagon buttons.
+ * A window cuts 10 px (.chamfer), a card inside one 6 px (.chamfer-sm).
+ *
+ * clip-path would cut the border off with the corner, so, as with the
+ * buttons, the outline is two clipped layers behind the content: ::before in
+ * the outline colour, ::after one hairline in, in the fill colour (its cut is
+ * shortened by 0.586 px so the hairline is as thick on the diagonals as on
+ * the sides). .chamfer-body clips the content to the same shape, so a child's
+ * square background can never poke out past a cut corner. Keep padding at
+ * least the cut, so text stays clear of the corners.
+ *
+ * In the components layer, so a positioning utility (fixed, absolute) on the
+ * same element still wins.
+ */
+@layer components {
+  .chamfer {
+    --cut: 10px;
+    --chamfer-line: var(--line-2);
+    --chamfer-fill: var(--panel);
+    position: relative;
+    isolation: isolate;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .chamfer::before,
+  .chamfer::after,
+  .chamfer-body {
+    clip-path: polygon(
+      var(--c) 0, calc(100% - var(--c)) 0, 100% var(--c), 100% calc(100% - var(--c)),
+      calc(100% - var(--c)) 100%, var(--c) 100%, 0 calc(100% - var(--c)), 0 var(--c)
+    );
+  }
+
+  .chamfer::before,
+  .chamfer::after {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  .chamfer::before {
+    --c: var(--cut);
+    inset: 0;
+    background: var(--chamfer-line);
+  }
+
+  .chamfer::after {
+    --c: calc(var(--cut) - 0.586px);
+    inset: 1px;
+    background: var(--chamfer-fill);
+  }
+
+  .chamfer-body {
+    --c: calc(var(--cut) - 0.586px);
+    margin: 1px;
+  }
+
+  .chamfer-sm {
+    --cut: 6px;
+  }
+
+  /* a chamfered card that is a control: hover tint, and a focus outline that follows the cut */
+  .chamfer-press {
+    cursor: pointer;
+  }
+
+  .chamfer-press:hover {
+    --chamfer-fill: var(--panel-2);
+  }
+
+  .chamfer-press:focus-visible {
+    outline: none;
+    --chamfer-line: var(--blue);
+  }
+
+  .chamfer-press:focus-visible::after {
+    --c: calc(var(--cut) - 1.172px);
+    inset: 2px;
+  }
+}
+
 /* Panels and inspectors: 8px radius, 1px hairline in line, flat. */
 .panel {
   @apply rounded-md border border-line bg-panel;
 }
 
-/* Controls: 4px radius, panel-2 fill, line-2 outline. */
+/*
+ * Buttons are hexagons — the brand shape. A text button is an elongated
+ * hexagon: flat top and bottom, the two ends pointed at 120 degrees (the
+ * slanted edges run at 60 degrees, so each point is height / (2 * sqrt 3)
+ * deep). A single-glyph button (.btn-glyph) is the same outline at the width
+ * of a regular hexagon.
+ *
+ * clip-path would cut a border off, so the outline is drawn as two layers
+ * behind the label: ::before in the outline colour, ::after inset by one
+ * hairline in the fill colour. Both follow --hex-h, so a size is one variable.
+ */
 .btn {
-  @apply cursor-pointer rounded-sm border border-line-2 bg-panel-2 px-2 py-1 text-xs text-ink hover:bg-line disabled:cursor-not-allowed disabled:opacity-40;
+  --hex-h: 28px;
+  --hex-d: calc(var(--hex-h) * 0.2887);
+  --btn-line: var(--line-2);
+  --btn-fill: var(--panel-2);
+  --btn-ring: 1px;
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--hex-h);
+  min-width: calc(var(--hex-h) * 1.1547);
+  padding: 0 calc(var(--hex-d) + 6px);
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
-/* Active control: the one blue; hover and pressed in blue-strong. */
-.btn-active {
-  @apply border-blue bg-blue text-white hover:border-blue-strong hover:bg-blue-strong;
+.btn::before,
+.btn::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  clip-path: polygon(var(--d) 0, calc(100% - var(--d)) 0, 100% 50%, calc(100% - var(--d)) 100%, var(--d) 100%, 0 50%);
+}
+
+/* outline layer */
+.btn::before {
+  --d: var(--hex-d);
+  inset: 0;
+  background: var(--btn-line);
+}
+
+/* fill layer: one hairline in on every edge (1.155 = 1 / sin 60 on the slants) */
+.btn::after {
+  --d: calc((var(--hex-h) - 2 * var(--btn-ring)) * 0.2887);
+  inset: var(--btn-ring) calc(var(--btn-ring) * 1.155);
+  background: var(--btn-fill);
+}
+
+.btn:hover:not(:disabled) {
+  --btn-fill: var(--line);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+/* Keyboard focus: the hexagon's own outline thickens and turns blue. */
+.btn:focus-visible {
+  outline: none;
+  --btn-line: var(--blue);
+  --btn-ring: 2px;
+}
+
+/* Primary: the one blue; hover and pressed in blue-strong. */
+.btn-primary {
+  --btn-line: var(--blue);
+  --btn-fill: var(--blue);
+  color: var(--white);
+}
+
+.btn-primary:hover:not(:disabled) {
+  --btn-line: var(--blue-strong);
+  --btn-fill: var(--blue-strong);
+}
+
+.btn-primary:focus-visible {
+  --btn-line: var(--ink);
+}
+
+/* Destructive (Fail unit): alarm red, the one place a button is red. */
+.btn-danger {
+  --btn-line: var(--alarm);
+  --btn-fill: var(--alarm);
+  color: var(--white);
+}
+
+.btn-danger:hover:not(:disabled) {
+  --btn-line: #b02d26;
+  --btn-fill: #b02d26;
+}
+
+.btn-danger:focus-visible {
+  --btn-line: var(--ink);
+}
+
+/* Active (a chosen speed, an open window or menu): blue outline on blue-soft. */
+.btn-active,
+.btn-active:hover:not(:disabled) {
+  --btn-line: var(--blue);
+  --btn-fill: var(--blue-soft);
+  color: var(--blue-strong);
+}
+
+/*
+ * A hexagon that holds an editable value ("Speed: 1"): a label styled as a
+ * button with a bare input inside. Focus inside it draws the same thickened
+ * blue outline a focused button gets.
+ */
+.btn-field {
+  cursor: text;
+  gap: 4px;
+}
+
+.btn-field:focus-within {
+  --btn-line: var(--blue);
+  --btn-ring: 2px;
+}
+
+/* a refused entry: the field flashes red while the old value comes back */
+.btn-field-rejected {
+  --btn-line: var(--alarm);
+  --btn-ring: 2px;
+  animation: field-rejected 0.9s ease-out;
+}
+
+@keyframes field-rejected {
+  0%, 40% { --btn-fill: #fbeceb; color: var(--alarm); }
+  100% { color: inherit; }
+}
+
+.btn-field input {
+  width: 4ch; /* "64.0" — the hexagon keeps its width whatever the number */
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--f-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  outline: none;
+}
+
+/* Single glyph: a regular hexagon. */
+.btn-glyph {
+  width: calc(var(--hex-h) * 1.1547);
+  min-width: 0;
+  padding: 0;
+}
+
+/* Large call to action. */
+.btn-lg {
+  --hex-h: 48px;
+  padding: 0 calc(var(--hex-d) + 16px);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* Compact, for controls inside cards (still a 28 px tall hit area). */
+.btn-sm {
+  padding: 0 calc(var(--hex-d) + 2px);
+  font-family: var(--f-mono);
+  font-size: 11px;
+}
+
+/* Rows of a dropdown list: full-width, quiet until hovered or focused. */
+.menu-item {
+  @apply flex w-full cursor-pointer items-center rounded-sm px-2 py-1.5 text-left text-xs text-ink hover:bg-panel-2 focus:bg-blue-soft focus:outline-none disabled:cursor-default disabled:text-muted disabled:hover:bg-transparent;
 }
 
 .field {

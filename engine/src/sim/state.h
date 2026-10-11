@@ -39,6 +39,9 @@ struct TankState {
   double pickup_gap_h = 4;     // fixed 4 h for pipeline-fed tanks (§5.2)
   double caution = 1;          // learned multiplier (§5.8); 1 in M1
   uint64_t next_eta_tick = 0, last_pickup_tick = 0;  // §4.4, M2
+  // Product that did not fit and was thrown away, cumulative (only ever
+  // non-zero for a tank the world marks reject_when_full).
+  double rejected_t = 0;
 };
 
 // §4.4 vehicle state. Plain data so forks copy it: the planned node sequence
@@ -74,6 +77,10 @@ struct Order {
   uint32_t vehicle = UINT32_MAX;
   uint64_t created_tick = 0, eta_tick = 0;
   OrdStatus status = OrdStatus::Open;
+  // Bookkeeping for the economy view, outside the state hash: the route
+  // length the lot was priced on and the tick it was delivered (0 = not yet).
+  double km = 0;
+  uint64_t delivered_tick = 0;
 };
 
 struct ProcState {
@@ -96,6 +103,7 @@ struct EventDef {
   Type type = Type::UnitOutage;
   uint32_t site = 0;
   uint32_t site2 = UINT32_MAX;  // route_break: the far end of the closed span
+  uint32_t edge = UINT32_MAX;   // route_break by edge: the one route edge closed
   int32_t unit = -1;      // world unit index; unit-level events only
   uint32_t trains = 0;    // unit_outage
   double multiplier = 1;  // demand/supply shocks
@@ -113,6 +121,15 @@ struct LogEntry {
 struct Ledger {
   double produced_t = 0, consumed_t = 0, unmet_t = 0;
   double revenue = 0, feed_cost = 0, freight = 0, energy_cost = 0;
+};
+
+// Per-process running totals since tick 0. Derived from quantities the hash
+// already covers, so they stay out of the state hash; they exist so a window
+// of a run (forecasts, per-customer service) is a plain subtraction.
+struct ProcTotals {
+  double demand_t = 0;  // sinks: tonnes asked for
+  double served_t = 0;  // sinks: tonnes actually drawn
+  double down_h = 0;    // plants: hours in Shutdown or Restarting
 };
 
 struct State {
@@ -134,6 +151,7 @@ struct State {
   std::vector<Ledger> ledger;          // per site
   std::vector<uint8_t> sink_starved;   // per process: edge state for stockouts
   std::vector<double> rate_override;   // per process: §7.2 R_max cap, <0 = none
+  std::vector<ProcTotals> proc_totals; // per process, cumulative (not hashed)
 
   // Accounting accumulators (§5.4, §5.10). Real material only: pseudo
   // streams (FUEL_GAS, LOSS, WATER, AIR_O2) never enter tanks, so their

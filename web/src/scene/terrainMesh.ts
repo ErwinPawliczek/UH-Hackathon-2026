@@ -7,16 +7,21 @@ import * as THREE from 'three';
 import { sampleHeight, type WorldSpec } from '../engine/world';
 import { buildCells, hexCenter, type HexCell } from './hexGrid';
 import { terrainHexColor } from './palette';
+import { BOARD_RENDER_ORDER } from './renderOrder';
 
 /** World units per km — the 600 × 400 km map becomes 60 × 40 units. */
 export const SCALE = 0.1;
 /** World units per metre of elevation (2 500 m → 30 units). */
 export const HEIGHT_SCALE = 0.012;
 
-/** Hex circumradius in map km — ~2.8k cells across the 600 × 400 km map. */
-export const HEX_SIZE_KM = 6;
+/** Hex circumradius in map km — ~3.8k cells across the 600 × 400 km map. At 5 km a
+ * hex is narrower than a 10 km water-mask cell, so every drawn water cell lands on
+ * at least one tile. */
+export const HEX_SIZE_KM = 5;
 /** Sea cells sit this far below the sampled height so the coast has a visible wall. */
-export const WATER_DROP = 0.5;
+export const WATER_DROP = 0.3;
+/** Depth (m below sea level) over which the drawn surface eases down to the water tiles. */
+const WATER_EASE_M = 3;
 /** Land cells sink this far below the smooth height field — the clip guarantee. */
 const LAND_SINK = 0.02;
 /** Horizontal shrink of each tile; the gap shows the white background as a hairline. */
@@ -27,6 +32,27 @@ const TILE_THICKNESS = 1.0;
 /** Ground height (world units) at map km coordinates, for draping and placement. */
 export function terrainYAt(world: WorldSpec, xKm: number, yKm: number): number {
   return (sampleHeight(world.terrain, xKm, yKm) - world.terrain.seaLevelM) * HEIGHT_SCALE;
+}
+
+/**
+ * Height (world units) of what is drawn at map km coordinates: the ground on
+ * land, the lowered water tiles on water — where barges, ships and their
+ * lanes sit. Eases across the shoreline so a vessel reaching its berth does
+ * not jump.
+ */
+export function surfaceYAt(world: WorldSpec, xKm: number, yKm: number): number {
+  const hM = sampleHeight(world.terrain, xKm, yKm) - world.terrain.seaLevelM;
+  if (hM >= 0) return hM * HEIGHT_SCALE;
+  const t = Math.min(1, -hM / WATER_EASE_M);
+  return hM * HEIGHT_SCALE - WATER_DROP * t * t * (3 - 2 * t);
+}
+
+/**
+ * Height (world units) for things that cross water above it — roads on
+ * bridges, pipelines: the ground on land, sea level over water.
+ */
+export function deckYAt(world: WorldSpec, xKm: number, yKm: number): number {
+  return Math.max(0, terrainYAt(world, xKm, yKm));
 }
 
 /** Map km coordinates to world XZ: x → x, y → z. */
@@ -98,5 +124,6 @@ export function buildHexBoard(world: WorldSpec): THREE.InstancedMesh {
   if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
   // Instances span the whole map; the base bounding sphere would cull them wrongly.
   mesh.frustumCulled = false;
+  mesh.renderOrder = BOARD_RENDER_ORDER;
   return mesh;
 }

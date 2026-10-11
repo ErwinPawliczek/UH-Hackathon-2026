@@ -17,7 +17,11 @@ namespace crx {
 namespace sim {
 
 // Assigns open orders to idle vehicles (§5.7). Call after procurement.
-void stepDispatch(const World& world, State& state, PathCache& paths, Recorder& rec);
+// `urgency_boost_h` is MarketParams::dispatch_urgency_boost_h: negative
+// serves the most urgent order first (then the oldest); >= 0 serves first
+// come first served with urgency worth a head start of that many hours.
+void stepDispatch(const World& world, State& state, PathCache& paths, Recorder& rec,
+                  double urgency_boost_h = -1.0);
 
 // One transport tick: movement, bay queues, loading and unloading (§5.7).
 // Delivery books price and freight into the per-site ledgers and feeds the

@@ -1,10 +1,12 @@
 // Full-viewport three.js canvas: builds the MapScene when the world changes,
-// drives the render loop (frame interpolation between 250 ms snapshots, flow
-// animation), forwards clicks to picking, and handles resize.
+// drives the render loop (vehicles drive continuously between the 250 ms
+// snapshots, see vehicleMotion.ts), forwards clicks to picking, and handles
+// resize.
 
 import { useEffect, useRef } from 'react';
 import { useSim } from '../store/sim';
-import { MapScene } from './mapScene';
+import { MapScene, viewFromParams } from './mapScene';
+import type { VehicleTrip } from './tripOverlay';
 
 export function SceneCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -16,8 +18,12 @@ export function SceneCanvas() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas === null || world === null) return;
-    const scene = new MapScene(canvas, world);
+    const scene = new MapScene(canvas, world, viewFromParams(new URLSearchParams(window.location.search)));
     sceneRef.current = scene;
+    // `?debug` exposes the scene to the console and to capture scripts, which
+    // may also hand it a trip to draw (window.__petrogridTrip)
+    const debug = new URLSearchParams(window.location.search).has('debug');
+    if (debug) (window as unknown as { __petrogridScene?: MapScene }).__petrogridScene = scene;
 
     const ro = new ResizeObserver(() => {
       const parent = canvas.parentElement;
@@ -35,9 +41,15 @@ export function SceneCanvas() {
       last = now;
       const st = useSim.getState();
       if (st.snap !== null) {
-        const stepMs = 250;
+        // real time between snapshots (longer below speed 1)
+        const stepMs = st.stepIntervalMs ?? 250;
         const f = st.playing ? Math.min(1, (now - st.snapAt) / stepMs) : 1;
-        scene.applySnapshot(st.snap, st.prevSnap, f, st.selected);
+        scene.applySnapshot(st.snap, st.prevSnap, f, st.selected, now, st.runEpoch, stepMs);
+        // the selected vehicle's trip, once the UI has fetched it (absent on older stores)
+        const trip =
+          (st as unknown as { selectedVehicleDetail?: VehicleTrip | null }).selectedVehicleDetail ??
+          (debug ? ((window as unknown as { __petrogridTrip?: VehicleTrip }).__petrogridTrip ?? null) : null);
+        scene.showTrip(trip, st.selected);
       }
       scene.animate(dt);
       scene.render();
@@ -70,14 +82,34 @@ export function SceneCanvas() {
       useSim.getState().select(hit);
     };
     canvas.addEventListener('pointerdown', onDown);
+    // double-click on empty map: back to the start view
+    const onDouble = (e: MouseEvent) => {
+      const scene = sceneRef.current;
+      if (scene !== null && scene.pick(e.clientX, e.clientY) === null) scene.resetView();
+    };
     canvas.addEventListener('pointerup', onUp);
+    canvas.addEventListener('dblclick', onDouble);
     return () => {
+      canvas.removeEventListener('dblclick', onDouble);
       canvas.removeEventListener('pointerdown', onDown);
       canvas.removeEventListener('pointerup', onUp);
     };
   }, []);
 
   return (
-    <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-label="Simulation map" />
+    <>
+      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-label="Simulation map" />
+      <div className="absolute bottom-4 right-4 z-10">
+      <button
+        type="button"
+        className="btn"
+        onClick={() => sceneRef.current?.resetView()}
+        title="Show the whole map again (or double-click empty map)"
+        data-testid="reset-view"
+      >
+        Reset view
+      </button>
+      </div>
+    </>
   );
 }

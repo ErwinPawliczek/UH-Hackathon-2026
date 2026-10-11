@@ -30,6 +30,17 @@ constexpr double kOverdesign = 1.10;  // §3.2: trains sized at 110 % of namepla
 
 }  // namespace
 
+double unitThroughputPerBasis(const UnitSlot& slot, const std::vector<double>& mode_share) {
+  double tput = 0.0;
+  for (size_t m = 0; m < slot.by_mode.size() && m < mode_share.size(); ++m) {
+    if (mode_share[m] <= 0.0) continue;
+    double in = 0.0;
+    for (const Stream& s : slot.by_mode[m].in) in += s.t_per_t;
+    tput += mode_share[m] * in;  // a single-mode process: 1.0 x its in-sum, exactly
+  }
+  return tput > 0.0 ? tput : 1.0;
+}
+
 bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, World& out,
                 std::string& error) {
   auto fail = [&](const std::string& msg) {
@@ -51,6 +62,11 @@ bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, Wo
     site.name = ss.name;
     site.x_km = ss.x_km;
     site.y_km = ss.y_km;
+    if (ss.preset != nullptr) {
+      site.preset = catalog.findPreset(ss.preset);
+      if (site.preset < 0)
+        return fail("site " + site.key + ": unknown preset " + std::string(ss.preset));
+    }
     site.tanks.begin = static_cast<uint32_t>(out.tanks.size());
     site.processes.begin = static_cast<uint32_t>(out.processes.size());
     const SiteId sid{static_cast<uint32_t>(out.sites.size() - 1)};
@@ -65,6 +81,8 @@ bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, Wo
       if (ts.cover_days <= 0 || ts.target_frac < 0 || ts.target_frac > 1)
         return fail("site " + site.key + ": tank " + ts.material +
                     " needs cover_days > 0 and target_frac in [0,1]");
+      if (ts.init_frac > 1)
+        return fail("site " + site.key + ": tank " + ts.material + " init_frac is over 1");
       Tank& t = out.tanks.emplace_back();
       t.key = site.key + "/" + ts.material;
       t.site = sid;
@@ -72,6 +90,13 @@ bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, Wo
       t.role = ts.role;
       t.cover_days = ts.cover_days;
       t.target_frac = ts.target_frac;
+      t.init_frac = ts.init_frac;
+      if (ts.lead_time_h > 0) t.init_lead_time_h = ts.lead_time_h;
+      if (ts.pickup_gap_h > 0) t.init_pickup_gap_h = ts.pickup_gap_h;
+      if (ts.reject_when_full && ts.role != TankRole::Product)
+        return fail("site " + site.key + ": tank " + ts.material +
+                    " has reject_when_full, which only a product tank can");
+      t.reject_when_full = ts.reject_when_full;
     }
 
     site.tanks.count = static_cast<uint32_t>(out.tanks.size()) - site.tanks.begin;
@@ -160,11 +185,16 @@ bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, Wo
       }
     }
 
-    // §3.2: trains together are sized at 110 % of the process nameplate
-    // (nameplate is in basis t/h, so unit capacity is basis t/h per train).
+    // §3.2: trains together are sized at 110 % of the process nameplate.
+    // Nameplate is in basis t/h; a unit passes unitThroughputPerBasis() of
+    // its own tonnes per basis tonne, so its capacity carries that factor —
+    // R_max (control.cpp) divides it back out and lands on 110 % of
+    // nameplate for every unit with all trains online.
     for (uint32_t u = proc.units.begin; u < rangeEnd(proc.units); ++u) {
       const UnitSlot& slot = type.units[out.units[u].slot];
-      out.units[u].cap_per_train_t_h = kOverdesign * proc.design_rate_t_h / slot.trains;
+      out.units[u].cap_per_train_t_h =
+          kOverdesign * proc.design_rate_t_h * unitThroughputPerBasis(slot, proc.mode_share) /
+          slot.trains;
     }
   }
 
@@ -216,6 +246,11 @@ bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, Wo
     pl.to = TankId{static_cast<uint32_t>(to)};
     pl.material = static_cast<uint16_t>(mid);
     pl.cap_t_h = ps.cap_t_h;
+    if (ps.points_xy.size() >= 4 && ps.points_xy.size() % 2 == 0) {
+      pl.polyline = Range<uint32_t>{static_cast<uint32_t>(out.polyline_xy.size() / 2),
+                                    static_cast<uint32_t>(ps.points_xy.size() / 2)};
+      out.polyline_xy.insert(out.polyline_xy.end(), ps.points_xy.begin(), ps.points_xy.end());
+    }
   }
 
   // Pass 4 — route graph (§4.3/§5.7): one road node per site, straight
@@ -232,10 +267,14 @@ bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, Wo
     s.node[modeIndex(crx::Mode::Road)] = static_cast<uint32_t>(out.nodes.size());
     out.nodes.push_back(n);
   }
-  for (Site& s : out.sites) {
-    s.bays[modeIndex(crx::Mode::Road)] = static_cast<uint8_t>(spec.road_bays);
-    s.bays[modeIndex(crx::Mode::River)] = static_cast<uint8_t>(spec.river_bays);
-    s.bays[modeIndex(crx::Mode::Sea)] = static_cast<uint8_t>(spec.sea_bays);
+  for (size_t i = 0; i < out.sites.size(); ++i) {
+    Site& s = out.sites[i];
+    const unsigned defaults[kModeCount] = {spec.road_bays, spec.river_bays, spec.sea_bays};
+    for (int m = 0; m < kModeCount; ++m) {
+      const int own = spec.sites[i].bays[static_cast<size_t>(m)];
+      s.bays[static_cast<size_t>(m)] =
+          static_cast<uint8_t>(own >= 0 ? std::min(own, 255) : static_cast<int>(defaults[m]));
+    }
   }
   for (const RoadSpec& rs : spec.roads) {
     const int a = out.findSite(rs.from), b = out.findSite(rs.to);

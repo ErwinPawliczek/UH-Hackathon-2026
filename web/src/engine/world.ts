@@ -13,7 +13,12 @@ export type GlyphKind =
   | 'extruder_hall'
   | 'tank'
   | 'flare'
-  | 'jetty';
+  | 'jetty'
+  | 'pipe_rack'
+  | 'truck_rack'
+  | 'silo'
+  | 'cell_room'
+  | 'exchanger_bank';
 
 export type RouteMode = 'road' | 'river' | 'sea';
 
@@ -31,10 +36,33 @@ export interface RouteSpec {
   mode: RouteMode;
   /** display names of the two ends (e.g. site names, or "Overseas" off-map) */
   ends: [string, string];
-  /** site indices at each end, null for off-map */
+  /** site indices at each end, null for off-map ends and network junctions */
   sites: [number | null, number | null];
+  /**
+   * True where the end is a junction of the drawn network rather than a site
+   * (hand-drawn map worlds: a route is one stretch of road, river or sea lane
+   * between two junctions). Absent on worlds whose routes all join sites.
+   */
+  junction?: [boolean, boolean];
   /** km points in map coordinates (0..w, 0..h) */
   points: [number, number][];
+}
+
+/**
+ * One stream into or out of a unit or a process, at design rate. A
+ * "material" stream moves between the unit and a tank (`tank` is the index
+ * into WorldSpec.tanks); an "internal" stream joins one unit's out to
+ * another unit's in by key, inside one process; a "utility" stream (water,
+ * fuel gas, losses) has no tank and is shown as a note, not a line.
+ */
+export interface StreamSpec {
+  key: string;
+  /** the stream in plain words, when the engine gives one ("ethylene dichloride" for `edc`) */
+  name?: string;
+  /** tonnes per hour at design rate */
+  tph: number;
+  kind: 'material' | 'internal' | 'utility';
+  tank: number | null;
 }
 
 export interface UnitSpec {
@@ -42,6 +70,16 @@ export interface UnitSpec {
   name: string;
   glyph: GlyphKind;
   trains: number;
+  // Flowsheet data (engine worlds; absent on the stub world):
+  /** global unit index — the unit's slot in snapshot array 3 (trains online) */
+  index?: number;
+  /** throughput one train can take, in t/h of everything the unit takes in */
+  capPerTrainTph?: number;
+  in?: StreamSpec[];
+  out?: StreamSpec[];
+  /** heat duty and electrical load at design rate */
+  heatGjH?: number;
+  powerMw?: number;
 }
 
 export interface ProcessSpec {
@@ -49,6 +87,20 @@ export interface ProcessSpec {
   name: string;
   designRateTph: number;
   units: UnitSpec[];
+  // Flowsheet data (engine worlds; absent on the stub world):
+  /** global process index — the process's slot in snapshot arrays 1 and 2 */
+  index?: number;
+  /** the stream the design rate is quoted in */
+  basis?: string;
+  /** "source" makes material from nothing, "sink" consumes it; "none" is a plant process */
+  boundary?: 'source' | 'sink' | 'none';
+  modes?: string[];
+  modeShare?: number[];
+  turndown?: number;
+  restartH?: number;
+  /** net streams of the whole process at design rate */
+  in?: StreamSpec[];
+  out?: StreamSpec[];
 }
 
 export type TankRole = 'feed' | 'product' | 'internal' | 'both';
@@ -75,22 +127,24 @@ export type VehicleClassKey =
 /** §3.4 vehicle classes; sceneLength is the 3D glyph size in scene units (km), sized for visibility. */
 export const VEHICLE_CLASSES: Record<
   VehicleClassKey,
-  { label: string; capacityT: number; speedKmh: number; sceneLength: number; sceneWidth: number }
+  { label: string; capacityT: number; speedKmh: number; /** t/h a bay loads or unloads it at (catalog load_t_h) */ loadTph: number; sceneLength: number; sceneWidth: number }
 > = {
-  TRUCK_TANK: { label: 'Truck (tank)', capacityT: 25, speedKmh: 70, sceneLength: 5, sceneWidth: 2.2 },
-  TRUCK_PRESS: { label: 'Truck (pressurised)', capacityT: 20, speedKmh: 70, sceneLength: 5, sceneWidth: 2.2 },
-  TRUCK_BULK: { label: 'Truck (bulk)', capacityT: 25, speedKmh: 70, sceneLength: 5, sceneWidth: 2.2 },
-  BARGE_TANK: { label: 'Barge (tank)', capacityT: 2000, speedKmh: 12, sceneLength: 11, sceneWidth: 3.5 },
-  BARGE_DRY: { label: 'Barge (dry)', capacityT: 1500, speedKmh: 12, sceneLength: 10, sceneWidth: 3.5 },
-  SHIP_TANK: { label: 'Ship (tanker)', capacityT: 40000, speedKmh: 26, sceneLength: 20, sceneWidth: 5 },
-  SHIP_GAS: { label: 'Ship (gas)', capacityT: 12000, speedKmh: 30, sceneLength: 18, sceneWidth: 5 },
-  SHIP_DRY: { label: 'Ship (bulk)', capacityT: 20000, speedKmh: 24, sceneLength: 18, sceneWidth: 5 },
+  TRUCK_TANK: { label: 'Truck (tank)', capacityT: 25, speedKmh: 70, loadTph: 50, sceneLength: 5, sceneWidth: 2.2 },
+  TRUCK_PRESS: { label: 'Truck (pressurised)', capacityT: 20, speedKmh: 70, loadTph: 40, sceneLength: 5, sceneWidth: 2.2 },
+  TRUCK_BULK: { label: 'Truck (bulk)', capacityT: 25, speedKmh: 70, loadTph: 50, sceneLength: 5, sceneWidth: 2.2 },
+  BARGE_TANK: { label: 'Barge (tank)', capacityT: 2000, speedKmh: 12, loadTph: 400, sceneLength: 11, sceneWidth: 3.5 },
+  BARGE_DRY: { label: 'Barge (dry)', capacityT: 1500, speedKmh: 12, loadTph: 300, sceneLength: 10, sceneWidth: 3.5 },
+  SHIP_TANK: { label: 'Ship (tanker)', capacityT: 40000, speedKmh: 26, loadTph: 2500, sceneLength: 20, sceneWidth: 5 },
+  SHIP_GAS: { label: 'Ship (gas)', capacityT: 12000, speedKmh: 30, loadTph: 800, sceneLength: 18, sceneWidth: 5 },
+  SHIP_DRY: { label: 'Ship (bulk)', capacityT: 20000, speedKmh: 24, loadTph: 1000, sceneLength: 18, sceneWidth: 5 },
 };
 
 export interface VehicleSpec {
   cls: VehicleClassKey;
-  /** cargo material key */
+  /** representative cargo material key; the cargo on board is snapshot state */
   cargo: string;
+  /** site index the vehicle is based at (engine worlds) */
+  home?: number;
   /** index into routes[] the vehicle shuttles along. Stub-producer-only: the
    * engine's world JSON carries no schedule — live movement (route, progress,
    * ETA) comes from snapshot arrays 12-14. The stub still needs these to
@@ -111,6 +165,8 @@ export interface PipelineSpec {
 }
 
 export interface SiteSpec {
+  /** engine site key (e.g. CRACKER_ETHANE) — what commands address a site by; absent on the stub world */
+  key?: string;
   name: string;
   preset: string;
   x: number;
@@ -119,6 +175,14 @@ export interface SiteSpec {
 }
 
 export interface WorldSpec {
+  /** world name as the engine reports it ('sixsite', a named map world, …) */
+  world?: string;
+  /**
+   * Engine material keys in snapshot index order (the catalog's list, which
+   * also carries site-internal streams). Absent on the stub world, whose
+   * snapshot indexes MATERIALS.
+   */
+  materials?: string[];
   seed: number;
   wKm: number;
   hKm: number;
@@ -147,6 +211,12 @@ const MATERIAL_COLORS: Record<string, number> = {
   CAUSTIC: 0x60a5fa, STYRENE: 0xa78bfa, PE: 0xe2e8f0, PP: 0xc4b5fd,
   PVC: 0xfda4af, PS: 0x93c5fd,
 };
+
+/** Material key for a snapshot material index in this world, or null when out of range. */
+export function materialKeyAt(world: WorldSpec, index: number): string | null {
+  const list = world.materials ?? MATERIALS;
+  return index >= 0 && index < list.length ? list[index] : null;
+}
 
 export function materialColor(key: string): number {
   return MATERIAL_COLORS[key] ?? 0x94a3b8;

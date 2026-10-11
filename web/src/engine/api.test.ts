@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HttpBackend } from './httpBackend';
+import { HttpBackend, HttpError, resolveEventSites, siteKeyIndex } from './httpBackend';
 import { StubBackend } from './stubBackend';
 import { createBackend, type SimBackend } from './api';
 import { encodeStub } from './stub';
@@ -44,6 +44,41 @@ describe('HttpBackend request mapping', () => {
     // The hosted engine's create contract is {seed, adaptation?}: the UI's
     // scenario concept stops at the stub boundary and must not reach the wire.
     expect(JSON.parse(calls[0].body)).toEqual({ seed: 42 });
+  });
+
+  it('asks for a named world and leaves the key out for the built-in one', async () => {
+    const { calls, impl } = fakeFetch({ 'POST /api/sim': () => ({ id: 'sim-8' }) });
+    const b = new HttpBackend('http://x', impl);
+    await b.create({ seed: 42, scenario: 'none', world: 'erwin-world-v1' });
+    await b.create({ seed: 42, scenario: 'none', world: 'sixsite' });
+    expect(JSON.parse(calls[0].body)).toEqual({ seed: 42, world: 'erwin-world-v1' });
+    expect(JSON.parse(calls[1].body)).toEqual({ seed: 42 });
+  });
+
+  it('falls back to the built-in world when the server rejects the named one', async () => {
+    const bodies: unknown[] = [];
+    const impl: typeof fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      bodies.push(body);
+      return 'world' in body
+        ? new Response('{"error":"engine rejected the config JSON"}', { status: 400 })
+        : new Response(JSON.stringify({ id: 'sim-9' }), { status: 200 });
+    };
+    const b = new HttpBackend('http://x', impl);
+    const { id } = await b.create({ seed: 7, scenario: 'none', world: 'erwin-world-v1' });
+    expect(id).toBe('sim-9');
+    expect(bodies).toEqual([{ seed: 7, world: 'erwin-world-v1' }, { seed: 7 }]);
+  });
+
+  it('does not retry a named-world create on errors other than a 400', async () => {
+    let n = 0;
+    const impl: typeof fetch = async () => {
+      n += 1;
+      return new Response('busy', { status: 503 });
+    };
+    const b = new HttpBackend('http://x', impl);
+    await expect(b.create({ seed: 7, scenario: 'none', world: 'erwin-world-v1' })).rejects.toThrow(/503/);
+    expect(n).toBe(1);
   });
 
   it('steps by posting {"ticks":N} and decodes the binary snapshot reply', async () => {
@@ -92,6 +127,46 @@ describe('HttpBackend request mapping', () => {
     expect(calls[0].url).toBe('http://x/api/sim/sim-7/events?since=2');
   });
 
+  it("turns an event's site key into the site's index, using the session's world", async () => {
+    const world = { sites: [{ key: 'OIL_FIELD' }, { key: 'CRACKER_ETHANE' }, { key: 'FUEL_DEPOT' }] };
+    const { calls, impl } = fakeFetch({
+      'GET /api/sim/sim-7/world': () => world,
+      'GET /api/sim/sim-7/events': () => [
+        { seq: 0, tick: 96, type: 'unit_failed', site: 'CRACKER_ETHANE', text: 'a' },
+        { seq: 1, tick: 97, type: 'route_break', text: 'b' },
+        { seq: 2, tick: 98, type: 'stockout', site: 'NOWHERE', text: 'c' },
+        { seq: 3, tick: 99, type: 'stockout', site: 2, text: 'd' },
+      ],
+    });
+    const b = new HttpBackend('http://x', impl);
+    await b.world('sim-7');
+    const events = await b.events('sim-7', 0);
+    expect(events.map((e) => e.site)).toEqual([1, undefined, undefined, 2]);
+    expect('site' in events[2]).toBe(false); // an unknown key is no site, never the wrong site
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual(['/api/sim/sim-7/world', '/api/sim/sim-7/events']);
+
+    // a session whose world was never asked for: fetched once, when a key first needs resolving
+    const fresh = fakeFetch({
+      'GET /api/sim/sim-9/world': () => world,
+      'GET /api/sim/sim-9/events': () => [{ seq: 0, tick: 4, type: 'stockout', site: 'FUEL_DEPOT', text: 'e' }],
+    });
+    const c = new HttpBackend('http://x', fresh.impl);
+    expect((await c.events('sim-9', 0))[0].site).toBe(2);
+    expect((await c.events('sim-9', 0))[0].site).toBe(2);
+    expect(fresh.calls.filter((x) => x.url.endsWith('/world'))).toHaveLength(1);
+  });
+
+  it("maps site keys on their own: by key, leaving indices and site-less events alone", () => {
+    const keys = siteKeyIndex({ sites: [{ key: 'A' }, { name: 'no key' }, { key: 'C' }] } as never);
+    expect([...keys]).toEqual([['A', 0], ['C', 2]]);
+    expect(siteKeyIndex(undefined).size).toBe(0);
+    expect(resolveEventSites([
+      { seq: 0, tick: 1, type: 't', text: '', site: 'C' },
+      { seq: 1, tick: 1, type: 't', text: '', site: 0 },
+      { seq: 2, tick: 1, type: 't', text: '' },
+    ], keys).map((e) => e.site)).toEqual([2, 0, undefined]);
+  });
+
   it('floors the events since sentinel at the wire minimum', async () => {
     // The store's -1 ("nothing fetched yet") is not representable in §7.4,
     // where since is unsigned — the server answers 400 to since=-1.
@@ -111,6 +186,38 @@ describe('HttpBackend request mapping', () => {
     expect(await b.series('sim-7', 2, 31)).toEqual([1, 2, 3]);
     expect(calls[0].url).toBe('http://x/api/sim/sim-7/kpis');
     expect(calls[1].url).toBe('http://x/api/sim/sim-7/series?kind=2&id=31');
+  });
+
+  it('rewinds by posting {"tick":N} and returns the tick the server went back to', async () => {
+    const { calls, impl } = fakeFetch({ 'POST /api/sim/sim-7/rewind': () => ({ ok: true, tick: 288 }) });
+    const b = new HttpBackend('http://x', impl);
+    expect(await b.rewind('sim-7', 288)).toEqual({ tick: 288 });
+    expect(calls[0].url).toBe('http://x/api/sim/sim-7/rewind');
+    expect(JSON.parse(calls[0].body)).toEqual({ tick: 288 });
+  });
+
+  it('carries the server\'s reason when a rewind is refused', async () => {
+    const impl: typeof fetch = async () =>
+      new Response('{"error":"tick is ahead of the run"}', { status: 400 });
+    const b = new HttpBackend('http://x', impl);
+    const err = await b.rewind('sim-7', 9999).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HttpError);
+    expect((err as HttpError).status).toBe(400);
+    expect((err as HttpError).reason).toBe('tick is ahead of the run');
+  });
+
+  it('reads the hourly series as the raw float32 array the engine sends', async () => {
+    const impl: typeof fetch = async () =>
+      new Response(new Float32Array([1, 0.5, 0.25]).buffer, {
+        status: 200,
+        headers: { 'Content-Type': 'application/octet-stream' },
+      });
+    const b = new HttpBackend('http://x', impl);
+    expect(await b.series('sim-7', 1, 5)).toEqual([1, 0.5, 0.25]);
+    // nothing recorded yet: an empty body is an empty series
+    const empty: typeof fetch = async () =>
+      new Response(new ArrayBuffer(0), { status: 200, headers: { 'Content-Type': 'application/octet-stream' } });
+    expect(await new HttpBackend('http://x', empty).series('sim-7', 0, 9)).toEqual([]);
   });
 
   it('throws with the status on a failed request', async () => {
@@ -194,6 +301,23 @@ describe('StubBackend', () => {
     expect(twin.tick).toBe(192n);
     const parent = await b.step(id, 0);
     expect(parent.tick).toBe(96n);
+  });
+
+  it('goes back in time: the tick resets and later outages are forgotten', async () => {
+    const { id } = await b.create({ seed: 7, scenario: 'none' });
+    await b.step(id, 100);
+    const world = await b.world(id);
+    const unit = world.sites[0].processes[0].units[0].key;
+    await b.command(id, { type: 'unit_outage', site: 0, unit, trains: 1, duration_h: 48 });
+    await b.step(id, 100);
+    expect((await b.events(id, -1)).some((e) => e.type === 'unit_failed' && e.tick === 100)).toBe(true);
+
+    expect(await b.rewind(id, 100)).toEqual({ tick: 100 }); // the outage was commanded AT 100: forgotten
+    expect((await b.step(id, 0)).tick).toBe(100n);
+    await b.step(id, 50);
+    expect((await b.events(id, -1)).some((e) => e.type === 'unit_failed' && e.tick === 100)).toBe(false);
+
+    await expect(b.rewind(id, 9999)).rejects.toThrow(/ahead of the run/);
   });
 
   it('echoes commands and throws on unknown sessions', async () => {

@@ -32,6 +32,29 @@ void recordHourly(const World& world, const State& state, Recorder& rec) {
              world.processes[p].design_rate_t_h > 0.0
                  ? state.proc[p].rate_t_h / world.processes[p].design_rate_t_h
                  : 0.0);
+
+  // Economy history: untrimmed, one row per hour.
+  for (size_t p = 0; p < world.processes.size(); ++p)
+    rec.hour_rate.push_back(world.processes[p].design_rate_t_h > 0.0
+                                ? static_cast<float>(state.proc[p].rate_t_h /
+                                                     world.processes[p].design_rate_t_h)
+                                : 0.f);
+  for (const double idx : state.price_index) rec.hour_price.push_back(static_cast<float>(idx));
+  double rejected_t = 0, rejected_usd = 0;
+  Recorder::rejectedTotals(world, state, rejected_t, rejected_usd);
+  rec.hour_totals.push_back({state.cum_demand_t, state.cum_unmet_t, state.cum_unmet_usd,
+                             state.cum_freight_usd, state.cum_energy_usd, state.cum_shutdown_h,
+                             rejected_t, rejected_usd});
+}
+
+void Recorder::rejectedTotals(const World& world, const State& state, double& tonnes,
+                              double& usd) {
+  tonnes = usd = 0;
+  for (size_t t = 0; t < world.tanks.size() && t < state.tank.size(); ++t) {
+    if (!world.tanks[t].reject_when_full) continue;
+    tonnes += state.tank[t].rejected_t;
+    usd += state.tank[t].rejected_t * world.catalog.materials[world.tanks[t].material].base_price;
+  }
 }
 
 void logEvent(Recorder& rec, uint64_t tick, const std::string& type, const std::string& site,
@@ -64,7 +87,8 @@ uint64_t hashState(const World& world, const State& state) {
   h.mixU64(state.tick);
   h.mixU64(state.rng.state);
   h.mixU64(state.rng.inc);
-  for (const TankState& t : state.tank) {
+  for (size_t i = 0; i < state.tank.size(); ++i) {
+    const TankState& t = state.tank[i];
     h.mixF64(t.level_t);
     h.mixF64(t.inbound_t);
     h.mixF64(t.reserved_out_t);
@@ -72,6 +96,9 @@ uint64_t hashState(const World& world, const State& state) {
     h.mixF64(t.caution);
     h.mixU64(t.next_eta_tick);
     h.mixU64(t.last_pickup_tick);
+    // Rejected product is state only where a tank can reject: worlds without
+    // the flag hash exactly as they always have.
+    if (i < world.tanks.size() && world.tanks[i].reject_when_full) h.mixF64(t.rejected_t);
   }
   for (const ProcState& p : state.proc) {
     h.mixF64(p.rate_t_h);
@@ -93,6 +120,7 @@ uint64_t hashState(const World& world, const State& state) {
     h.mixU64(e.start_tick);
     h.mixU64(e.end_tick);
     h.mix(&e.applied, sizeof e.applied);
+    if (e.edge != UINT32_MAX) h.mixU32(e.edge);  // only edge breaks carry one
   }
   for (const EventDef& e : state.active) {
     // Applied events are deterministic from their pending form; mix the

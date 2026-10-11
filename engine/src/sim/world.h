@@ -87,6 +87,12 @@ struct Tank {
   // 70% full, so exports never rob the domestic chain. Set by the world
   // builder (M3 sizing for port import/export tanks).
   bool export_buy = false;
+  // Initial fill as a share of capacity; negative starts at target_frac.
+  double init_frac = -1.0;
+  // A product tank that may overflow: when it is full its plant keeps
+  // running and what will not fit is rejected (flared, dumped, left in the
+  // gas) instead of holding the plant back. Off unless the world says so.
+  bool reject_when_full = false;
 };
 
 struct Process {
@@ -108,13 +114,28 @@ struct Process {
 struct Unit {
   ProcessId process;
   uint8_t slot = 0;  // UnitSlot index within the process type
+  // What one train can pass, in t/h of the unit's own throughput (its
+  // recipe in-sum, see unitThroughputPerBasis) — not of process basis.
   double cap_per_train_t_h = 0;
 };
+
+// Tonnes a unit passes per tonne of process basis: its recipe in-sum,
+// weighted over the modes the process runs by their share of the feed (1
+// when the unit has no inputs, i.e. a source). Not 1 everywhere — a
+// chlor-alkali cell passes 2.156 t per tonne of chlorine, a VCM unit 1.6 —
+// and not the same in every mode: a flex cracker's pygas unit passes 0.02 t
+// per tonne on ethane and 0.22 on naphtha, so at 1:1:6 it sees 0.176. Unit
+// capacity (sized in the world builder) and R_max (control) must use the
+// same value, so both come here.
+double unitThroughputPerBasis(const UnitSlot& slot, const std::vector<double>& mode_share);
 
 struct Pipeline {
   TankId from, to;
   uint16_t material = 0;
   double cap_t_h = 0;
+  // Drawn display path in World::polyline_xy (render-only); count 0 means a
+  // straight line between the two sites.
+  Range<uint32_t> polyline{};
 };
 
 struct World {
@@ -147,6 +168,29 @@ struct World {
   };
   std::vector<Contract> contracts;
 
+  // Named hand-built worlds: the name the API reports, the map extent, and
+  // render-only map data the simulation step never reads — a water mask on
+  // a square grid (the API turns it into the terrain the client draws).
+  std::string name = "sixsite";
+  double w_km = 600, h_km = 400;
+  double water_cell_km = 0;  // 0 = no mask: the API renders seeded terrain
+  uint32_t water_cols = 0, water_rows = 0;
+  std::vector<uint8_t> water;  // rows x cols, row-major, 1 = water
+
+  // Per-world market settings (§5.6, procurement.h MarketParams): a world
+  // file may override any of them; negative leaves the engine default.
+  struct Market {
+    double value_of_time_usd_t_h = -1, switch_cost_frac = -1, beta = -1;
+    double min_lot_cap_frac = -1, min_lot_target_frac = -1;
+    double max_lots_per_tank = -1;
+    double dispatch_urgency_boost_h = -1;
+  };
+  Market market;
+
+  // Named worlds may open already running: every process starts at its design
+  // rate instead of ramping up from a cold stop over the first day.
+  bool warm_start = false;
+
   int findSite(const std::string& key) const;
   int findTank(const std::string& key) const;
 };
@@ -159,6 +203,11 @@ struct TankSpec {
   TankRole role;
   double cover_days;
   double target_frac;
+  double init_frac = -1.0;  // initial fill share of capacity; negative = target_frac
+  // §5.8 starting points for the learned lead time and pickup gap; zero or
+  // negative keeps the defaults (24 h and 4 h).
+  double lead_time_h = -1.0, pickup_gap_h = -1.0;
+  bool reject_when_full = false;  // product tanks only: see Tank
 };
 
 struct ProcSpec {
@@ -173,6 +222,9 @@ struct SiteSpec {
   double x_km, y_km;
   std::vector<ProcSpec> procs;
   std::vector<TankSpec> tanks;
+  const char* preset = nullptr;  // catalog site preset key (Site::preset), optional
+  // Bays per mode (road, river, sea); negative takes the WorldSpec default.
+  std::array<int, kModeCount> bays{-1, -1, -1};
 };
 
 struct PipeSpec {
@@ -180,6 +232,9 @@ struct PipeSpec {
   const char* from;  // tank key "SITE/MATERIAL"
   const char* to;
   double cap_t_h;
+  // Drawn display path as flat x,y km pairs (Pipeline::polyline); empty
+  // leaves the pipeline a straight line between its two sites.
+  std::vector<double> points_xy = {};
 };
 
 // M2 logistics specs. Roads connect two sites' road nodes with a straight

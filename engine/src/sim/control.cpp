@@ -11,6 +11,7 @@
 #include "sim/adaptation.h"
 #include "sim/events.h"
 #include "sim/recorder.h"
+#include "sim/words.h"
 
 #include <algorithm>
 #include <cmath>
@@ -43,7 +44,10 @@ std::vector<ProcView> makeViews(const World& world) {
         const TankId tank = proc.tank_of[s.slot];
         if (!tank.valid()) continue;
         if (s.t_per_t < 0.0) view.feeds.push_back(tank);
-        if (s.t_per_t > 0.0) view.products.push_back(tank);
+        // A tank that rejects when full has room as far as the plant is
+        // concerned: its headroom signal is left out of the governor.
+        if (s.t_per_t > 0.0 && !world.tanks[tank.v].reject_when_full)
+          view.products.push_back(tank);
       }
     }
   }
@@ -51,8 +55,9 @@ std::vector<ProcView> makeViews(const World& world) {
 }
 
 // R_max (§5.3): minimum over units of what the online trains can pass, in
-// t/h of process basis. Unit throughput per tonne of basis comes from the
-// unit's mode-0 recipe in-sum (all modes are ≈ 1 t/t in this catalog).
+// t/h of process basis. A unit's capacity is in its own throughput tonnes;
+// unitThroughputPerBasis() (world.h) converts it back to basis, the same
+// factor the world builder sized the capacity with.
 double computeRMax(const World& world, const Process& proc, const State& state) {
   const ProcessType& type = world.catalog.process_types[proc.type];
   double r_max = std::numeric_limits<double>::infinity();
@@ -61,11 +66,8 @@ double computeRMax(const World& world, const Process& proc, const State& state) 
     const UnitSlot& slot = type.units[unit.slot];
     const int online = static_cast<int>(slot.trains) - state.unit[u].trains_down;
     if (online <= 0) return 0.0;
-    double tput = 0.0;
-    if (!slot.by_mode.empty())
-      for (const Stream& s : slot.by_mode[0].in) tput += s.t_per_t;
-    if (tput <= 0.0) tput = 1.0;
-    r_max = std::min(r_max, unit.cap_per_train_t_h * online / tput);
+    r_max = std::min(r_max, unit.cap_per_train_t_h * online /
+                                unitThroughputPerBasis(slot, proc.mode_share));
   }
   // §3.2 sizes trains at 110% of nameplate so the process still reaches
   // nameplate with one train down; the process rate itself never exceeds it.
@@ -111,10 +113,12 @@ void stepControl(const World& world, State& state, const std::vector<TankSignals
       // Source path: supply curve × shock, throttled by product-room signal.
       const double shock = shockFactor(state, proc.site.v, EventDef::Type::SupplyShock);
       double target = proc.design_rate_t_h * scheduleFactor(world, proc, state.tick) * shock;
-      if (computeRMax(world, proc, state) <= kRateEps) target = 0.0;  // units down
+      const double source_max = computeRMax(world, proc, state);
+      if (source_max <= kRateEps) target = 0.0;  // units down
       for (const TankId t : views[p].products) target *= signals[t.v].h;
       ps.status = ProcStatus::Running;
       ps.rate_t_h = rampToward(ps.rate_t_h, target, proc.design_rate_t_h, type.ramp_per_h, dt_h);
+      if (ps.rate_t_h > source_max) ps.rate_t_h = source_max;  // lost trains cap it at once
       d = {ps.rate_t_h, ps.status, target, 1.0, target};
       continue;
     }
@@ -208,13 +212,43 @@ void stepControl(const World& world, State& state, const std::vector<TankSignals
 
     // Log the two §7.2 transitions, once each.
     if (prev != ps.status) {
-      if (ps.status == ProcStatus::Shutdown)
+      if (ps.status == ProcStatus::Shutdown) {
+        // Say why: a failed unit, too few trains left, a feed that ran out
+        // or a product with nowhere to go.
+        std::string why;
+        if (r_max <= kRateEps) {
+          why = "a unit is down";
+          for (uint32_t u = proc.units.begin; u < rangeEnd(proc.units); ++u) {
+            const UnitSlot& slot = type.units[world.units[u].slot];
+            if (static_cast<int>(slot.trains) - state.unit[u].trains_down <= 0) {
+              why = "its " + slot.name + " is down";
+              break;
+            }
+          }
+        } else if (r_max < min_rate - kRateEps) {
+          why = "with trains down it cannot hold its minimum rate";
+        } else {
+          for (const TankId t : views[p].feeds)
+            if (why.empty() && signals[t.v].f <= kRateEps)
+              why = "it ran out of " + materialWord(world.catalog, world.tanks[t.v].material);
+          for (const TankId t : views[p].products)
+            if (why.empty() && signals[t.v].h <= kRateEps)
+              why = "its " + materialWord(world.catalog, world.tanks[t.v].material) + " tank is full";
+          if (why.empty()) why = "its tanks cannot keep it running";
+        }
         logEvent(rec, state.tick, "process_shutdown", site.key, type.key,
-                 site.name + ": " + type.name + " shut down (tanks cannot sustain operation)");
+                 site.name + ": " + processWithin(site.name, type.name) + " stopped, " + why);
+      }
       if (prev == ProcStatus::Restarting && ps.status == ProcStatus::Running)
         logEvent(rec, state.tick, "process_restart", site.key, type.key,
-                 site.name + ": " + type.name + " restarted at minimum rate");
+                 site.name + ": " + processWithin(site.name, type.name) +
+                     " is running again, at minimum rate");
     }
+
+    // A plant cannot pass more than its online trains allow. The ramp limits
+    // how fast the rate follows the governor; a lost train is a physical cap
+    // and takes effect at once.
+    if (ps.rate_t_h > r_max) ps.rate_t_h = r_max;
 
     d = {ps.rate_t_h, ps.status, r_max, g, desired};
   }

@@ -6,9 +6,9 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { siteRanges, type WorldSpec } from '../engine/world';
+import { sampleHeight, siteRanges, type WorldSpec } from '../engine/world';
 import type { Snapshot } from '../engine/snapshot';
-import { materialColor, siteStateStyle } from './palette';
+import { V3, materialColor, siteStateStyle } from './palette';
 import { hexCenter, hexSpiral } from './hexGrid';
 import { SCALE, hexPrismGeometry, terrainYAt } from './terrainMesh';
 
@@ -19,6 +19,56 @@ export const PAD_HEIGHT = 0.26;
 const CLUSTER_SPACING = 0.45;
 /** How far pads embed below the smooth terrain height (board tops sit lower). */
 const PAD_EMBED = 0.06;
+
+/**
+ * Tank level bars: thin bars in a compact block beside the site (a small bar
+ * chart of its tanks), on the side with the most room — clear of neighbouring
+ * sites and their labels, and on land.
+ */
+const BAR_SIZE = 0.18;
+const BAR_PITCH = 0.27;
+const BAR_MIN_HEIGHT = 0.05;
+const BAR_FULL_HEIGHT = 0.55;
+const BARS_PER_ROW = 4;
+/** Sides a block may take, as map directions (x east, y south), in order of preference. */
+const BAR_SIDES: [number, number][] = [
+  [1, 0], [-1, 0], [0.71, -0.71], [-0.71, -0.71], [0.71, 0.71], [-0.71, 0.71], [0, -1],
+];
+
+/**
+ * Where each site's block of tank bars goes: the centre of the block in map
+ * km, per site. Picks, among the sides, the one whose block centre is
+ * furthest from every other site (and not on water).
+ */
+export function tankBlockCentres(
+  sites: { x: number; y: number }[],
+  clusterRKm: number[],
+  blockRadiusKm: number[],
+  isWater: (xKm: number, yKm: number) => boolean,
+): { x: number; y: number }[] {
+  return sites.map((site, s) => {
+    let best = { x: site.x, y: site.y };
+    let bestScore = -Infinity;
+    BAR_SIDES.forEach(([dx, dy], rank) => {
+      const reach = clusterRKm[s] + blockRadiusKm[s] + 2.5;
+      const c = { x: site.x + dx * reach, y: site.y + dy * reach };
+      let room = 80;
+      sites.forEach((other, o) => {
+        if (o === s) return;
+        // a neighbour's label sits above (north of) its cluster: keep clear of that too
+        const toSite = Math.hypot(other.x - c.x, other.y - c.y) - clusterRKm[o];
+        const toLabel = Math.hypot(other.x - c.x, other.y - 9 - c.y) - 6;
+        room = Math.min(room, toSite, toLabel);
+      });
+      const score = room - blockRadiusKm[s] - rank * 1.5 - (isWater(c.x, c.y) ? 60 : 0);
+      if (score > bestScore) {
+        bestScore = score;
+        best = c;
+      }
+    });
+    return best;
+  });
+}
 
 export interface TankAnchor {
   x: number;
@@ -247,29 +297,39 @@ export function buildSiteLayer(world: WorldSpec): SiteLayer {
     glyphs.push(mesh);
   }
 
-  // Tank specs have no position — arrange each site's tanks in a shallow arc
-  // just outside the unit cluster (facing -z, towards the default camera).
+  // Tank specs have no position — each site's tanks stand as a compact block
+  // of thin level bars beside its unit cluster.
   const anchors: TankAnchor[] = [];
   const tanks = new THREE.InstancedMesh(
-    new THREE.BoxGeometry(0.55, 1, 0.55),
-    new THREE.MeshBasicMaterial({ color: 0xffffff }),
+    barGeometry(),
+    new THREE.MeshBasicMaterial({ vertexColors: true, color: 0xffffff }),
     Math.max(1, world.tanks.length),
   );
   tanks.count = world.tanks.length;
   const ranges = siteRanges(world);
+  const blockDims = world.sites.map((_, s) => {
+    const count = Math.max(1, ranges[s].tankIndices.length);
+    const cols = Math.min(count, BARS_PER_ROW);
+    const rows = Math.ceil(count / BARS_PER_ROW);
+    return { cols, rows, radiusKm: (Math.hypot(cols, rows) * BAR_PITCH) / 2 / SCALE };
+  });
+  const centres = tankBlockCentres(
+    world.sites,
+    siteAnchors.map((a) => a.clusterR / SCALE),
+    blockDims.map((d) => d.radiusKm),
+    (x, y) => sampleHeight(world.terrain, x, y) < world.terrain.seaLevelM,
+  );
   world.tanks.forEach((tank, t) => {
-    const site = world.sites[tank.site];
-    const siteAnchor = siteAnchors[tank.site];
-    const k = ranges[tank.site].tankIndices.indexOf(t);
-    const count = Math.max(1, ranges[tank.site].tankIndices.length);
-    const angle = -Math.PI / 2 + (k / count - 0.5) * (Math.PI * 2 / 3);
-    const radiusKm = (siteAnchor.clusterR + 0.45) / SCALE;
-    const x = site.x + Math.cos(angle) * radiusKm;
-    const y = site.y + Math.sin(angle) * radiusKm;
+    const k = Math.max(0, ranges[tank.site].tankIndices.indexOf(t));
+    const { cols, rows } = blockDims[tank.site];
+    const col = k % BARS_PER_ROW;
+    const row = Math.floor(k / BARS_PER_ROW);
+    const x = centres[tank.site].x + ((col - (cols - 1) / 2) * BAR_PITCH) / SCALE;
+    const y = centres[tank.site].y + ((row - (rows - 1) / 2) * BAR_PITCH) / SCALE;
     const anchor: TankAnchor = { x: x * SCALE, z: y * SCALE, groundY: terrainYAt(world, x, y) };
     anchors.push(anchor);
     tanks.setMatrixAt(t, tankMatrix(anchor, 0.3));
-    tanks.setColorAt(t, materialColor(tank.material));
+    tanks.setColorAt(t, barColor(tank.material));
   });
   tanks.instanceMatrix.needsUpdate = true;
 
@@ -287,12 +347,34 @@ function placeGlyph(
   mesh.setMatrixAt(slot, m);
 }
 
+/** A unit box whose sides are a shade darker than its top, so bars standing together read apart. */
+function barGeometry(): THREE.BufferGeometry {
+  const geo = new THREE.BoxGeometry(1, 1, 1).toNonIndexed();
+  const normal = geo.getAttribute('normal');
+  const tones = new Float32Array(normal.count * 3);
+  for (let i = 0; i < normal.count; i++) {
+    const tone = normal.getY(i) > 0.9 ? 1 : normal.getZ(i) > 0.9 ? 0.82 : 0.66;
+    tones.set([tone, tone, tone], 3 * i);
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(tones, 3));
+  return geo;
+}
+
+/** Ink bars are drawn a shade off black, so their darker sides still show against their tops. */
+const INK_BAR = new THREE.Color(0x33373c);
+
+/** A tank bar's colour: its material's class colour (see palette.ts). */
+function barColor(material: string): THREE.Color {
+  const color = materialColor(material);
+  return color.getHex() === V3.ink ? INK_BAR : color;
+}
+
 function tankMatrix(anchor: TankAnchor, fill: number): THREE.Matrix4 {
-  const height = 0.12 + Math.max(0.02, fill) * 1.6;
+  const height = BAR_MIN_HEIGHT + Math.min(1, Math.max(0, fill)) * BAR_FULL_HEIGHT;
   return new THREE.Matrix4().compose(
     new THREE.Vector3(anchor.x, anchor.groundY + height / 2, anchor.z),
     new THREE.Quaternion(),
-    new THREE.Vector3(0.55, height, 0.55),
+    new THREE.Vector3(BAR_SIZE, height, BAR_SIZE),
   );
 }
 

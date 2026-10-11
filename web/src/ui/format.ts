@@ -10,6 +10,15 @@ export function fmtClock(tick: number): string {
   return `D${day} ${hh}:${mm}`;
 }
 
+/**
+ * Tick → "Day 3, 08:30": a moment as it is written in a sentence. The short
+ * form, fmtClock's "D3 08:30", is for the clock and dense tables only.
+ */
+export function fmtMomentWords(tick: number): string {
+  const [day, time] = fmtClock(tick).split(' ');
+  return `Day ${day.slice(1)}, ${time}`;
+}
+
 /** Difference between two ticks as "+2d 06h" / "now" / "—". */
 export function fmtDelta(fromTick: number, toTick: number | null): string {
   if (toTick === null) return '—';
