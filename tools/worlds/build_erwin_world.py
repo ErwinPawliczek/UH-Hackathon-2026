@@ -456,7 +456,8 @@ def main():
     world = {"format": 1, "name": "erwin-world-v1", "wKm": layout["wKm"], "hKm": layout["hKm"],
              "cellKm": layout["cellKm"], "water": layout["water"], "sites": sites,
              "pipelines": pipelines, "network": layout["network"], "fleet": fleet,
-             "contracts": [], "stranded_materials": [], "market": MARKET}
+             "contracts": [], "stranded_materials": [], "market": MARKET,
+             "warm_start": True}
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(world, separators=(",", ":")) + "\n")
 
