@@ -89,6 +89,10 @@ struct Tank {
   bool export_buy = false;
   // Initial fill as a share of capacity; negative starts at target_frac.
   double init_frac = -1.0;
+  // A product tank that may overflow: when it is full its plant keeps
+  // running and what will not fit is rejected (flared, dumped, left in the
+  // gas) instead of holding the plant back. Off unless the world says so.
+  bool reject_when_full = false;
 };
 
 struct Process {
@@ -199,6 +203,7 @@ struct TankSpec {
   // §5.8 starting points for the learned lead time and pickup gap; zero or
   // negative keeps the defaults (24 h and 4 h).
   double lead_time_h = -1.0, pickup_gap_h = -1.0;
+  bool reject_when_full = false;  // product tanks only: see Tank
 };
 
 struct ProcSpec {

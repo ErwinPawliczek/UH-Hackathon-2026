@@ -64,6 +64,11 @@ WindowReport runWindow(Sim& sim, uint32_t ticks) {
   r.energy_usd = after.cum_energy_usd - before.cum_energy_usd;
   r.shutdown_h = after.cum_shutdown_h - before.cum_shutdown_h;
   r.inventory_usd_end = inventoryUsd(w, after);
+  double t0 = 0, usd0 = 0, t1 = 0, usd1 = 0;
+  Recorder::rejectedTotals(w, before, t0, usd0);
+  Recorder::rejectedTotals(w, after, t1, usd1);
+  r.rejected_t = t1 - t0;
+  r.rejected_usd = usd1 - usd0;
   r.service = r.demand_t > 0 ? 1.0 - r.unmet_t / r.demand_t : 1.0;
   for (WindowCustomer& c : r.customers) {
     c.demand_t = after.proc_totals[c.process].demand_t - before.proc_totals[c.process].demand_t;
@@ -119,6 +124,8 @@ std::string windowJson(const World& world, const WindowReport& r) {
                       {"freight_usd", r.freight_usd},
                       {"energy_usd", r.energy_usd},
                       {"shutdown_h", r.shutdown_h},
+                      {"rejected_t", r.rejected_t},
+                      {"rejected_usd", r.rejected_usd},
                       {"inventory_usd", r.inventory_usd_end},
                       {"inventory_change_usd", r.inventory_usd_end - r.inventory_usd_start}}},
                     {"customers", customers},

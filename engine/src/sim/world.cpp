@@ -89,6 +89,10 @@ bool buildWorld(const Catalog& catalog, uint64_t seed, const WorldSpec& spec, Wo
       t.init_frac = ts.init_frac;
       if (ts.lead_time_h > 0) t.init_lead_time_h = ts.lead_time_h;
       if (ts.pickup_gap_h > 0) t.init_pickup_gap_h = ts.pickup_gap_h;
+      if (ts.reject_when_full && ts.role != TankRole::Product)
+        return fail("site " + site.key + ": tank " + ts.material +
+                    " has reject_when_full, which only a product tank can");
+      t.reject_when_full = ts.reject_when_full;
     }
 
     site.tanks.count = static_cast<uint32_t>(out.tanks.size()) - site.tanks.begin;

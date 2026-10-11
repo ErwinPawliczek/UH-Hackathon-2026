@@ -30,6 +30,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <array>
 #include <map>
@@ -1253,4 +1255,153 @@ TEST_CASE("M16: smooth_km rounds interior corners and leaves the ends where they
   CHECK(!buildWorldFromJson("erwin-world-v1", file.dump(), 42, bad_world, error));
   file["smooth_km"] = "wide";
   CHECK(!buildWorldFromJson("erwin-world-v1", file.dump(), 42, bad_world, error));
+}
+
+namespace {
+
+// A sim on a copy of the map world file with one tank's fields changed,
+// loaded through the worlds directory like any named world.
+std::unique_ptr<Sim> makeVariantSim(const std::string& name, const std::string& site,
+                                    const std::string& material, const json& tank_fields) {
+  json file = json::parse(readWorldFile());
+  file["name"] = name;
+  bool found = false;
+  for (json& s : file["sites"])
+    if (s.at("key") == site)
+      for (json& t : s["tanks"])
+        if (t.at("material") == material) {
+          for (const auto& item : tank_fields.items()) t[item.key()] = item.value();
+          found = true;
+        }
+  REQUIRE(found);
+  const std::string dir = std::string(CRX_WORLDS_DIR) + "/../../../build/native-release/test-worlds";
+  std::error_code ec;
+  std::filesystem::create_directories(dir, ec);
+  std::ofstream(dir + "/" + name + ".json") << file.dump();
+  setenv("CRX_WORLDS_DIR", dir.c_str(), 1);
+  std::string error;
+  auto sim = Sim::createFromConfig(json{{"seed", 42}, {"world", name}}.dump().c_str(), error);
+  unsetenv("CRX_WORLDS_DIR");
+  REQUIRE_MESSAGE(sim != nullptr, error);
+  return sim;
+}
+
+}  // namespace
+
+TEST_CASE("M17: a product tank that rejects when full does not hold its plant back") {
+  const json small_tank = {{"cover_days", 5}, {"init_frac", 0.5}};
+  json small_rejecting = small_tank;
+  small_rejecting["reject_when_full"] = true;
+  auto held = makeVariantSim("reject-off", "GAS_PLANT", "ETHANE", small_tank);
+  auto free = makeVariantSim("reject-on", "GAS_PLANT", "ETHANE", small_rejecting);
+  const World& w = free->world();
+  const int ethane = w.findTank("GAS_PLANT/ETHANE");
+  REQUIRE(ethane >= 0);
+  CHECK(w.tanks[static_cast<size_t>(ethane)].reject_when_full);
+  CHECK(!held->world().tanks[static_cast<size_t>(ethane)].reject_when_full);
+  size_t gas_plant = w.processes.size(), grid = w.processes.size();
+  for (size_t p = 0; p < w.processes.size(); ++p) {
+    const std::string key = w.catalog.process_types[w.processes[p].type].key;
+    if (key == "NGL_RECOVERY") gas_plant = p;
+    if (key == "GAS_GRID_METHANE") grid = p;
+  }
+  REQUIRE(gas_plant < w.processes.size());
+  REQUIRE(grid < w.processes.size());
+
+  // Undisturbed, nothing is ever rejected and the two runs are the same run.
+  held->step(960);
+  free->step(960);
+  CHECK(free->state().tank[static_cast<size_t>(ethane)].rejected_t == 0.0);
+  for (size_t t = 0; t < w.tanks.size(); ++t)
+    CHECK(free->state().tank[t].level_t == held->state().tank[t].level_t);
+
+  // Ethane cracker down for ten days: the ethane has nowhere to go.
+  const std::string trip =
+      R"({"type":"unit_outage","site":"CRACKER_ETHANE","unit":"SC-CGC","trains":1,"duration_h":240})";
+  REQUIRE(held->command(trip).find("\"ok\":true") != std::string::npos);
+  REQUIRE(free->command(trip).find("\"ok\":true") != std::string::npos);
+  const double stock0 = stockSum(free->state());
+  const double supplied0 = free->state().cum_supplied_t, consumed0 = free->state().cum_consumed_t,
+               loss0 = free->state().cum_loss_t;
+  double min_rate = 1e300;
+  bool ever_down = false;
+  for (int tick = 0; tick < 20 * 96; ++tick) {
+    held->step(1);
+    free->step(1);
+    const ProcState& ps = free->state().proc[gas_plant];
+    min_rate = std::min(min_rate, ps.rate_t_h);
+    ever_down = ever_down || ps.status != ProcStatus::Running;
+    CHECK(free->state().tank[static_cast<size_t>(ethane)].level_t <=
+          w.tanks[static_cast<size_t>(ethane)].capacity_t + 1e-6);
+  }
+  // With the flag the gas plant never left design rate and the city's gas
+  // kept flowing; the surplus ethane was thrown away.
+  CHECK(!ever_down);
+  CHECK(min_rate == doctest::Approx(w.processes[gas_plant].design_rate_t_h));
+  const ProcTotals& grid_free = free->state().proc_totals[grid];
+  CHECK(grid_free.served_t == doctest::Approx(grid_free.demand_t).epsilon(1e-9));
+  const double rejected = free->state().tank[static_cast<size_t>(ethane)].rejected_t;
+  CHECK(rejected > 1000.0);
+  CHECK(free->state().tank[static_cast<size_t>(ethane)].level_t ==
+        doctest::Approx(w.tanks[static_cast<size_t>(ethane)].capacity_t).epsilon(1e-6));
+  // Without it the gas plant was held back and the grid went short.
+  const ProcTotals& grid_held = held->state().proc_totals[grid];
+  CHECK(grid_held.served_t < 0.95 * grid_held.demand_t);
+  CHECK(held->state().proc_totals[gas_plant].down_h > 24.0);
+  CHECK(held->state().tank[static_cast<size_t>(ethane)].rejected_t == 0.0);
+
+  // Mass is conserved: what was rejected left through the loss account.
+  const State& st = free->state();
+  const double residual = (stockSum(st) - stock0) - ((st.cum_supplied_t - supplied0) -
+                                                     (st.cum_consumed_t - consumed0) -
+                                                     (st.cum_loss_t - loss0));
+  CHECK(std::fabs(residual) <= 1e-6 * conservationScale(st));
+  CHECK(st.cum_loss_t - loss0 > rejected * 0.999);  // the loss account grew by at least that much
+
+  // The window account and the economy view report it, at catalog price.
+  Sim probe(*free);
+  const WindowReport quiet = runWindow(probe, 96);
+  CHECK(quiet.rejected_t >= 0.0);
+  const json econ = json::parse(economyJson(w, st, free->recorder(), 24));
+  REQUIRE(econ.at("rejected").size() == 1);
+  CHECK(econ.at("rejected")[0].at("site") == "GAS_PLANT");
+  CHECK(econ.at("rejected")[0].at("material") == "ETHANE");
+  CHECK(econ.at("rejected")[0].at("rejectedT").get<double>() == doctest::Approx(rejected).epsilon(1e-4));
+  CHECK(econ.at("rejected")[0].at("rejectedUsd").get<double>() ==
+        doctest::Approx(rejected * 220.0).epsilon(1e-4));
+  double by_bucket = 0;
+  for (const json& v : econ.at("totals").at("rejectedT")) by_bucket += v.get<double>();
+  CHECK(by_bucket == doctest::Approx(rejected).epsilon(1e-3));
+  // A world without the flag has no rejecting tanks and all-zero rejected totals.
+  const json econ_held = json::parse(economyJson(held->world(), held->state(), held->recorder(), 24));
+  CHECK(econ_held.at("rejected").empty());
+  for (const json& v : econ_held.at("totals").at("rejectedT")) CHECK(v.get<double>() == 0.0);
+
+  // Only a product tank may carry the flag.
+  json file = json::parse(readWorldFile());
+  for (json& s : file["sites"])
+    if (s.at("key") == "GAS_PLANT")
+      for (json& t : s["tanks"])
+        if (t.at("material") == "RAW_GAS") t["reject_when_full"] = true;
+  World bad_world;
+  std::string error;
+  CHECK(!buildWorldFromJson("erwin-world-v1", file.dump(), 42, bad_world, error));
+  CHECK(error.find("reject_when_full") != std::string::npos);
+}
+
+TEST_CASE("M18: with the flag absent or false the run is the same run") {
+  auto plain = makeMapSim();
+  auto off = makeVariantSim("reject-false", "GAS_PLANT", "ETHANE", {{"reject_when_full", false}});
+  plain->step(30 * 96);
+  off->step(30 * 96);
+  // World names differ, nothing else: every tank, process and vehicle agrees.
+  REQUIRE(off->state().tank.size() == plain->state().tank.size());
+  for (size_t t = 0; t < plain->state().tank.size(); ++t) {
+    CHECK(off->state().tank[t].level_t == plain->state().tank[t].level_t);
+    CHECK(off->state().tank[t].rejected_t == 0.0);
+  }
+  for (size_t p = 0; p < plain->state().proc.size(); ++p)
+    CHECK(off->state().proc[p].rate_t_h == plain->state().proc[p].rate_t_h);
+  CHECK(off->state().order.size() == plain->state().order.size());
+  CHECK(off->stateHash() == plain->stateHash());
 }

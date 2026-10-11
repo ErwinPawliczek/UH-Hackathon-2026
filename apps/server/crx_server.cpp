@@ -308,6 +308,12 @@ SessionRegistry::ForecastStatus SessionRegistry::forecast(const std::string& id,
                             {"freight_usd", freight},
                             {"energy_usd", energy},
                             {"inventory_usd", stock},
+                            // Product thrown away at tanks that reject when
+                            // full. Shown on its own, not added to cost_usd:
+                            // it never reaches stock, so the stock term has
+                            // already charged what it was made from.
+                            {"rejected_t", diff("rejected_t")},
+                            {"rejected_usd", diff("rejected_usd")},
                             {"shutdown_h", diff("shutdown_h")},
                             {"cost_usd", lost + freight + energy - stock}};
 

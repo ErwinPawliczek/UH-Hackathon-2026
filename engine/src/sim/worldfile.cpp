@@ -457,6 +457,11 @@ bool loadWorld(const std::string& name, const std::string& text, uint64_t seed, 
       ts.init_frac = numFieldOr(jt, "init_frac", -1.0, tctx);
       ts.lead_time_h = numFieldOr(jt, "lead_time_h", -1.0, tctx);
       ts.pickup_gap_h = numFieldOr(jt, "pickup_gap_h", -1.0, tctx);
+      if (jt.contains("reject_when_full")) {
+        if (!jt.at("reject_when_full").is_boolean())
+          bad(tctx + ": \"reject_when_full\" must be true or false");
+        ts.reject_when_full = jt.at("reject_when_full").get<bool>();
+      }
       ss.tanks.push_back(ts);
     }
     spec.sites.push_back(std::move(ss));

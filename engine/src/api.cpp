@@ -338,7 +338,8 @@ std::string buildWorldJson(const sim::World& w, const TerrainGrid& terrain,
                      {"material", cat.materials[tank.material].key},
                      {"role", role},
                      {"capacityT", tank.capacity_t},
-                     {"drawTph", tank.design_out_t_h}});
+                     {"drawTph", tank.design_out_t_h},
+                     {"rejectWhenFull", tank.reject_when_full}});
   }
 
   // A route end that is not a site is a junction of the drawn network (or an

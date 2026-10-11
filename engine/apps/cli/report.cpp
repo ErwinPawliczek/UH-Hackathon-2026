@@ -330,6 +330,8 @@ int main(int argc, char** argv) {
         if (!tank.valid()) continue;
         auto& list = s.t_per_t < 0.0 ? pi.feeds : pi.products;
         if (s.t_per_t == 0.0) continue;
+        // control.cpp leaves a tank that rejects when full out of the governor.
+        if (s.t_per_t > 0.0 && w.tanks[tank.v].reject_when_full) continue;
         if (std::find(list.begin(), list.end(), tank.v) == list.end()) list.push_back(tank.v);
       }
     }
@@ -929,8 +931,8 @@ int main(int argc, char** argv) {
       std::printf("%-36s %-4s %-4s %10s %6s %8s %8s %6s", "tank", "role", "pipe", "cap_t",
                   "cover", "in_t_h", "out_t_h", "d0");
       for (const Checkpoint& c : cps) std::printf(" %6s", dayLabel(c.day).c_str());
-      std::printf(" %6s %6s %7s %7s %7s %6s %5s %9s %7s\n", "min", "max", "h<5%", "h>97%",
-                  "lead_h", "gap_h", "caut", "inbound_t", "short_h");
+      std::printf(" %6s %6s %7s %7s %7s %6s %5s %9s %7s %10s\n", "min", "max", "h<5%", "h>97%",
+                  "lead_h", "gap_h", "caut", "inbound_t", "short_h", "rejected_t");
     }
     for (size_t t = 0; t < nt; ++t) {
       const Tank& tk = w.tanks[t];
@@ -946,9 +948,14 @@ int main(int argc, char** argv) {
                     tk.capacity_t, tk.cover_days, tk.design_in_t_h, tk.design_out_t_h,
                     pct(a.fill0).c_str());
         for (double f : a.cp_fill) std::printf(" %6s", pct(f).c_str());
-        std::printf(" %6s %6s %7.1f %7.1f %7.1f %6.1f %5.2f %9.0f %7.0f\n", pct(a.min).c_str(),
+        std::printf(" %6s %6s %7.1f %7.1f %7.1f %6.1f %5.2f %9.0f %7.0f", pct(a.min).c_str(),
                     pct(a.max).c_str(), a.low_h, a.high_h, ts.lead_time_h, ts.pickup_gap_h,
                     ts.caution, ts.inbound_t, a.unmatched_h + a.capped_h);
+        // Product thrown away at a tank that rejects when full ("-" = it cannot).
+        if (tk.reject_when_full)
+          std::printf(" %10.1f\n", ts.rejected_t);
+        else
+          std::printf(" %10s\n", "-");
       }
       jtanks.push_back({{"tank", tk.key},
                         {"role", role},
@@ -968,7 +975,9 @@ int main(int argc, char** argv) {
                         {"pickup_gap_h", ts.pickup_gap_h},
                         {"caution", ts.caution},
                         {"inbound_t", ts.inbound_t},
-                        {"reserved_out_t", ts.reserved_out_t}});
+                        {"reserved_out_t", ts.reserved_out_t},
+                        {"reject_when_full", tk.reject_when_full},
+                        {"rejected_t", ts.rejected_t}});
     }
 
     // Pipelines: what actually flowed against the capacity.

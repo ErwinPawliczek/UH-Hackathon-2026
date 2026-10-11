@@ -43,7 +43,10 @@ std::vector<ProcView> makeViews(const World& world) {
         const TankId tank = proc.tank_of[s.slot];
         if (!tank.valid()) continue;
         if (s.t_per_t < 0.0) view.feeds.push_back(tank);
-        if (s.t_per_t > 0.0) view.products.push_back(tank);
+        // A tank that rejects when full has room as far as the plant is
+        // concerned: its headroom signal is left out of the governor.
+        if (s.t_per_t > 0.0 && !world.tanks[tank.v].reject_when_full)
+          view.products.push_back(tank);
       }
     }
   }

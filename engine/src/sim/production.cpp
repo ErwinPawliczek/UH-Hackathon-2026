@@ -121,6 +121,7 @@ void stepProduction(const World& world, State& state, const std::vector<ControlD
       if (delta < -1e-12) {
         scale = std::min(scale, level / -delta);
       } else if (delta > 1e-12) {
+        if (world.tanks[tank.v].reject_when_full) continue;  // overflows instead of limiting
         scale = std::min(scale, std::max(0.0, world.tanks[tank.v].capacity_t - level) / delta);
       }
     }
@@ -128,8 +129,19 @@ void stepProduction(const World& world, State& state, const std::vector<ControlD
     r.scale = scale;
 
     for (const auto& [tank, delta] : deltas) {
-      const double applied = delta * scale;
+      double applied = delta * scale;
       TankState& ts = state.tank[tank.v];
+      if (applied > 0 && world.tanks[tank.v].reject_when_full) {
+        // Store what fits; the rest is rejected. It was made from real feed,
+        // so it leaves the system as loss (a source just makes less).
+        const double room = std::max(0.0, world.tanks[tank.v].capacity_t - ts.level_t);
+        const double rejected = std::max(0.0, applied - room);
+        if (rejected > 0) {
+          ts.rejected_t += rejected;
+          if (type.boundary != Boundary::Source) state.cum_loss_t += rejected;
+          applied -= rejected;
+        }
+      }
       ts.level_t = std::max(0.0, std::min(ts.level_t + applied, world.tanks[tank.v].capacity_t));
       if (applied < 0) {
         r.real_in_t += -applied;

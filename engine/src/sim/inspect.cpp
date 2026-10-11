@@ -551,8 +551,11 @@ std::string economyJson(const World& world, const State& state, const Recorder& 
   const auto totalsAt = [&](size_t b) {
     const size_t h = hourAtEnd(b);
     if (h >= 1 && h <= hours) return rec.hour_totals[h - 1];
-    return Recorder::HourTotals{state.cum_demand_t,   state.cum_unmet_t,  state.cum_unmet_usd,
-                                state.cum_freight_usd, state.cum_energy_usd, state.cum_shutdown_h};
+    double rejected_t = 0, rejected_usd = 0;
+    Recorder::rejectedTotals(world, state, rejected_t, rejected_usd);
+    return Recorder::HourTotals{state.cum_demand_t,    state.cum_unmet_t,    state.cum_unmet_usd,
+                                state.cum_freight_usd, state.cum_energy_usd, state.cum_shutdown_h,
+                                rejected_t,            rejected_usd};
   };
 
   json materials = json::array();
@@ -588,7 +591,7 @@ std::string economyJson(const World& world, const State& state, const Recorder& 
 
   // --- Money and service per bucket (differences of the running totals).
   std::vector<double> freight(n), energy(n), unmet_usd(n), unmet_t(n), demand_t(n), service(n),
-      shutdown_h(n);
+      shutdown_h(n), rejected_t(n), rejected_usd(n);
   Recorder::HourTotals prev{};
   for (size_t b = 0; b < n; ++b) {
     const Recorder::HourTotals now = totalsAt(b);
@@ -599,6 +602,8 @@ std::string economyJson(const World& world, const State& state, const Recorder& 
     demand_t[b] = now.demand_t - prev.demand_t;
     service[b] = demand_t[b] > 0 ? 1.0 - unmet_t[b] / demand_t[b] : 1.0;
     shutdown_h[b] = now.shutdown_h - prev.shutdown_h;
+    rejected_t[b] = now.rejected_t - prev.rejected_t;
+    rejected_usd[b] = now.rejected_usd - prev.rejected_usd;
     prev = now;
   }
 
@@ -642,6 +647,20 @@ std::string economyJson(const World& world, const State& state, const Recorder& 
                       {"rateMax", rounded(hi, round4)}});
   }
 
+  // Tanks that reject when full: what each has thrown away so far.
+  json rejected = json::array();
+  for (size_t t = 0; t < world.tanks.size(); ++t) {
+    if (!world.tanks[t].reject_when_full) continue;
+    const Tank& tk = world.tanks[t];
+    const Material& mat = catalog.materials[tk.material];
+    rejected.push_back({{"site", world.sites[tk.site.v].key},
+                        {"site_index", tk.site.v},
+                        {"name", world.sites[tk.site.v].name},
+                        {"material", mat.key},
+                        {"rejectedT", round2(state.tank[t].rejected_t)},
+                        {"rejectedUsd", round2(state.tank[t].rejected_t * mat.base_price)}});
+  }
+
   const json doc = {{"tick", state.tick},
                     {"bucketH", bucket_h},
                     {"buckets", n},
@@ -655,7 +674,10 @@ std::string economyJson(const World& world, const State& state, const Recorder& 
                       {"unmetT", rounded(unmet_t, round2)},
                       {"demandT", rounded(demand_t, round2)},
                       {"service", rounded(service, round4)},
-                      {"shutdownH", rounded(shutdown_h, round2)}}},
+                      {"shutdownH", rounded(shutdown_h, round2)},
+                      {"rejectedT", rounded(rejected_t, round2)},
+                      {"rejectedUsd", rounded(rejected_usd, round2)}}},
+                    {"rejected", rejected},
                     {"plants", plants}};
   return doc.dump();
 }

@@ -40,6 +40,8 @@ struct WindowReport {
   // when the window opened and when it closed. Unpriced site-internal
   // materials count as zero.
   double inventory_usd_start = 0, inventory_usd_end = 0;
+  // Product thrown away at tanks that reject when full, in the window.
+  double rejected_t = 0, rejected_usd = 0;
   std::vector<WindowCustomer> customers;
   std::vector<WindowPlant> plants;
 };

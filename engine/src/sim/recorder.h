@@ -28,7 +28,11 @@ struct Recorder {
   struct HourTotals {
     double demand_t = 0, unmet_t = 0, unmet_usd = 0;
     double freight_usd = 0, energy_usd = 0, shutdown_h = 0;
+    double rejected_t = 0, rejected_usd = 0;  // product thrown away (reject_when_full tanks)
   };
+
+  // Rejected product so far, in tonnes and at catalog base prices.
+  static void rejectedTotals(const World& world, const State& state, double& tonnes, double& usd);
   std::vector<float> hour_rate, hour_price;
   std::vector<HourTotals> hour_totals;
 };

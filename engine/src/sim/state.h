@@ -39,6 +39,9 @@ struct TankState {
   double pickup_gap_h = 4;     // fixed 4 h for pipeline-fed tanks (§5.2)
   double caution = 1;          // learned multiplier (§5.8); 1 in M1
   uint64_t next_eta_tick = 0, last_pickup_tick = 0;  // §4.4, M2
+  // Product that did not fit and was thrown away, cumulative (only ever
+  // non-zero for a tank the world marks reject_when_full).
+  double rejected_t = 0;
 };
 
 // §4.4 vehicle state. Plain data so forks copy it: the planned node sequence
