@@ -51,7 +51,6 @@ export function eventMark(e: SimEvent): { color: string; shape: 'bar' | 'diamond
 const USER_LABELS: Record<string, string> = {
   scenario: 'scenario',
   user_outage: 'you: disruption',
-  user_order: 'you: order',
   user_action: 'you',
   rewind: 'back in time',
 };
@@ -63,7 +62,7 @@ const ENGINE_LABELS: Record<string, string> = {
   shock_ended: 'back to normal',
 };
 
-/** An event type as a label: "route reopened", "unit failed", "you: order". */
+/** An event type as a label: "route reopened", "unit failed", "you: disruption". */
 export function eventLabel(e: SimEvent): string {
   return USER_LABELS[e.type] ?? ENGINE_LABELS[e.type] ?? e.type.replace(/_/g, ' ');
 }

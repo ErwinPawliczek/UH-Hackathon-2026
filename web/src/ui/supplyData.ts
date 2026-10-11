@@ -182,45 +182,6 @@ export function nextPassWords(d: SourcingDetail): string {
   return `The next ordering round will book ${parts.join(' and ')}.`;
 }
 
-/** The engine's answer to a place_order command. */
-export interface PlaceOrderReply {
-  ok?: boolean;
-  error?: string;
-  blocked?: string;
-  order?: {
-    id: number; tonnes: number; requestedTonnes?: number; material: string; seller: string; site: string; cls: string;
-    priceUsdT: number; freightUsd?: number; km?: number; etaTick: number;
-  };
-}
-
-/** The place_order command for one vehicle load of an option. */
-export function orderCommand(tank: { site: string; material: string }, o: Pick<SourcingOption, 'seller' | 'cls' | 'lot_t'>): Record<string, unknown> {
-  return { type: 'place_order', site: tank.site, material: tank.material, seller: o.seller, cls: o.cls, tonnes: o.lot_t };
-}
-
-/**
- * "25 t of benzene from Refinery by tank truck: $976 /t for the product +
- * $54 freight = $1,030 /t delivered, about 9.8 h door to door" — the same
- * money, in the same words, as the option's row. `doorToDoorH` is the
- * option's own estimate; the reply's `etaTick` is not used, because it
- * counts only the loaded drive from the moment of booking.
- */
-export function orderBookedWords(order: NonNullable<PlaceOrderReply['order']>, sellerName: string, doorToDoorH?: number): string {
-  const t = order.tonnes >= 100 ? Math.round(order.tonnes).toLocaleString('en-US') : String(Math.round(order.tonnes * 10) / 10);
-  const money = order.freightUsd === undefined || !(order.tonnes > 0)
-    ? `${usd(cashPrice(order.priceUsdT, 0).product)} /t for the product`
-    : cashWords(cashPrice(order.priceUsdT, order.freightUsd / order.tonnes));
-  const trip = doorToDoorH === undefined || !Number.isFinite(doorToDoorH) ? '' : `, about ${fmtTrip(doorToDoorH)} door to door`;
-  return `${t} t of ${materialName(order.material)} from ${sellerName} by ${vehicleWords(order.cls)}: ${money}${trip}`;
-}
-
-/** Why the engine refused an order: its own sentence, as a sentence. */
-export function orderRefusedWords(reply: PlaceOrderReply): string {
-  const raw = (reply.error ?? '').replace(/^place_order:\s*/, '').trim();
-  if (raw === '') return 'The order was not accepted.';
-  return raw.charAt(0).toUpperCase() + raw.slice(1) + (/[.!?]$/.test(raw) ? '' : '.');
-}
-
 /** Label of a tank in the list: "Benzene", with the site it belongs to. */
 export const tankLabel = (t: Pick<SourcingTank, 'material' | 'name'>) => ({ material: materialTitle(t.material), site: t.name });
 
