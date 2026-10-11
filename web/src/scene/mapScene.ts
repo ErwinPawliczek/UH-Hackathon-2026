@@ -1,34 +1,25 @@
-// MapScene: three.js scene assembly and frame driver — terrain, draped
-// routes/pipelines, instanced sites/vehicles, map camera with OrbitControls,
-// click-picking for sites and vehicles, and a selection ring. The React
-// component only feeds it snapshots and forwards pointer events.
+// MapScene: three.js scene assembly and frame driver — instanced hex terrain
+// board, per-unit site clusters, CSS2D site labels, mode-styled route lines,
+// instanced vehicles, map camera with OrbitControls, click-picking for sites
+// and vehicles, and the selection ring. The React component only feeds it
+// snapshots and forwards pointer events.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { Selection } from '../store/sim';
 import type { Snapshot } from '../engine/snapshot';
 import type { WorldSpec } from '../engine/world';
-import { buildTerrain, terrainYAt, mapToWorld, SCALE } from './terrainMesh';
+import { buildHexBoard, terrainYAt, mapToWorld, SCALE } from './terrainMesh';
 import { buildFlowLine, tickFlowLines, type FlowLine } from './lines';
-import { EDGE_COLORS } from './palette';
-import {
-  buildSiteLayer, buildVehicleLayer, lerpPose, updateInstances, updateVehicles,
-  type SiteLayer, type VehicleLayer,
-} from './instances';
-
-/** Sites are small on a large map — accept clicks within this many px of a glyph. */
-const SITE_PICK_TOLERANCE_PX = 24;
+import { MODE_LINE_STYLE, V3, flowColor, routeLineColor } from './palette';
+import { SiteLabels } from './siteLabels';
+import { buildSiteLayer, updateInstances, type SiteLayer } from './siteClusters';
+import { buildVehicleLayer, lerpPose, updateVehicles, type VehicleLayer } from './instances';
 
 export interface PickHit {
   kind: 'site' | 'vehicle';
   index: number;
 }
-
-const ROUTE_STYLE: Record<string, { color: number; dash: number; gap: number }> = {
-  road: { color: EDGE_COLORS.road, dash: 0.6, gap: 0.3 },
-  river: { color: EDGE_COLORS.river, dash: 0.9, gap: 0.15 },
-  sea: { color: EDGE_COLORS.sea, dash: 1.2, gap: 0.4 },
-};
 
 export class MapScene {
   readonly scene: THREE.Scene;
@@ -39,6 +30,7 @@ export class MapScene {
   private readonly world: WorldSpec;
   private readonly siteLayer: SiteLayer;
   private readonly vehicleLayer: VehicleLayer;
+  private readonly labels: SiteLabels;
   private readonly flowLines: FlowLine[] = [];
   private readonly ring: THREE.Mesh;
   private readonly ringPivot: THREE.Group;
@@ -48,8 +40,7 @@ export class MapScene {
   constructor(canvas: HTMLCanvasElement, world: WorldSpec) {
     this.world = world;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0b1220);
-    this.scene.fog = new THREE.Fog(0x0b1220, 90, 220);
+    this.scene.background = new THREE.Color(V3.white);
 
     const w = world.wKm * SCALE;
     const h = world.hKm * SCALE;
@@ -59,37 +50,58 @@ export class MapScene {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    this.scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x1a2433, 1.1));
-    const sun = new THREE.DirectionalLight(0xfff3d6, 1.6);
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0xdfe3e8, 1.15));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.5);
     sun.position.set(-40, 60, 30);
     this.scene.add(sun);
 
-    this.scene.add(buildTerrain(world));
+    this.scene.add(buildHexBoard(world));
 
-    for (const route of world.routes) {
-      const style = ROUTE_STYLE[route.mode] ?? ROUTE_STYLE.road;
-      const flow = buildFlowLine(route.points, world.terrain, { ...style, speed: 0, lift: 0.08 });
+    // routes: colour by material class, line style by transport mode
+    for (let i = 0; i < world.routes.length; i++) {
+      const route = world.routes[i];
+      const style = MODE_LINE_STYLE[route.mode];
+      const flow = buildFlowLine(route.points, world.terrain, {
+        color: routeLineColor(world, i),
+        dash: style.dash,
+        gap: style.gap,
+        lift: 0.1,
+      });
       this.flowLines.push(flow);
       this.scene.add(flow.line);
     }
+    // pipelines: solid thin lines in the carried material's flow colour
     for (const pipe of world.pipelines) {
       const flow = buildFlowLine(pipe.points, world.terrain, {
-        color: EDGE_COLORS.pipeline, dash: 0.5, gap: 0.45, speed: 2.5, lift: 0.12, opacity: 0.95,
+        color: flowColor(pipe.material),
+        dash: 1e6, // effectively solid
+        gap: 0,
+        lift: 0.12,
+        opacity: 0.95,
       });
       this.flowLines.push(flow);
       this.scene.add(flow.line);
     }
 
     this.siteLayer = buildSiteLayer(world);
-    this.scene.add(this.siteLayer.glyphs, this.siteLayer.tanks);
+    this.scene.add(this.siteLayer.pads, this.siteLayer.rings, this.siteLayer.tanks);
+    for (const glyphs of this.siteLayer.glyphs) this.scene.add(glyphs);
+
     this.vehicleLayer = buildVehicleLayer(world);
     for (const mesh of this.vehicleLayer.meshes) this.scene.add(mesh);
 
-    // selection ring: flat annulus, nudged to the picked entity each frame
+    // canvas is always in the DOM here; a detached canvas just gets an
+    // off-screen host so labels exist but render nowhere
+    const container = canvas.parentElement ?? document.createElement('div');
+    this.labels = new SiteLabels(container, world, this.siteLayer.siteAnchors);
+    this.labels.addTo(this.scene);
+
+    // selection ring: flat hexagonal annulus on the picked site cluster
     this.ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.9, 1.15, 48).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthTest: false }),
+      new THREE.RingGeometry(0.9, 1.02, 6).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: V3.blue, transparent: true, opacity: 0.9, depthTest: false }),
     );
+    this.ring.rotation.y = Math.PI / 6; // align the ring's corners with the hex pads
     this.ring.renderOrder = 2;
     this.ring.visible = false;
     this.ringPivot = new THREE.Group();
@@ -107,7 +119,8 @@ export class MapScene {
 
   /** Push a snapshot into the layers; `f` (0..1) interpolates from `prev`. */
   applySnapshot(cur: Snapshot, prev: Snapshot | null, f: number, selection: Selection): void {
-    updateInstances(this.siteLayer, cur, prev, f);
+    const selectedSite = selection !== null && selection.kind === 'site' ? selection.index : null;
+    updateInstances(this.siteLayer, cur, prev, f, selectedSite);
     const poses: { x: number; y: number; dirX: number; dirY: number }[] = [];
     for (let v = 0; v < cur.nVeh; v++) poses.push(lerpPose(cur, prev, v, f));
     updateVehicles(this.vehicleLayer, poses, (x, y) => terrainYAt(this.world, x, y));
@@ -119,36 +132,28 @@ export class MapScene {
       this.ring.visible = false;
       return;
     }
-    let xKm: number;
-    let yKm: number;
-    let groundY: number;
     if (selection.kind === 'site') {
-      const site = this.world.sites[selection.index];
-      if (site === undefined) {
+      const anchor = this.siteLayer.siteAnchors[selection.index];
+      if (anchor === undefined) {
         this.ring.visible = false;
         return;
       }
-      xKm = site.x;
-      yKm = site.y;
-      groundY = terrainYAt(this.world, xKm, yKm);
-      this.ring.scale.setScalar(2.4);
+      this.ringPivot.position.set(anchor.x, anchor.topY + 0.03, anchor.z);
+      this.ring.scale.setScalar((anchor.clusterR + 0.15) / 1.02);
     } else {
       const pose = poses[selection.index];
       if (pose === undefined) {
         this.ring.visible = false;
         return;
       }
-      xKm = pose.x;
-      yKm = pose.y;
-      groundY = terrainYAt(this.world, xKm, yKm);
+      const [x, z] = mapToWorld(pose.x, pose.y);
+      this.ringPivot.position.set(x, terrainYAt(this.world, pose.x, pose.y) + 0.15, z);
       this.ring.scale.setScalar(1.2);
     }
-    const [x, z] = mapToWorld(xKm, yKm);
-    this.ringPivot.position.set(x, groundY + 0.15, z);
     this.ring.visible = true;
   }
 
-  /** Raycast the pointer against site glyphs and vehicle meshes. */
+  /** Raycast the pointer against unit pads and vehicle meshes. */
   pick(clientX: number, clientY: number): PickHit | null {
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.ndc.set(
@@ -157,11 +162,11 @@ export class MapScene {
     );
     this.raycaster.setFromCamera(this.ndc, this.camera);
     const hits = this.raycaster.intersectObjects(
-      [this.siteLayer.glyphs, ...this.vehicleLayer.meshes],
+      [this.siteLayer.pads, ...this.vehicleLayer.meshes],
       false,
     );
     for (const hit of hits) {
-      if (hit.object === this.siteLayer.glyphs && hit.instanceId !== undefined) {
+      if (hit.object === this.siteLayer.pads && hit.instanceId !== undefined) {
         return { kind: 'site', index: this.siteLayer.glyphSite[hit.instanceId] };
       }
       const meshIdx = this.vehicleLayer.meshes.indexOf(hit.object as THREE.InstancedMesh);
@@ -169,13 +174,13 @@ export class MapScene {
         return { kind: 'vehicle', index: this.vehicleLayer.classStart[meshIdx] + hit.instanceId };
       }
     }
-    // Small glyphs on a large map miss raycasts by a few pixels — fall back
+    // Small pads on a large map miss raycasts by a few pixels — fall back
     // to the projected site centre within a click tolerance.
     const v = new THREE.Vector3();
     let bestSite = -1;
-    let bestDist = SITE_PICK_TOLERANCE_PX;
-    this.siteLayer.anchors.forEach((anchor, i) => {
-      v.set(anchor.x, anchor.groundY + 0.9, anchor.z).project(this.camera);
+    let bestDist = 24; // px
+    this.siteLayer.siteAnchors.forEach((anchor, i) => {
+      v.set(anchor.x, anchor.topY + 0.85, anchor.z).project(this.camera);
       if (v.z > 1) return; // behind the camera
       const px = (v.x * 0.5 + 0.5) * rect.width;
       const py = (-v.y * 0.5 + 0.5) * rect.height;
@@ -192,19 +197,27 @@ export class MapScene {
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
+    this.labels.setSize(width, height);
   }
 
   render(): void {
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
+    this.labels.update(
+      this.camera,
+      this.controls.target.x,
+      this.controls.target.y,
+      this.controls.target.z,
+    );
   }
 
-  /** Advance flow-dash animation; dt in seconds. */
+  /** Advance flow-dash animation; dt in seconds. Kept for the render loop API. */
   animate(dtSec: number): void {
     tickFlowLines(this.flowLines, dtSec);
   }
 
   dispose(): void {
+    this.labels.dispose();
     this.controls.dispose();
     this.scene.traverse((obj) => {
       if (obj instanceof THREE.Mesh || obj instanceof THREE.Line || obj instanceof THREE.InstancedMesh) {
