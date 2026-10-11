@@ -12,6 +12,7 @@
 // schedule.
 #include "crx/api.h"
 
+#include "api_world.h"
 #include "sim/routes.h"
 #include "sim/sim.h"
 
@@ -31,70 +32,181 @@
 using json = nlohmann::json;
 using crx::sim::Sim;
 
+namespace crx {
+
 namespace {
 
-constexpr uint32_t kSnapshotVersion = 2;
-constexpr uint32_t kNArrays = 15;
-constexpr uint32_t kHeaderBytes = 20;  // magic4 + version4 + tick8 + count4
-
-// Snapshot array table: scalar kind and count per array. Counts are
-// world-derived; the per-array (scalars, offset) table inside the binary is
-// what decoders consume.
-enum ArrKind : uint32_t { kF32, kU8, kU32 };
-struct ArrSpec {
-  ArrKind kind;
-  uint32_t scalars;
+// Seeded value-noise helpers shared by both terrain builders (a C++ port of
+// the web stub's generator, world.ts makeTerrain).
+struct TerrainRng {
+  uint32_t state;
+  explicit TerrainRng(uint64_t seed) : state(static_cast<uint32_t>(seed) ^ 0x9e3779b9u) {}
+  double next() {
+    state += 0x6D2B79F5u;
+    uint32_t t = state ^ (state >> 15);
+    t = t * (1u | state);
+    t = (t + (t ^ (t >> 7)) * (61u | t)) ^ t;
+    return static_cast<double>(t ^ (t >> 14)) / 4294967296.0;
+  }
 };
 
-uint32_t scalarSize(ArrKind kind) { return kind == kU8 ? 1u : kind == kU32 ? 4u : 4u; }
-uint32_t align4(uint32_t v) { return (v + 3u) & ~3u; }
+double smoothStep(double x, double lo, double hi) {
+  const double t = std::clamp((x - lo) / (hi - lo), 0.0, 1.0);
+  return t * t * (3 - 2 * t);
+}
 
-// ABI object: the sim plus per-call scratch (replies, snapshot bytes, KPIs).
-// Copying deep-copies the sim — that is the fork path (§7.1).
-struct ApiSim {
-  std::unique_ptr<Sim> sim;
-  mutable std::string reply;  // scratch: points at the last command/event reply
-  std::string world_json;
-  // Client route index per world edge (world JSON routes[] order), filled by
-  // buildWorldJson and read by the snapshot writer (array 12). UINT32_MAX
-  // where an edge has no client route (none today — every edge gets one).
-  std::vector<uint32_t> edge_route;
-  mutable std::vector<double> kpis;
-  std::vector<float> terrain;
-  mutable std::vector<uint8_t> snap;
-  mutable bool snap_dirty = true;
+// One octave of bilinear value noise over a w_km × h_km map.
+struct NoiseOctave {
+  std::vector<double> lattice;
+  int gw = 0, gh = 0;
+  double cell = 1;
+  NoiseOctave(TerrainRng& rng, double cell_km, double w_km, double h_km) : cell(cell_km) {
+    gw = static_cast<int>(std::ceil(w_km / cell)) + 2;
+    gh = static_cast<int>(std::ceil(h_km / cell)) + 2;
+    lattice.resize(static_cast<size_t>(gw) * gh);
+    for (double& v : lattice) v = rng.next();
+  }
+  double operator()(double x, double y) const {
+    const double fx = x / cell, fy = y / cell;
+    const int x0 = std::clamp(static_cast<int>(std::floor(fx)), 0, gw - 2);
+    const int y0 = std::clamp(static_cast<int>(std::floor(fy)), 0, gh - 2);
+    const double tx = std::clamp(fx - x0, 0.0, 1.0), ty = std::clamp(fy - y0, 0.0, 1.0);
+    const auto g = [&](int gx, int gy) { return lattice[static_cast<size_t>(gy) * gw + gx]; };
+    const double sx = tx * tx * (3 - 2 * tx);
+    const double sy = ty * ty * (3 - 2 * ty);
+    const double top = g(x0, y0) * (1 - sx) + g(x0 + 1, y0) * sx;
+    const double bottom = g(x0, y0 + 1) * (1 - sx) + g(x0 + 1, y0 + 1) * sx;
+    return top * (1 - sy) + bottom * sy;
+  }
+};
 
-  ApiSim() = default;
-  explicit ApiSim(uint64_t seed) {
-    std::string error;
-    sim = Sim::create(seed, error);
-    if (sim == nullptr) throw std::runtime_error(error);
-    buildTerrain(seed, terrain);
-    buildWorldJson(*sim, terrain, world_json, edge_route);
+const char* modeName(crx::Mode mode) {
+  return mode == crx::Mode::River ? "river" : mode == crx::Mode::Sea ? "sea" : "road";
+}
+
+}  // namespace
+
+// Render-only terrain (never enters the state hash) for worlds without a
+// water mask: value-noise meadows, sea in the NE, highlands toward the west,
+// heights in metres on a 61×41 / 10 km grid.
+void buildSeedTerrain(uint64_t seed, TerrainGrid& out) {
+  constexpr int kCols = 61, kRows = 41;
+  constexpr double kCellKm = 10.0;
+  TerrainRng rng(seed);
+  const NoiseOctave base(rng, 90, 600.0, 400.0);
+  const NoiseOctave detail(rng, 30, 600.0, 400.0);
+
+  out.cols = kCols;
+  out.rows = kRows;
+  out.cell_km = kCellKm;
+  out.height.assign(static_cast<size_t>(kCols) * kRows, 0.f);
+  for (int r = 0; r < kRows; ++r) {
+    for (int c = 0; c < kCols; ++c) {
+      const double x = c * kCellKm, y = r * kCellKm;
+      const double land = 1 - smoothStep(x + 0.9 * y, 560, 680);
+      const double highlands = std::pow(1 - x / 600.0, 2);
+      const double n = 0.65 * base(x, y) + 0.35 * detail(x, y);
+      out.height[static_cast<size_t>(r) * kCols + c] =
+          static_cast<float>(-6 + land * (5 + 26 * n + 12 * highlands));
+    }
+  }
+}
+
+// Render-only terrain from a hand-drawn water mask. Samples sit on a grid
+// twice as fine as the mask, so each mask cell owns one interior sample and
+// shares its edge and corner samples with its neighbours: a sample is water
+// (below sea level) when every mask cell it touches is water, land when
+// every one is land, and exactly sea level on the shoreline in between. The
+// client's bilinear sampling then puts the zero contour on the mask outline,
+// so drawn rivers come out as continuous water one mask cell wide.
+void buildMaskTerrain(const sim::World& world, TerrainGrid& out) {
+  const int mcols = static_cast<int>(world.water_cols);
+  const int mrows = static_cast<int>(world.water_rows);
+  const double cell = world.water_cell_km / 2.0;
+  const int cols = 2 * mcols + 1, rows = 2 * mrows + 1;
+  out.cols = static_cast<uint32_t>(cols);
+  out.rows = static_cast<uint32_t>(rows);
+  out.cell_km = cell;
+  out.height.assign(static_cast<size_t>(cols) * rows, 0.f);
+
+  // Sample class: 2 = water, 1 = shoreline, 0 = land.
+  std::vector<uint8_t> cls(static_cast<size_t>(cols) * rows, 0);
+  const auto maskAt = [&](int c, int r) {
+    return world.water[static_cast<size_t>(r) * mcols + c] != 0;
+  };
+  for (int j = 0; j < rows; ++j) {
+    for (int i = 0; i < cols; ++i) {
+      // Mask cells this sample touches: one when the index is odd (interior),
+      // the two neighbours when even (on their shared edge), clipped to the map.
+      const int c0 = (i % 2 == 1) ? (i - 1) / 2 : i / 2 - 1, c1 = (i % 2 == 1) ? c0 : i / 2;
+      const int r0 = (j % 2 == 1) ? (j - 1) / 2 : j / 2 - 1, r1 = (j % 2 == 1) ? r0 : j / 2;
+      int water = 0, land = 0;
+      for (int r = std::max(0, r0); r <= std::min(mrows - 1, r1); ++r)
+        for (int c = std::max(0, c0); c <= std::min(mcols - 1, c1); ++c)
+          (maskAt(c, r) ? water : land) += 1;
+      cls[static_cast<size_t>(j) * cols + i] = land == 0 ? 2 : water == 0 ? 0 : 1;
+    }
   }
 
-  ApiSim(const ApiSim& other)
-      : sim(std::make_unique<Sim>(*other.sim)),
-        reply(other.reply),
-        world_json(other.world_json),
-        edge_route(other.edge_route),
-        kpis(other.kpis),
-        terrain(other.terrain),
-        snap{},
-        snap_dirty(true) {}
-  ApiSim& operator=(const ApiSim&) = delete;
+  // Distance from each land sample to the nearest water or shoreline sample
+  // (two-pass chamfer, in km) — the coast stays low, the interior rises.
+  const double kFar = 1e9, diag = cell * std::sqrt(2.0);
+  std::vector<double> dist(cls.size(), kFar);
+  for (size_t k = 0; k < cls.size(); ++k)
+    if (cls[k] != 0) dist[k] = 0.0;
+  const auto relax = [&](int i, int j, int di, int dj, double step) {
+    const int ni = i + di, nj = j + dj;
+    if (ni < 0 || nj < 0 || ni >= cols || nj >= rows) return;
+    double& d = dist[static_cast<size_t>(j) * cols + i];
+    d = std::min(d, dist[static_cast<size_t>(nj) * cols + ni] + step);
+  };
+  for (int j = 0; j < rows; ++j)
+    for (int i = 0; i < cols; ++i) {
+      relax(i, j, -1, 0, cell);
+      relax(i, j, 0, -1, cell);
+      relax(i, j, -1, -1, diag);
+      relax(i, j, 1, -1, diag);
+    }
+  for (int j = rows - 1; j >= 0; --j)
+    for (int i = cols - 1; i >= 0; --i) {
+      relax(i, j, 1, 0, cell);
+      relax(i, j, 0, 1, cell);
+      relax(i, j, 1, 1, diag);
+      relax(i, j, -1, 1, diag);
+    }
 
-  static void buildWorldJson(const Sim& s, const std::vector<float>& terrain,
-                             std::string& out, std::vector<uint32_t>& edge_route);
-  static void buildTerrain(uint64_t seed, std::vector<float>& out);
-};
+  TerrainRng rng(world.seed);
+  const double w_km = (cols - 1) * cell, h_km = (rows - 1) * cell;
+  const NoiseOctave base(rng, 90, w_km, h_km);
+  const NoiseOctave detail(rng, 30, w_km, h_km);
+  for (int j = 0; j < rows; ++j) {
+    for (int i = 0; i < cols; ++i) {
+      const size_t k = static_cast<size_t>(j) * cols + i;
+      double h = 0.0;  // shoreline
+      if (cls[k] == 2) {
+        h = -6.0;
+      } else if (cls[k] == 0) {
+        const double n = 0.65 * base(i * cell, j * cell) + 0.35 * detail(i * cell, j * cell);
+        const double inland = std::min(dist[k], 1000.0);
+        h = 1.5 + smoothStep(inland, 0.0, 30.0) * (3.0 + 20.0 * n);
+      }
+      out.height[k] = static_cast<float>(h);
+    }
+  }
+}
 
-ApiSim* asApi(crx_sim* s) { return reinterpret_cast<ApiSim*>(s); }
-const ApiSim* asApi(const crx_sim* s) { return reinterpret_cast<const ApiSim*>(s); }
+void buildTerrain(const sim::World& world, TerrainGrid& out) {
+  const bool masked = world.water_cell_km > 0.0 && world.water_cols > 0 && world.water_rows > 0 &&
+                      world.water.size() ==
+                          static_cast<size_t>(world.water_cols) * world.water_rows;
+  if (masked)
+    buildMaskTerrain(world, out);
+  else
+    buildSeedTerrain(world.seed, out);
+}
 
-void ApiSim::buildWorldJson(const Sim& s, const std::vector<float>& terrain,
-                            std::string& out, std::vector<uint32_t>& edge_route) {
-  const auto& w = s.world();
+std::string buildWorldJson(const sim::World& w, const TerrainGrid& terrain,
+                           std::vector<uint32_t>& edge_route) {
   const auto& cat = w.catalog;
   json mats = json::array();
   for (const auto& m : cat.materials) mats.push_back(m.key);
@@ -113,7 +225,7 @@ void ApiSim::buildWorldJson(const Sim& s, const std::vector<float>& terrain,
       json units = json::array();
       for (uint32_t u = 0; u < w.units.size(); ++u) {
         const auto& unit = w.units[u];
-        if (unit.process.v != static_cast<int>(p)) continue;
+        if (unit.process.v != p) continue;
         const auto& slot = type.units[unit.slot];
         units.push_back({{"key", slot.key},
                          {"name", slot.name},
@@ -150,6 +262,23 @@ void ApiSim::buildWorldJson(const Sim& s, const std::vector<float>& terrain,
                      {"drawTph", tank.design_out_t_h}});
   }
 
+  // A route end that is not a site is a junction of the drawn network (or an
+  // off-map end): name it after the nearest site so the UI reads "near
+  // Refinery" rather than a bare node number.
+  const auto endName = [&](const sim::RouteNode& node) -> std::string {
+    if (node.site >= 0) return w.sites[node.site].name;
+    int best = -1;
+    double best_d = 0.0;
+    for (size_t s = 0; s < w.sites.size(); ++s) {
+      const double d = std::hypot(w.sites[s].x_km - node.x_km, w.sites[s].y_km - node.y_km);
+      if (best < 0 || d < best_d) {
+        best = static_cast<int>(s);
+        best_d = d;
+      }
+    }
+    return best < 0 ? std::string("off-map") : "near " + w.sites[best].name;
+  };
+
   // One route per edge, in edge order, every mode — vehicles (trucks, barges,
   // ships alike) map their current edge to a client route by this index. The
   // edge → route mapping lands in edge_route for the snapshot writer.
@@ -157,21 +286,20 @@ void ApiSim::buildWorldJson(const Sim& s, const std::vector<float>& terrain,
   edge_route.assign(w.edges.size(), UINT32_MAX);
   for (uint32_t e = 0; e < w.edges.size(); ++e) {
     const auto& edge = w.edges[e];
-    const int sa = w.nodes[edge.a].site, sb = w.nodes[edge.b].site;
-    const char* mode = edge.mode == crx::Mode::River
-                           ? "river"
-                           : edge.mode == crx::Mode::Sea ? "sea" : "road";
+    const auto& na = w.nodes[edge.a];
+    const auto& nb = w.nodes[edge.b];
     json pts = json::array();
     for (uint32_t i = edge.polyline.begin;
          i < edge.polyline.begin + edge.polyline.count; ++i)
       pts.push_back({w.polyline_xy[2 * i], w.polyline_xy[2 * i + 1]});
     edge_route[e] = static_cast<uint32_t>(routes.size());
     routes.push_back(
-        {{"mode", mode},
-         {"ends", {sa >= 0 ? w.sites[sa].name : "off-map",
-                   sb >= 0 ? w.sites[sb].name : "off-map"}},
-         {"sites", {sa >= 0 ? json(sa) : json(nullptr),
-                    sb >= 0 ? json(sb) : json(nullptr)}},
+        {{"mode", modeName(edge.mode)},
+         {"ends", {endName(na), endName(nb)}},
+         {"sites", {na.site >= 0 ? json(na.site) : json(nullptr),
+                    nb.site >= 0 ? json(nb.site) : json(nullptr)}},
+         // true where the end is a network junction rather than a site
+         {"junction", {na.site < 0, nb.site < 0}},
          {"points", pts}});
   }
 
@@ -179,27 +307,33 @@ void ApiSim::buildWorldJson(const Sim& s, const std::vector<float>& terrain,
   for (const auto& pl : w.pipelines) {
     const auto& from = w.tanks[pl.from.v];
     const auto& to = w.tanks[pl.to.v];
-    // §7.3 leaves pipelines point-to-point: the tank pair carries the flow.
+    // The drawn path when the world carries one; otherwise §7.3's
+    // point-to-point line between the two sites.
+    json pts = json::array();
+    if (pl.polyline.count >= 2 &&
+        2 * static_cast<size_t>(pl.polyline.begin + pl.polyline.count) <= w.polyline_xy.size()) {
+      for (uint32_t i = pl.polyline.begin; i < pl.polyline.begin + pl.polyline.count; ++i)
+        pts.push_back({w.polyline_xy[2 * i], w.polyline_xy[2 * i + 1]});
+    } else {
+      pts.push_back({w.sites[from.site.v].x_km, w.sites[from.site.v].y_km});
+      pts.push_back({w.sites[to.site.v].x_km, w.sites[to.site.v].y_km});
+    }
     pipes.push_back({{"fromSite", from.site.v},
                      {"toSite", to.site.v},
                      {"material", cat.materials[pl.material].key},
                      {"capTph", pl.cap_t_h},
-                     {"points",
-                      json::array({json::array({w.sites[from.site.v].x_km,
-                                                w.sites[from.site.v].y_km}),
-                                   json::array({w.sites[to.site.v].x_km,
-                                                w.sites[to.site.v].y_km})})}});
+                     {"points", pts}});
   }
 
-  // Fleet manifest only: class and the commodity lane's cargo. Live movement
-  // (assigned route, progress, ETA) is snapshot state — arrays 12–14 — never
-  // a world payload schedule. The former "static display lane" fields
-  // (route/loopTicks/phase) fabricated a <4 h shuttle loop that contradicted
-  // the dispatch ledger's multi-hour deliveries; they are gone.
+  // Fleet manifest only: class, home site and a representative cargo. Live
+  // movement and the cargo actually on board are snapshot state (arrays 6–8
+  // and 12–14), never a world payload schedule.
   json vehicles = json::array();
   for (const auto& f : w.fleet) {
     const auto& vc = cat.vehicle_classes[f.cls];
-    std::string cargo = cat.materials.front().key;
+    // Representative cargo: the contract lane at the home site if there is
+    // one, else the first material this class can carry in its mode.
+    std::string cargo;
     for (const auto& c : w.contracts) {
       const auto& from = w.tanks[c.seller.v];
       const auto& to = w.tanks[c.buyer.v];
@@ -209,22 +343,33 @@ void ApiSim::buildWorldJson(const Sim& s, const std::vector<float>& terrain,
         break;
       }
     }
-    vehicles.push_back({{"cls", vc.key}, {"cargo", cargo}});
+    if (cargo.empty()) {
+      for (const auto& m : cat.materials) {
+        if (m.phase != vc.carries) continue;
+        if (!(m.modes & (1u << static_cast<uint8_t>(vc.mode)))) continue;
+        cargo = m.key;
+        break;
+      }
+    }
+    if (cargo.empty()) cargo = cat.materials.front().key;
+    vehicles.push_back({{"cls", vc.key}, {"cargo", cargo}, {"home", f.home.v}});
   }
 
+  // Heights to 0.1 m: the grid is the bulk of the document and a float's
+  // full decimal expansion would triple its size.
   json heights = json::array();
-  for (float h : terrain) heights.push_back(h);
+  for (float h : terrain.height) heights.push_back(std::round(h * 10.0) / 10.0);
 
-  const json doc = {{"world", "sixsite"},
+  const json doc = {{"world", w.name},
                     {"seed", w.seed},
-                    {"wKm", 600},
-                    {"hKm", 400},
+                    {"wKm", w.w_km},
+                    {"hKm", w.h_km},
                     {"dt_h", crx::sim::kTickHours},
                     {"materials", mats},
                     {"terrain",
-                     {{"cols", 61},
-                      {"rows", 41},
-                      {"cellKm", 10},
+                     {{"cols", terrain.cols},
+                      {"rows", terrain.rows},
+                      {"cellKm", terrain.cell_km},
                       {"seaLevelM", 0},
                       {"height", heights}}},
                     {"sites", sites},
@@ -232,61 +377,72 @@ void ApiSim::buildWorldJson(const Sim& s, const std::vector<float>& terrain,
                     {"routes", routes},
                     {"pipelines", pipes},
                     {"vehicles", vehicles}};
-  out = doc.dump();
+  return doc.dump();
 }
 
-// Render-only terrain (never enters the state hash): a C++ port of the web
-// stub's generator (world.ts makeTerrain) so the engine-owned world renders
-// with the same island character — value-noise meadows, sea in the NE,
-// highlands toward the west, heights in metres on a 61×41 / 10 km grid.
-void ApiSim::buildTerrain(uint64_t seed, std::vector<float>& out) {
-  constexpr int kCols = 61, kRows = 41;
-  constexpr double kCellKm = 10.0;
-  uint32_t rng = static_cast<uint32_t>(seed) ^ 0x9e3779b9u;
-  auto next = [&rng]() {
-    rng += 0x6D2B79F5u;
-    uint32_t t = rng ^ (rng >> 15);
-    t = t * (1u | rng);
-    t = (t + (t ^ (t >> 7)) * (61u | t)) ^ t;
-    return static_cast<double>(t ^ (t >> 14)) / 4294967296.0;
-  };
-  auto smooth = [](double x, double lo, double hi) {
-    const double t = std::clamp((x - lo) / (hi - lo), 0.0, 1.0);
-    return t * t * (3 - 2 * t);
-  };
-  auto octave = [&](double cell) {
-    const int gw = static_cast<int>(std::ceil(600.0 / cell)) + 2;
-    const int gh = static_cast<int>(std::ceil(400.0 / cell)) + 2;
-    std::vector<double> lattice(static_cast<size_t>(gw) * gh);
-    for (double& v : lattice) v = next();
-    return [lattice, gw, gh, cell](double x, double y) {
-      const double fx = x / cell, fy = y / cell;
-      const int x0 = static_cast<int>(std::floor(fx));
-      const int y0 = static_cast<int>(std::floor(fy));
-      const double tx = fx - x0, ty = fy - y0;
-      const auto g = [&](int gx, int gy) { return lattice[gy * gw + gx]; };
-      const double sx = tx * tx * (3 - 2 * tx);
-      const double sy = ty * ty * (3 - 2 * ty);
-      const double top = g(x0, y0) * (1 - sx) + g(x0 + 1, y0) * sx;
-      const double bottom = g(x0, y0 + 1) * (1 - sx) + g(x0 + 1, y0 + 1) * sx;
-      return top * (1 - sy) + bottom * sy;
-    };
-  };
-  const auto base = octave(90);
-  const auto detail = octave(30);
+}  // namespace crx
 
-  out.assign(static_cast<size_t>(kCols) * kRows, 0.f);
-  for (int r = 0; r < kRows; ++r) {
-    for (int c = 0; c < kCols; ++c) {
-      const double x = c * kCellKm, y = r * kCellKm;
-      const double land = 1 - smooth(x + 0.9 * y, 560, 680);
-      const double highlands = std::pow(1 - x / 600.0, 2);
-      const double n = 0.65 * base(x, y) + 0.35 * detail(x, y);
-      out[static_cast<size_t>(r) * kCols + c] =
-          static_cast<float>(-6 + land * (5 + 26 * n + 12 * highlands));
-    }
+namespace {
+
+constexpr uint32_t kSnapshotVersion = 2;
+constexpr uint32_t kNArrays = 15;
+constexpr uint32_t kHeaderBytes = 20;  // magic4 + version4 + tick8 + count4
+
+// Snapshot array table: scalar kind and count per array. Counts are
+// world-derived; the per-array (scalars, offset) table inside the binary is
+// what decoders consume.
+enum ArrKind : uint32_t { kF32, kU8, kU32 };
+struct ArrSpec {
+  ArrKind kind;
+  uint32_t scalars;
+};
+
+uint32_t scalarSize(ArrKind kind) { return kind == kU8 ? 1u : kind == kU32 ? 4u : 4u; }
+uint32_t align4(uint32_t v) { return (v + 3u) & ~3u; }
+
+// ABI object: the sim plus per-call scratch (replies, snapshot bytes, KPIs).
+// Copying deep-copies the sim — that is the fork path (§7.1).
+struct ApiSim {
+  std::unique_ptr<Sim> sim;
+  mutable std::string reply;  // scratch: points at the last command/event reply
+  std::string world_json;
+  // Client route index per world edge (world JSON routes[] order), filled by
+  // buildWorldJson and read by the snapshot writer (array 12). UINT32_MAX
+  // where an edge has no client route (none today — every edge gets one).
+  std::vector<uint32_t> edge_route;
+  mutable std::vector<double> kpis;
+  crx::TerrainGrid terrain;
+  mutable std::vector<uint8_t> snap;
+  mutable bool snap_dirty = true;
+
+  ApiSim() = default;
+  explicit ApiSim(uint64_t seed) {
+    std::string error;
+    sim = Sim::create(seed, error);
+    if (sim == nullptr) throw std::runtime_error(error);
+    describeWorld();
   }
-}
+
+  // Render-side description of the sim's world: terrain grid and world JSON.
+  void describeWorld() {
+    crx::buildTerrain(sim->world(), terrain);
+    world_json = crx::buildWorldJson(sim->world(), terrain, edge_route);
+  }
+
+  ApiSim(const ApiSim& other)
+      : sim(std::make_unique<Sim>(*other.sim)),
+        reply(other.reply),
+        world_json(other.world_json),
+        edge_route(other.edge_route),
+        kpis(other.kpis),
+        terrain(other.terrain),
+        snap{},
+        snap_dirty(true) {}
+  ApiSim& operator=(const ApiSim&) = delete;
+};
+
+ApiSim* asApi(crx_sim* s) { return reinterpret_cast<ApiSim*>(s); }
+const ApiSim* asApi(const crx_sim* s) { return reinterpret_cast<const ApiSim*>(s); }
 
 void buildSnapshot(const Sim& sim, const std::vector<uint32_t>& edge_route,
                    std::vector<uint8_t>& snap) {
@@ -482,8 +638,7 @@ crx_sim* crx_create(const char* config_json) {
     }
     auto* api = new ApiSim();
     api->sim = std::move(sim);
-    ApiSim::buildTerrain(api->sim->world().seed, api->terrain);
-    ApiSim::buildWorldJson(*api->sim, api->terrain, api->world_json, api->edge_route);
+    api->describeWorld();
     return reinterpret_cast<crx_sim*>(api);
   } catch (const std::exception& e) {
     std::fprintf(stderr, "crx_create: %s\n", e.what());
@@ -516,8 +671,8 @@ const char* crx_world_json(const crx_sim* sim) { return asApi(sim)->world_json.c
 
 const float* crx_terrain(const crx_sim* sim, uint32_t* n) {
   const ApiSim* api = asApi(sim);
-  *n = static_cast<uint32_t>(api->terrain.size());
-  return api->terrain.data();
+  *n = static_cast<uint32_t>(api->terrain.height.size());
+  return api->terrain.height.data();
 }
 
 const uint8_t* crx_snapshot(crx_sim* sim, uint32_t* bytes) {

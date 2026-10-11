@@ -78,6 +78,10 @@ target_compile_definitions(crx_catalog_tests PRIVATE
   CRX_CATALOG_DIR="${CMAKE_SOURCE_DIR}/engine/data/catalog")
 add_test(NAME catalog COMMAND crx_catalog_tests)
 
+add_executable(crx_api_world_tests engine/tests/test_api_world.cpp)
+target_link_libraries(crx_api_world_tests PRIVATE crx_engine doctest::doctest)
+add_test(NAME api_world COMMAND crx_api_world_tests)
+
 # ---- crx-worldgen: template layout generator (§6) ----
 add_library(crx_worldgen STATIC
   engine/src/world/worldgen/CatalogData.cpp
