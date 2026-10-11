@@ -256,8 +256,34 @@ describe('session lifecycle', () => {
     // triggered before 288 is kept; triggered AT 288 is forgotten by the engine and available again
     expect(s.triggered).toEqual(['early_one']);
     expect(s.triggeredAt).toEqual({ early_one: 100 });
-    expect(s.events.map((e) => e.text)).toEqual(['early', 'Early one', 'kept']);
+    // the visitor's notes from before that moment are kept, and going back leaves one of its own
+    expect(s.events.map((e) => e.text)).toEqual(['early', 'Early one', 'kept', 'You went back to Day 4, 00:00']);
+    expect(s.events[s.events.length - 1]).toMatchObject({ type: 'rewind', tick: 288 });
+    expect(s.events[s.events.length - 1].seq).toBeLessThan(0);
     expect(s.lastSeq).toBe(1); // the engine's log restarts its numbering
+    cleanup();
+  });
+
+  it('notes an accepted command in the log as the visitor\'s action, and a refused one not at all', async () => {
+    const backend = fakeBackend();
+    const cleanup = openEngineSession({ kind: 'http', seed: 42, scenario: 'none' }, backend);
+    await vi.waitFor(() => expect(useSim.getState().sendCommand).not.toBeNull());
+    const send = useSim.getState().sendCommand!;
+    backend.command.mockImplementation(async () => ({ ok: true }));
+    await send({ type: 'unit_outage', site: 0, unit: 'RF-CDU', trains: 1, duration_h: 24 });
+    let notes = useSim.getState().events.filter((e) => e.seq < 0);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ type: 'user_outage', site: 0 });
+    expect(notes[0].text).toContain('RF-CDU');
+    // the caller writes its own note (a scenario): none is added here
+    await send({ type: 'unit_outage', site: 0, unit: 'RF-CDU', trains: 1, duration_h: 24 }, { note: false });
+    expect(useSim.getState().events.filter((e) => e.seq < 0)).toHaveLength(1);
+    // the engine refused: nothing happened, so nothing is noted
+    backend.command.mockImplementation(async () => ({ ok: false, error: 'place_order: seller has no stock' }));
+    const reply = await send({ type: 'place_order', site: 0, material: 'SALT', seller: 1, cls: 'TRUCK_BULK', tonnes: 25 });
+    expect(reply).toMatchObject({ ok: false });
+    notes = useSim.getState().events.filter((e) => e.seq < 0);
+    expect(notes).toHaveLength(1);
     cleanup();
   });
 

@@ -12,6 +12,7 @@ import type { Snapshot } from '../engine/snapshot';
 import type { SimEvent, BackendKind, VehicleDetail } from '../engine/api';
 import type { WorldSpec } from '../engine/world';
 import { scenarioSite, type EngineScenario } from '../engine/scenarios';
+import { userSeq } from './userNotes';
 import {
   DEFAULT_SEED, DEFAULT_WORLD, STORAGE_KEY, dropLegacyPersistedState, backendOverride, seedFromParams,
   worldFromParams,
@@ -109,8 +110,13 @@ export interface SimState {
   lastSeq: number;
   selected: Selection;
   error: string | null;
-  /** Live backend command dispatcher, wired by useSimEngine; null between sessions. */
-  sendCommand: ((cmd: Record<string, unknown>) => Promise<unknown>) | null;
+  /**
+   * Live backend command dispatcher, wired by the engine session; null
+   * between sessions. A command the engine accepts leaves a note in the log
+   * saying what the visitor did (see userNotes.ts); pass `{ note: false }`
+   * when the caller writes its own.
+   */
+  sendCommand: ((cmd: Record<string, unknown>, opts?: { note?: boolean }) => Promise<unknown>) | null;
   /**
    * Fetch what one vehicle is doing (cargo, order, route) from the live
    * session; wired by the engine session, null between sessions.
@@ -223,7 +229,7 @@ export const useSim = create<SimState>()(
         if (sendCommand === null || triggered.includes(scenario.key)) return;
         let reply: unknown;
         try {
-          reply = await sendCommand(scenario.command);
+          reply = await sendCommand(scenario.command, { note: false }); // the scenario's own note follows
         } catch (err) {
           set({ error: err instanceof Error ? err.message : String(err) });
           return;
@@ -244,7 +250,7 @@ export const useSim = create<SimState>()(
           events: [
             ...s.events,
             {
-              seq: -1 - s.triggered.length,
+              seq: userSeq(),
               tick: Number(s.snap?.tick ?? 0),
               type: 'scenario',
               site: s.world === null ? undefined : scenarioSite(s.world, scenario),

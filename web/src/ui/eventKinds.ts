@@ -4,7 +4,7 @@
 import type { SimEvent } from '../engine/events';
 
 /** Alarm red is reserved for bad states and the disruptions a visitor triggers. */
-export const CRITICAL_EVENTS = new Set(['stockout', 'unit_failed', 'process_shutdown', 'site_shutdown', 'route_break', 'scenario']);
+export const CRITICAL_EVENTS = new Set(['stockout', 'unit_failed', 'process_shutdown', 'site_shutdown', 'route_break', 'scenario', 'user_outage']);
 
 /** Every order logs a dispatch and a delivery: hundreds a day on the full map. */
 const ROUTINE_EVENTS = new Set(['dispatch', 'delivered']);
@@ -13,10 +13,16 @@ export function isRoutineEvent(e: SimEvent): boolean {
   return ROUTINE_EVENTS.has(e.type);
 }
 
-/** The events worth a marker or a row when looking back over a run: everything notable up to `tick`. */
+/**
+ * The events worth a marker or a row when looking back over a run: everything
+ * notable up to `tick`. A note that the visitor went back in time is not a
+ * moment to go back to, so it is left out.
+ */
 export function notableEvents(events: SimEvent[], tick: number): SimEvent[] {
-  return events.filter((e) => e.tick <= tick && !isRoutineEvent(e));
+  return events.filter((e) => e.tick <= tick && !isRoutineEvent(e) && e.type !== 'rewind');
 }
+
+export { isUserEvent } from '../store/userNotes';
 
 /** Route closures and reopenings: about a lane, not a plant. */
 const ROUTE_EVENTS = new Set(['route_break', 'route_reopened']);
@@ -38,7 +44,16 @@ export function eventMark(e: SimEvent): { color: string; shape: 'bar' | 'diamond
   };
 }
 
-/** An event type as a label: "route reopened", "unit failed". */
+/** Labels for the entries the client writes on the visitor's behalf. */
+const USER_LABELS: Record<string, string> = {
+  scenario: 'scenario',
+  user_outage: 'you: disruption',
+  user_order: 'you: order',
+  user_action: 'you',
+  rewind: 'back in time',
+};
+
+/** An event type as a label: "route reopened", "unit failed", "you: order". */
 export function eventLabel(e: SimEvent): string {
-  return e.type.replace(/_/g, ' ');
+  return USER_LABELS[e.type] ?? e.type.replace(/_/g, ' ');
 }
