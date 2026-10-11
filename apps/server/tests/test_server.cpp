@@ -127,6 +127,57 @@ TEST_CASE("command posts through to the engine and fork copies the run") {
   CHECK(tickOf(forkSnapshot->body) == 10);
 }
 
+TEST_CASE("world json: fleet manifest without a fabricated shuttle schedule") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, "{}");
+
+  auto world = cli.Get("/api/sim/" + id + "/world");
+  REQUIRE(world);
+  const json doc = json::parse(world->body);
+  REQUIRE(doc.contains("routes"));
+  REQUIRE(doc.contains("vehicles"));
+  // The former display-lane fields fabricated a <4 h shuttle loop that never
+  // matched the dispatch ledger's multi-hour deliveries; movement now lives
+  // only in snapshot arrays 12–14.
+  for (const auto& v : doc.at("vehicles")) {
+    CHECK(v.contains("cls"));
+    CHECK(v.contains("cargo"));
+    CHECK(v.find("loopTicks") == v.end());
+    CHECK(v.find("phase") == v.end());
+    CHECK(v.find("route") == v.end());
+  }
+  // Every edge gets a client route (any mode) so vehicles on river/sea legs
+  // can be mapped by the snapshot's route id.
+  const size_t nRoutes = doc.at("routes").size();
+  size_t namedModes = 0;
+  for (const auto& r : doc.at("routes")) {
+    const std::string mode = r.at("mode").get<std::string>();
+    // doctest chokes on chained || in CHECK; fold it into one boolean.
+    const bool knownMode =
+        mode == "road" || mode == "river" || mode == "sea";
+    CHECK(knownMode);
+    ++namedModes;
+  }
+  CHECK(nRoutes > 0);
+  CHECK(namedModes == nRoutes);
+}
+
+TEST_CASE("step: snapshot v2 serves route, progress and eta arrays") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":7})");
+
+  auto step = cli.Post("/api/sim/" + id + "/step", R"({"ticks":600})", "application/json");
+  REQUIRE(step);
+  REQUIRE(step->body.size() > 20 + 8 * 15);
+  uint32_t version = 0, count = 0;
+  std::memcpy(&version, step->body.data() + 4, 4);
+  std::memcpy(&count, step->body.data() + 16, 4);
+  CHECK(version == 2);
+  CHECK(count == 15);
+}
+
 TEST_CASE("bad requests: unknown session 404, malformed body 400") {
   TestServer srv;
   auto cli = client(srv.port);

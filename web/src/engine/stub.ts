@@ -9,9 +9,9 @@ import type { Snapshot } from './snapshot';
 import { MATERIALS, routeLength, routePointAt, stubWorld, type WorldSpec } from './world';
 
 const MAGIC = 0x53585243; // 'CRXS' little-endian
-const VERSION = 1;
+const VERSION = 2;
 const HEADER_BYTES = 20;
-const TYPES = ['f32', 'f32', 'u8', 'u8', 'u8', 'f32', 'f32', 'u8', 'u32', 'f32', 'u8', 'f32'] as const;
+const TYPES = ['f32', 'f32', 'u8', 'u8', 'u8', 'f32', 'f32', 'u8', 'u32', 'f32', 'u8', 'f32', 'u32', 'f32', 'u32'] as const;
 const TYPE_SIZE: Record<string, number> = { f32: 4, u8: 1, u32: 4 };
 
 function mulberry32(seed: number) {
@@ -61,7 +61,10 @@ export interface StubVehicleState {
   outbound: boolean;
   /** 0..1 progress through the current leg */
   legProgress: number;
-  /** tick at which the current leg ends */
+  /** client route index and 0..1 progress along that polyline (snapshot arrays 12/13) */
+  routeId: number;
+  routeProgress: number;
+  /** absolute tick at which the current leg ends (snapshot array 14) */
   etaTick: number;
   orderId: number;
   from: string;
@@ -76,6 +79,11 @@ export interface StubVehicleState {
  */
 export function stubVehicleState(world: WorldSpec, tick: number, v: number): StubVehicleState {
   const spec = world.vehicles[v];
+  // The stub animates a placeholder loop, which only makes sense for a world
+  // that declares the schedule; engine worlds never reach this function.
+  if (spec.route === undefined || spec.loopTicks === undefined || spec.phase === undefined) {
+    throw new Error(`stub world vehicle ${v} has no route schedule`);
+  }
   const route = world.routes[spec.route];
   const total = routeLength(route.points);
   const leg = Math.floor(spec.phase + tick / spec.loopTicks);
@@ -96,6 +104,8 @@ export function stubVehicleState(world: WorldSpec, tick: number, v: number): Stu
     status,
     outbound,
     legProgress: p,
+    routeId: spec.route,
+    routeProgress: s,
     etaTick: tick + Math.round((1 - p) * spec.loopTicks),
     orderId: v * 1000 + leg,
     from: route.ends[outbound ? 0 : 1],
@@ -119,6 +129,7 @@ export function encodeStub(seed: number, tick: number, outages: StubOutage[] = [
   const COUNTS = [
     4 * nTanks, nProc, nProc, nUnits, nSites, nSites,
     5 * nVeh, 2 * nVeh, nVeh, nPipes, nEdges, nMats,
+    nVeh, nVeh, nVeh, // v2: vehRoute, vehProgress, vehEta
   ];
 
   const rand = mulberry32(seed);
@@ -205,7 +216,8 @@ export function encodeStub(seed: number, tick: number, outages: StubOutage[] = [
   const urg = f32(5);
   for (let i = 0; i < nSites; i++) urg[i] = 0.5 * scurve(wobble(tick, 0.2 * i), 0, 1);
 
-  // vehicles follow their route polylines
+  // vehicles follow their route polylines; v2 movement contract (arrays
+  // 12-14) publishes the same route/progress/ETA the stub animates by.
   const veh = f32(6);
   for (let i = 0; i < nVeh; i++) {
     const st = stubVehicleState(world, tick, i);
@@ -213,6 +225,9 @@ export function encodeStub(seed: number, tick: number, outages: StubOutage[] = [
     u8(7)[2 * i] = st.status;
     u8(7)[2 * i + 1] = MATERIALS.indexOf(world.vehicles[i].cargo);
     u32(8)[i] = st.orderId;
+    u32(12)[i] = st.routeId;
+    f32(13)[i] = st.routeProgress;
+    u32(14)[i] = st.etaTick;
   }
 
   pipePhase.forEach((ph, i) => {

@@ -76,6 +76,9 @@ describe('route helpers', () => {
   it('rides vehicles along their routes in both directions', () => {
     const w = stubWorld(42);
     const v = w.vehicles[0];
+    if (v.route === undefined || v.loopTicks === undefined) {
+      throw new Error('stub world vehicles must carry a route schedule');
+    }
     const route = w.routes[v.route];
     const a = stubVehicleState(w, 0, 0);
     const half = stubVehicleState(w, v.loopTicks / 2, 0);

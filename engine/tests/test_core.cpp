@@ -8,6 +8,7 @@
 #include "crx/rng.h"
 #include "crx/scurve.h"
 
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -110,14 +111,70 @@ TEST_CASE("snapshot: header, version, tick, array count (test 9 anchor)") {
   REQUIRE(p[3] == 'S');
   uint32_t version = 0;
   std::memcpy(&version, p + 4, 4);
-  REQUIRE(version == 1);
+  REQUIRE(version == 2);
   uint64_t tick = 0;
   std::memcpy(&tick, p + 8, 8);
   REQUIRE(tick == 96);
   uint32_t count = 0;
   std::memcpy(&count, p + 16, 4);
-  REQUIRE(count == 12);
+  REQUIRE(count == 15);
   crx_destroy(s);
+}
+
+// Snapshot v2 vehicle arrays (12–14): assigned route, progress along it, and
+// the tick the current activity ends — the client's movement contract.
+TEST_CASE("snapshot: vehicle route, progress and eta arrays") {
+  crx_sim* s = makeSim(3);
+  crx_step(s, 480);  // 5 days: dispatch is past its first deliveries
+  uint32_t bytes = 0;
+  const uint8_t* p = crx_snapshot(s, &bytes);
+  uint32_t counts[15];
+  uint32_t offsets[15];
+  for (uint32_t i = 0; i < 15; ++i) std::memcpy(&counts[i], p + 20 + 8 * i, 4);
+  for (uint32_t i = 0; i < 15; ++i) std::memcpy(&offsets[i], p + 24 + 8 * i, 4);
+  const uint32_t nVeh = counts[8];
+  REQUIRE(nVeh > 0);
+  const auto route = reinterpret_cast<const uint32_t*>(p + offsets[12]);
+  const auto prog = reinterpret_cast<const float*>(p + offsets[13]);
+  const auto eta = reinterpret_cast<const uint32_t*>(p + offsets[14]);
+  const auto status = p + offsets[7];
+  bool anyOnRoute = false;
+  for (uint32_t v = 0; v < nVeh; ++v) {
+    if (route[v] != UINT32_MAX) {
+      CHECK(route[v] < counts[10]);  // a client route index, or "none"
+      CHECK(prog[v] >= 0.0f);
+      CHECK(prog[v] <= 1.0f);
+      anyOnRoute = true;
+    }
+    CHECK(status[2 * v] <= 6);  // §4.4 VehStatus range
+    if (eta[v] != UINT32_MAX) CHECK(eta[v] >= 480);  // never behind the tick
+  }
+  REQUIRE(anyOnRoute);  // five days in, some vehicle is under way
+  crx_destroy(s);
+}
+
+// Replay determinism at the API surface: two fresh sessions stepped the same
+// way must emit byte-identical snapshots (the v2 arrays are pure functions of
+// the hashed state — no wall clock).
+TEST_CASE("snapshot: identical runs produce identical snapshot bytes") {
+  std::string first;
+  for (int run = 0; run < 2; ++run) {
+    crx_sim* s = makeSim(42);
+    crx_step(s, 300);
+    crx_step(s, 300);
+    uint32_t bytes = 0;
+    const uint8_t* p = crx_snapshot(s, &bytes);
+    std::string hex;
+    hex.reserve(static_cast<size_t>(bytes) * 2);
+    for (uint32_t i = 0; i < bytes; ++i) {
+      char buf[3];
+      std::snprintf(buf, sizeof buf, "%02x", p[i]);
+      hex += buf;
+    }
+    if (run == 0) first = hex;
+    else REQUIRE(hex == first);
+    crx_destroy(s);
+  }
 }
 
 TEST_CASE("command and world json") {

@@ -44,7 +44,7 @@ bool readSnapshot(const uint8_t* data, uint32_t bytes, Snapshot& out) {
   std::memcpy(&version, data + 4, 4);
   std::memcpy(&out.tick, data + 8, 8);
   std::memcpy(&nArrays, data + 16, 4);
-  if (version != 1 || nArrays != 12) return false;
+  if (version < 1 || nArrays < 12) return false;
 
   struct Entry {
     uint32_t scalars, offset;
