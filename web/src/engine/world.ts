@@ -373,8 +373,8 @@ export function stubWorld(seed: number): WorldSpec {
       name: 'Oil Field', preset: 'OIL_FIELD', x: 120, y: 260,
       processes: [
         {
-          key: 'PRODUCTION', name: 'Oil production', designRateTph: 1125,
-          units: [{ key: 'OF-WELLS', name: 'Wellhead pad', glyph: 'reactor', trains: 4 }],
+          key: 'OIL_PRODUCTION', name: 'Oil production', designRateTph: 1125,
+          units: [{ key: 'OIL-WELLS', name: 'Wellhead pad', glyph: 'reactor', trains: 4 }],
         },
       ],
     },
@@ -389,6 +389,21 @@ export function stubWorld(seed: number): WorldSpec {
           ],
         },
         {
+          key: 'REFORMING', name: 'Catalytic reforming', designRateTph: 950,
+          units: [
+            { key: 'RF-NHT', name: 'Naphtha hydrotreater', glyph: 'reactor', trains: 1 },
+            { key: 'RF-CCR', name: 'CCR platformer', glyph: 'reactor', trains: 1 },
+            { key: 'RF-BTX', name: 'BTX splitter', glyph: 'column', trains: 1 },
+          ],
+        },
+        {
+          key: 'FCC', name: 'Fluid catalytic cracking', designRateTph: 800,
+          units: [
+            { key: 'RF-FCC', name: 'FCC reactor', glyph: 'reactor', trains: 1 },
+            { key: 'RF-FRAC', name: 'Main fractionator', glyph: 'column', trains: 1 },
+          ],
+        },
+        {
           key: 'DIESEL_HDT', name: 'Diesel hydrotreating', designRateTph: 500,
           units: [{ key: 'RF-DHT', name: 'Diesel hydrotreater', glyph: 'reactor', trains: 2 }],
         },
@@ -398,7 +413,7 @@ export function stubWorld(seed: number): WorldSpec {
       name: 'Steam Cracker', preset: 'STEAM_CRACKER', x: 340, y: 150,
       processes: [
         {
-          key: 'OLEFINS', name: 'Olefins (flex)', designRateTph: 229,
+          key: 'OLEFINS_FLEX', name: 'Olefins (flex)', designRateTph: 229,
           units: [
             { key: 'SC-FURN', name: 'Pyrolysis furnaces', glyph: 'furnace', trains: 8 },
             { key: 'SC-QUENCH', name: 'Quench and primary frac', glyph: 'column', trains: 1 },
