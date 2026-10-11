@@ -1,6 +1,8 @@
 // Chain Reaction — §5.9 events.
 #include "sim/events.h"
 
+#include "sim/words.h"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -203,8 +205,8 @@ void applyOutage(const World& world, State& state, Recorder& rec, const EventDef
     takeDown(world, state, static_cast<uint32_t>(def.unit), def.trains, def.end_tick);
     // Process and unit both: several units at a site can share a name.
     logEvent(rec, state.tick, "unit_failed", site.key, type.units[unit.slot].key,
-             site.name + ": " + type.name + ", " + type.units[unit.slot].name + " failed (" +
-                 std::to_string(def.trains) + " train(s) down)");
+             site.name + ": " + processWithin(site.name, type.name) + ", " +
+                 type.units[unit.slot].name + " failed (" + trainsDownText(def.trains) + ")");
     return;
   }
 
@@ -213,7 +215,7 @@ void applyOutage(const World& world, State& state, Recorder& rec, const EventDef
   for (uint32_t p = procs.begin; p < rangeEnd(procs); ++p)
     for (uint32_t u = world.processes[p].units.begin; u < rangeEnd(world.processes[p].units); ++u)
       takeDown(world, state, u, 255, def.end_tick);
-  logEvent(rec, state.tick, "site_shutdown", site.key, "", site.name + ": site shut down by operator");
+  logEvent(rec, state.tick, "site_shutdown", site.key, "", site.name + ": the whole site was shut down");
 }
 
 // Restores trains whose repair tick matches the expiring event.
@@ -230,7 +232,8 @@ void expireOutage(const World& world, State& state, Recorder& rec, const EventDe
       us.trains_down = 0;
       us.back_at_tick = 0;
       logEvent(rec, state.tick, "unit_repaired", site.key, type.units[unit.slot].key,
-               site.name + ": " + type.name + ", " + type.units[unit.slot].name + " repaired");
+               site.name + ": " + processWithin(site.name, type.name) + ", " +
+                   type.units[unit.slot].name + " repaired");
     }
 }
 
@@ -284,6 +287,22 @@ std::string spanText(uint64_t ticks) {
   return std::to_string(hours) + (hours == 1 ? " hour" : " hours");
 }
 
+// The stretch a route_break closes, the same words when it closes and when
+// it reopens: "River lane between Salt mine and Chlor-alkali", "Road near
+// Vinyls", or for the site-to-site form "Route between A and B".
+std::string routeText(const World& world, const EventDef& def) {
+  if (def.edge == UINT32_MAX) {
+    const std::string b = def.site2 < world.sites.size() ? world.sites[def.site2].name : "?";
+    return "Route between " + world.sites[def.site].name + " and " + b;
+  }
+  const RouteEdge& edge = world.edges[def.edge];
+  const char* what = edge.mode == crx::Mode::River ? "River lane"
+                     : edge.mode == crx::Mode::Sea ? "Sea lane" : "Road";
+  const std::string a = world.sites[nearestSite(world, edge.a)].name;
+  const std::string b = world.sites[nearestSite(world, edge.b)].name;
+  return std::string(what) + (a == b ? " near " + a : " between " + a + " and " + b);
+}
+
 // A shock starting: "Gas field: output cut to 50% for 10 days".
 void logShockStart(const World& world, const State& state, Recorder& rec, const EventDef& def) {
   const bool supply = def.type == EventDef::Type::SupplyShock;
@@ -317,20 +336,9 @@ void stepEvents(const World& world, State& state, Recorder& rec) {
     def.applied = true;
     if (def.type == EventDef::Type::RouteBreak) {
       setSpanEdges(world, state, def, false);
-      if (def.edge != UINT32_MAX) {
-        const RouteEdge& edge = world.edges[def.edge];
-        const char* what = edge.mode == crx::Mode::River ? "River lane"
-                           : edge.mode == crx::Mode::Sea ? "Sea lane" : "Road";
-        const std::string a = world.sites[nearestSite(world, edge.a)].name;
-        const std::string b = world.sites[nearestSite(world, edge.b)].name;
-        logEvent(rec, state.tick, "route_break", world.sites[def.site].key,
-                 std::to_string(def.edge),
-                 std::string(what) + " closed " + (a == b ? "near " + a : "between " + a + " and " + b));
-      } else {
-        logEvent(rec, state.tick, "route_break", world.sites[def.site].key, "",
-                 world.sites[def.site].key + " - " + world.sites[def.site2].key +
-                     ": route closed for repairs");
-      }
+      logEvent(rec, state.tick, "route_break", world.sites[def.site].key,
+               def.edge != UINT32_MAX ? std::to_string(def.edge) : std::string(),
+               routeText(world, def) + " closed for " + spanText(def.end_tick - def.start_tick));
     } else {
       applyOutage(world, state, rec, def);
     }
@@ -349,14 +357,9 @@ void stepEvents(const World& world, State& state, Recorder& rec) {
     if (def.type == EventDef::Type::RouteBreak && def.end_tick <= state.tick &&
         !spanStillHeld(state, def)) {
       setSpanEdges(world, state, def, true);
-      if (def.edge != UINT32_MAX) {
-        const RouteEdge& edge = world.edges[def.edge];
-        const char* what = edge.mode == crx::Mode::River ? "River lane"
-                           : edge.mode == crx::Mode::Sea ? "Sea lane" : "Road";
-        logEvent(rec, state.tick, "route_reopened", world.sites[def.site].key,
-                 std::to_string(def.edge),
-                 std::string(what) + " reopened near " + world.sites[def.site].name);
-      }
+      logEvent(rec, state.tick, "route_reopened", world.sites[def.site].key,
+               def.edge != UINT32_MAX ? std::to_string(def.edge) : std::string(),
+               routeText(world, def) + " reopened");
     }
   // A shock ending says so, unless another of its kind still holds the site.
   for (const EventDef& def : state.active) {
@@ -400,7 +403,8 @@ void stepEvents(const World& world, State& state, Recorder& rec) {
     us.back_at_tick = 0;
     const Site& site = world.sites[world.processes[unit.process.v].site.v];
     logEvent(rec, state.tick, "unit_repaired", site.key, type.units[unit.slot].key,
-             site.name + ": " + type.name + ", " + type.units[unit.slot].name + " repaired");
+             site.name + ": " + processWithin(site.name, type.name) + ", " +
+                 type.units[unit.slot].name + " repaired");
   }
 
   // Optional random failures (§5.9): Bernoulli per tick at trains·dt/mtbf.
@@ -419,8 +423,9 @@ void stepEvents(const World& world, State& state, Recorder& rec) {
         const Site& site = world.sites[world.processes[unit.process.v].site.v];
         logEvent(rec, state.tick, "unit_failed", site.key, slot.key,
                  site.name + ": " +
-                     world.catalog.process_types[world.processes[unit.process.v].type].name +
-                     ", " + slot.name + " failed (random)");
+                     processWithin(site.name,
+                                   world.catalog.process_types[world.processes[unit.process.v].type].name) +
+                     ", " + slot.name + " failed on its own (" + trainsDownText(1) + ")");
       }
     }
   }

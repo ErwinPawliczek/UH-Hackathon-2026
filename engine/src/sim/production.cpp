@@ -1,6 +1,8 @@
 // Chain Reaction — §5.4 production, energy booking and sink accounting.
 #include "sim/production.h"
 
+#include "sim/words.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -76,7 +78,8 @@ void stepProduction(const World& world, State& state, const std::vector<ControlD
           state.stockouts += 1;
           state.sink_starved[p] = 1;
           logEvent(rec, state.tick, "stockout", world.sites[proc.site.v].key, type.key,
-                   world.sites[proc.site.v].name + ": " + type.name + " cannot serve demand");
+                   world.sites[proc.site.v].name + " cannot get enough " +
+                       materialWord(type.basis_key));
         }
       }
       continue;
@@ -183,7 +186,8 @@ void stepProduction(const World& world, State& state, const std::vector<ControlD
       if (starved && state.sink_starved[p] == 0) {
         state.stockouts += 1;
         logEvent(rec, state.tick, "stockout", world.sites[proc.site.v].key, type.key,
-                 world.sites[proc.site.v].name + ": " + type.name + " cannot serve demand");
+                 world.sites[proc.site.v].name + " cannot get enough " +
+                     materialWord(type.basis_key));
       }
       state.sink_starved[p] = starved ? 1 : 0;
     }

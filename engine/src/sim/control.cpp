@@ -11,6 +11,7 @@
 #include "sim/adaptation.h"
 #include "sim/events.h"
 #include "sim/recorder.h"
+#include "sim/words.h"
 
 #include <algorithm>
 #include <cmath>
@@ -211,12 +212,37 @@ void stepControl(const World& world, State& state, const std::vector<TankSignals
 
     // Log the two §7.2 transitions, once each.
     if (prev != ps.status) {
-      if (ps.status == ProcStatus::Shutdown)
+      if (ps.status == ProcStatus::Shutdown) {
+        // Say why: a failed unit, too few trains left, a feed that ran out
+        // or a product with nowhere to go.
+        std::string why;
+        if (r_max <= kRateEps) {
+          why = "a unit is down";
+          for (uint32_t u = proc.units.begin; u < rangeEnd(proc.units); ++u) {
+            const UnitSlot& slot = type.units[world.units[u].slot];
+            if (static_cast<int>(slot.trains) - state.unit[u].trains_down <= 0) {
+              why = "its " + slot.name + " is down";
+              break;
+            }
+          }
+        } else if (r_max < min_rate - kRateEps) {
+          why = "with trains down it cannot hold its minimum rate";
+        } else {
+          for (const TankId t : views[p].feeds)
+            if (why.empty() && signals[t.v].f <= kRateEps)
+              why = "it ran out of " + materialWord(world.catalog, world.tanks[t.v].material);
+          for (const TankId t : views[p].products)
+            if (why.empty() && signals[t.v].h <= kRateEps)
+              why = "its " + materialWord(world.catalog, world.tanks[t.v].material) + " tank is full";
+          if (why.empty()) why = "its tanks cannot keep it running";
+        }
         logEvent(rec, state.tick, "process_shutdown", site.key, type.key,
-                 site.name + ": " + type.name + " shut down (tanks cannot sustain operation)");
+                 site.name + ": " + processWithin(site.name, type.name) + " stopped, " + why);
+      }
       if (prev == ProcStatus::Restarting && ps.status == ProcStatus::Running)
         logEvent(rec, state.tick, "process_restart", site.key, type.key,
-                 site.name + ": " + type.name + " restarted at minimum rate");
+                 site.name + ": " + processWithin(site.name, type.name) +
+                     " is running again, at minimum rate");
     }
 
     // A plant cannot pass more than its online trains allow. The ramp limits

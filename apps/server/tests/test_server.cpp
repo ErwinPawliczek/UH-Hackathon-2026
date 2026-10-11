@@ -445,7 +445,8 @@ TEST_CASE("route_break by edge: the index is the route's position in the world J
   bool closed = false;
   for (const json& e : json::parse(events->body))
     if (e.at("type") == "route_break" && e.at("unit") == std::to_string(river))
-      closed = e.at("text").get<std::string>().rfind("River lane closed", 0) == 0;
+      closed = e.at("text").get<std::string>().rfind("River lane ", 0) == 0 &&
+               e.at("text").get<std::string>().find(" closed for 2 days") != std::string::npos;
   CHECK(closed);
 
   // A rewind to before the closure forgets it, like any other disruption.

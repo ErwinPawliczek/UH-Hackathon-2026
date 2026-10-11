@@ -24,6 +24,7 @@
 #include "sim/routes.h"
 #include "sim/sim.h"
 #include "sim/window.h"
+#include "sim/words.h"
 #include "sim/worldfile.h"
 
 #include <nlohmann/json.hpp>
@@ -1846,4 +1847,94 @@ TEST_CASE("M22: supply and demand shocks say when they start and end") {
   }
   CHECK(starts == 2);  // once each, not every tick
   CHECK(ends == 2);
+}
+
+TEST_CASE("M23: the event log reads as plain sentences") {
+  // The word helpers on their own.
+  CHECK(materialWord("PE") == "polyethylene");
+  CHECK(materialWord("JET") == "jet fuel");
+  CHECK(materialWord("LPG") == "LPG");
+  CHECK(materialWord("SOME_NEW_THING") == "some new thing");
+  CHECK(vehicleWord("TRUCK_BULK") == "a bulk truck");
+  CHECK(vehicleWord("SHIP_TANK") == "a tanker");
+  CHECK(tonnesText(25.0) == "25 t");
+  CHECK(tonnesText(7.5) == "7.5 t");
+  CHECK(tonnesText(1610.4) == "1,610 t");
+  CHECK(tonnesText(40000.0) == "40,000 t");
+  CHECK(trainsDownText(1) == "1 train down");
+  CHECK(trainsDownText(2) == "2 trains down");
+  CHECK(processWithin("Process industries", "Process industries caustic demand") == "caustic demand");
+  CHECK(processWithin("Refinery", "Crude distillation") == "Crude distillation");
+  CHECK(processWithin("Packaging", "Packaging") == "Packaging");
+  CHECK(streamTitle("edc") == "Ethylene dichloride");
+  CHECK(streamTitle("wet_cl2") == "Wet chlorine gas");
+  CHECK(streamTitle("PE") == "Polyethylene");
+
+  // A run with a little of everything: a unit failure that stops a plant,
+  // a route closure, a customer running short.
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  sim->step(480);
+  const auto send = [&](const json& cmd) { return json::parse(sim->command(cmd.dump())).at("ok"); };
+  REQUIRE(send({{"type", "unit_outage"}, {"site", "REFINERY"}, {"unit", "RF-CDU"}, {"trains", 1},
+                {"duration_h", 480}}) == true);
+  REQUIRE(send({{"type", "unit_outage"}, {"site", "POLYPROPYLENE"}, {"unit", "PO-RX"}, {"trains", 2},
+                {"duration_h", 24}}) == true);
+  const uint32_t river = firstEdgeBetween(*sim, "SALT_MINE", "CHLOR_ALKALI", crx::Mode::River);
+  REQUIRE(send({{"type", "route_break"}, {"edge", river}, {"duration_h", 48}}) == true);
+  sim->step(40 * 96);
+  std::map<std::string, std::vector<std::string>> by_type;
+  for (const LogEntry& e : sim->recorder().log) by_type[e.type].push_back(e.text);
+  const auto any = [&](const char* type, const std::string& text) {
+    const auto& v = by_type[type];
+    return std::find(v.begin(), v.end(), text) != v.end();
+  };
+  const auto anyStarting = [&](const char* type, const std::string& head) {
+    for (const std::string& t : by_type[type])
+      if (t.rfind(head, 0) == 0) return true;
+    return false;
+  };
+  CHECK(any("unit_failed", "Refinery: Crude distillation, Atmospheric column failed (1 train down)"));
+  CHECK(any("unit_failed",
+            "Polypropylene: polymerisation, Gas-phase reactor failed (2 trains down)"));
+  CHECK(any("unit_repaired", "Polypropylene: polymerisation, Gas-phase reactor repaired"));
+  // The shutdown says a unit caused it, not that tanks could not sustain it.
+  CHECK(any("process_shutdown", "Refinery: Crude distillation stopped, its Atmospheric column is down"));
+  CHECK(any("process_shutdown",
+            "Polypropylene: polymerisation stopped, its Gas-phase reactor is down"));
+  CHECK(anyStarting("process_restart", "Polypropylene: polymerisation is running again"));
+  // Downstream of the crude unit the reason is the feed that ran out.
+  CHECK(any("process_shutdown", "Refinery: Fluid catalytic cracking stopped, it ran out of vacuum gasoil"));
+  // Closing and reopening use the same words for the stretch.
+  std::string closed, reopened;
+  for (const std::string& t : by_type["route_break"]) closed = t;
+  for (const std::string& t : by_type["route_reopened"]) reopened = t;
+  REQUIRE(closed.size() > 20);
+  REQUIRE(reopened.size() > 10);
+  CHECK(closed.rfind("River lane between ", 0) == 0);
+  CHECK(closed.substr(closed.size() - 18) == " closed for 2 days");
+  CHECK(reopened == closed.substr(0, closed.size() - 18) + " reopened");
+  // Customers say what they cannot get.
+  CHECK(!by_type["stockout"].empty());
+  for (const std::string& t : by_type["stockout"]) {
+    CHECK(t.find(" cannot get enough ") != std::string::npos);
+    CHECK(t.find("demand") == std::string::npos);
+  }
+  // Trucks, barges and ships are sent and deliver in words.
+  CHECK(anyStarting("dispatch", "A bulk truck was sent for 25 t of PVC from Vinyls"));
+  CHECK(anyStarting("dispatch", "A tanker was sent for "));
+  bool delivered_ok = false;
+  for (const std::string& t : by_type["delivered"])
+    delivered_ok = delivered_ok || (t.rfind("25 t of PVC delivered to Construction after ", 0) == 0 &&
+                                    t.substr(t.size() - 2) == " h");
+  CHECK(delivered_ok);
+  // Nothing in the log shouts a raw key or the old stock phrases.
+  for (const auto& entry : by_type)
+    for (const std::string& t : entry.second) {
+      CHECK(t.find("train(s)") == std::string::npos);
+      CHECK(t.find("cannot sustain") == std::string::npos);
+      CHECK(t.find("cannot serve demand") == std::string::npos);
+      CHECK(t.find("TRUCK_") == std::string::npos);
+      CHECK(t.find("\xE2\x86\x92") == std::string::npos);  // no arrows
+    }
 }
