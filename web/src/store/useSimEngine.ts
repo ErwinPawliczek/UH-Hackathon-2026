@@ -35,7 +35,17 @@ export function useSimEngine(): void {
         const world = resolveWorld(await backend.world(id), seed);
         if (cancelled) return;
         session.current = { id, backend };
-        useSim.setState({ world, events: [], lastSeq: -1, selected: null, prevSnap: null, snap: null });
+        // Expose the session's command channel to the UI (fail-this-unit
+        // controls); cleared again on session teardown below.
+        useSim.setState({
+          world,
+          events: [],
+          lastSeq: -1,
+          selected: null,
+          prevSnap: null,
+          snap: null,
+          sendCommand: (cmd) => backend.command(id, cmd),
+        });
         const snap = await backend.step(id, 0);
         if (cancelled) return;
         useSim.getState().pushSnapshot(snap);
@@ -46,6 +56,7 @@ export function useSimEngine(): void {
     return () => {
       cancelled = true;
       session.current = null;
+      useSim.setState({ sendCommand: null });
     };
   }, [backendKind, baseUrl, seed, scenario, retryNonce]);
 

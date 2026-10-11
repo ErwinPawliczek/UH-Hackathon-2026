@@ -39,6 +39,17 @@ const wobble = (tick: number, phase: number) => {
 /** Vehicle status names, index = §4.4 VehStatus enum. */
 export const VEH_STATUS = ['Idle', 'To pickup', 'Queue load', 'Loading', 'To dropoff', 'Queue unload', 'Unloading'] as const;
 
+/** A user-triggered unit_outage (§7.2 event), applied while its window is live. */
+export interface StubOutage {
+  siteIdx: number;
+  unitIdx: number;
+  procIdx: number;
+  unitKey: string;
+  trains: number;
+  startTick: number;
+  endTick: number;
+}
+
 export interface StubVehicleState {
   x: number;
   y: number;
@@ -92,7 +103,7 @@ export function stubVehicleState(world: WorldSpec, tick: number, v: number): Stu
   };
 }
 
-export function encodeStub(seed: number, tick: number): ArrayBuffer {
+export function encodeStub(seed: number, tick: number, outages: StubOutage[] = []): ArrayBuffer {
   const world = stubWorld(seed);
   const nSites = world.sites.length;
   const nTanks = world.tanks.length;
@@ -175,6 +186,19 @@ export function encodeStub(seed: number, tick: number): ArrayBuffer {
     const dhtUnitIdx = procs.slice(0, dhtProcIdx).reduce((n, p) => n + p.units.length, 0)
       + procs[dhtProcIdx].units.findIndex((u) => u.key === 'RF-DHT');
     if (tick >= outageStart && tick < outageEnd && dhtUnitIdx >= 0) trains[dhtUnitIdx] = 0;
+  }
+
+  // session outages (user-triggered §7.2 unit_outage events): trains return
+  // when the window ends; a fully-down unit idles its process
+  for (const o of outages) {
+    if (tick < o.startTick || tick >= o.endTick) continue;
+    const design = units[o.unitIdx]?.trains ?? 0;
+    const online = Math.max(0, design - o.trains);
+    trains[o.unitIdx] = online;
+    if (online === 0) {
+      rate[o.procIdx] = 0;
+      procStatus[o.procIdx] = 2; // Shutdown
+    }
   }
 
   u8(4).fill(0); // site status: all running

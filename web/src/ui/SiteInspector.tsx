@@ -1,24 +1,66 @@
-// Site inspector: process block list with per-unit train status and tanks
-// with level + days of cover. All live numbers slice the snapshot arrays via
-// the site's flattened index ranges.
+// Site inspector: header, disruption urgency, fed-by/feeds neighbour lists,
+// one ProcessCard per process (recipe flows, per-unit trains, fail control),
+// then tanks with level and days of cover. All live numbers slice the
+// snapshot arrays via the site's flattened index ranges. The chrome restyle
+// (old Tailwind classes here) lands with the parallel v3-light-chrome PR — new
+// components use the v3 CSS variables.
 
+import type { CSSProperties } from 'react';
 import { siteRanges } from '../engine/world';
-import { useSim } from '../store/sim';
-import { PROC_STATUS_LABELS } from '../scene/palette';
+import { useSim, type SimState } from '../store/sim';
+import type { Snapshot } from '../engine/snapshot';
+import type { WorldSpec } from '../engine/world';
 import { fmtDaysOfCover, fmtPct, hoursOfCover } from './format';
+import { buildProcessCards, siteNeighbors, type ProcessCardUnit } from './processCardModel';
+import { ProcessCard } from './ProcessCard';
 
-const STATUS_DOT: Record<number, string> = {
-  0: 'bg-blue',
-  1: 'bg-blue-light',
-  2: 'bg-blue',
-  3: 'bg-alarm',
-  4: 'bg-white ring-2 ring-alarm',
+const nbLabel: CSSProperties = {
+  fontFamily: 'var(--f-mono)',
+  fontSize: 10,
+  letterSpacing: '0.14em',
+  textTransform: 'uppercase',
+  color: 'var(--muted)',
 };
 
-export function SiteInspector({ siteIdx }: { siteIdx: number }) {
-  const world = useSim((s) => s.world);
-  const snap = useSim((s) => s.snap);
-  if (world === null || snap === null) return null;
+const nbValue: CSSProperties = {
+  fontFamily: 'var(--f-mono)',
+  fontVariantNumeric: 'tabular-nums',
+  fontSize: 11,
+  color: 'var(--ink)',
+};
+
+function NeighborList({ title, rows, testid }: {
+  title: string;
+  rows: { key: string; name: string; materials: string[] }[];
+  testid: string;
+}) {
+  return (
+    <div data-testid={testid} style={{ marginBottom: 6 }}>
+      <div style={nbLabel}>{title}</div>
+      {rows.length === 0 ? (
+        <div style={{ ...nbValue, color: 'var(--dim)' }}>—</div>
+      ) : (
+        rows.map((r) => (
+          <div key={r.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+            <span style={nbValue}>{r.name}</span>
+            <span style={{ ...nbValue, color: 'var(--muted)' }}>{r.materials.join(' · ')}</span>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+/**
+ * Pure presentational inspector: props in, markup out (render-testable without
+ * a DOM). The store-connected SiteInspector below feeds it live state.
+ */
+export function SiteInspectorView({ siteIdx, world, snap, sendCommand }: {
+  siteIdx: number;
+  world: WorldSpec;
+  snap: Snapshot;
+  sendCommand: SimState['sendCommand'];
+}) {
   const site = world.sites[siteIdx];
   if (site === undefined) return null;
 
@@ -28,6 +70,25 @@ export function SiteInspector({ siteIdx }: { siteIdx: number }) {
   let procRateSum = 0;
   for (let k = 0; k < ranges.procCount; k++) procRateSum += snap.procRate[ranges.procStart + k] ?? 0;
   const rateFactor = ranges.procCount > 0 ? procRateSum / ranges.procCount : 0;
+
+  const cards = buildProcessCards(world, snap, siteIdx, ranges);
+  const neighbors = siteNeighbors(world, siteIdx);
+  const fedBy = neighbors
+    .filter((n) => n.feedsMe.length > 0)
+    .map((n) => ({ key: `${n.site}-${n.name}`, name: n.name, materials: n.feedsMe }));
+  const feeds = neighbors
+    .filter((n) => n.iFeed.length > 0)
+    .map((n) => ({ key: `${n.site}-${n.name}`, name: n.name, materials: n.iFeed }));
+
+  const failUnit = (unit: ProcessCardUnit, trainsDown: number, durationHours: number) => {
+    if (sendCommand === null) return;
+    void sendCommand({ type: 'unit_outage', site: siteIdx, unit: unit.key, trains: trainsDown, duration_h: durationHours })
+      .then((res) => {
+        const r = res as { ok?: boolean; error?: string } | null;
+        if (r !== null && typeof r === 'object' && r.ok === false) console.error('unit_outage rejected:', r.error);
+      })
+      .catch((err: unknown) => console.error('unit_outage failed', err));
+  };
 
   return (
     <section className="panel pointer-events-auto max-h-[calc(100vh-9rem)] w-80 overflow-y-auto p-4 text-xs" data-testid="site-inspector">
@@ -46,44 +107,15 @@ export function SiteInspector({ siteIdx }: { siteIdx: number }) {
         </div>
       </div>
 
+      <NeighborList title="fed by" rows={fedBy} testid="site-fed-by" />
+      <NeighborList title="feeds" rows={feeds} testid="site-feeds" />
+
       <h3 className="label mb-2">Processes</h3>
-      <ul className="mb-4 space-y-2">
-        {site.processes.map((proc, k) => {
-          const procIdx = ranges.procStart + k;
-          const rate = snap.procRate[procIdx] ?? 0;
-          const status = snap.procStatus[procIdx] ?? 0;
-          return (
-            <li key={proc.key} className="rounded-sm border border-line bg-panel-2 p-2">
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-ink">{proc.key}</span>
-                <span className="flex items-center gap-2 text-muted">
-                  <span className={`inline-block h-2 w-2 rounded-full ${STATUS_DOT[status] ?? 'bg-dim'}`} />
-                  {PROC_STATUS_LABELS[status] ?? `status ${status}`}
-                </span>
-              </div>
-              <div className="mt-2 flex items-center gap-2">
-                <div className="h-1.5 flex-1 overflow-hidden rounded-sm bg-line-2">
-                  <div className="h-full rounded-sm bg-blue" style={{ width: `${rate * 100}%` }} />
-                </div>
-                <span className="data w-10 text-right text-muted">{fmtPct(rate)}</span>
-              </div>
-              <ul className="mt-2 space-y-1 text-muted">
-                {proc.units.map((unit, u) => {
-                  const trains = snap.unitTrains[ranges.unitStart + u] ?? 0;
-                  return (
-                    <li key={unit.key} className="flex justify-between">
-                      <span>{unit.key}</span>
-                      <span className="data" data-testid="unit-trains">
-                        {trains}/{unit.trains} trains
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </li>
-          );
-        })}
-      </ul>
+      <div className="mb-3 grid gap-2" data-testid="process-cards">
+        {cards.map((card) => (
+          <ProcessCard key={card.key} card={card} onFailUnit={failUnit} />
+        ))}
+      </div>
 
       <h3 className="label mb-2">Tanks</h3>
       <ul className="space-y-2">
@@ -109,4 +141,13 @@ export function SiteInspector({ siteIdx }: { siteIdx: number }) {
       </ul>
     </section>
   );
+}
+
+/** Store-connected inspector: feeds live state into the pure view. */
+export function SiteInspector({ siteIdx }: { siteIdx: number }) {
+  const world = useSim((s) => s.world);
+  const snap = useSim((s) => s.snap);
+  const sendCommand = useSim((s) => s.sendCommand);
+  if (world === null || snap === null) return null;
+  return <SiteInspectorView siteIdx={siteIdx} world={world} snap={snap} sendCommand={sendCommand} />;
 }
