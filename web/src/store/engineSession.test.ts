@@ -300,36 +300,31 @@ describe('session lifecycle', () => {
     cleanup();
   });
 
-  it('a gone session (404) mid-use recreates silently and retries the step once', async () => {
+  it("a gone session (404) mid-use ends the run and says so, without starting another behind the visitor's back", async () => {
     const backend = fakeBackend();
     let created = 0;
     backend.create.mockImplementation(async () => ({ id: `sim-${++created}` }));
     backend.step.mockImplementation(async (id: string, ticks: number) => {
-      // Opening a session steps tick 0 and must succeed; only a live step on
-      // the first session discovers it is gone server-side.
       if (id === 'sim-1' && ticks > 0) throw new HttpError(404, 'POST /api/sim/sim-1/step -> 404: unknown session');
       return decode(encodeStub(42, ticks));
     });
-    useSim.setState({ playing: true, speed: 16, error: null });
+    useSim.setState({ playing: true, speed: 16, error: null, ended: false });
 
     const cleanupOpen = openEngineSession({ kind: 'http', seed: 42, scenario: 'none' }, backend);
     await vi.waitFor(() => expect(engineSession()?.id).toBe('sim-1'));
 
     const stopLoop = startStepLoop();
-    await vi.waitFor(() => {
-      // the loop stepped the dead session and recovery replaced it
-      expect(engineSession()?.id).toBe('sim-2');
-    });
+    await vi.waitFor(() => expect(useSim.getState().ended).toBe(true));
     await flush();
 
-    expect(backend.create).toHaveBeenCalledTimes(2);
-    // the failed request was retried once on the fresh session
-    expect(backend.step).toHaveBeenCalledWith('sim-2', 16);
-    expect(useSim.getState().error).toBeNull(); // silent: no error surfaced
-    expect(useSim.getState().snap).not.toBeNull();
+    expect(useSim.getState().playing).toBe(false);
+    expect(useSim.getState().error).toBeNull(); // one plain message, not a raw error as well
+    expect(engineSession()).toBeNull();
+    expect(backend.create).toHaveBeenCalledTimes(1); // nothing recreated silently
 
     stopLoop();
     cleanupOpen();
+    useSim.setState({ ended: false });
   });
 
   it('isGoneSession matches only the gone-id statuses', () => {

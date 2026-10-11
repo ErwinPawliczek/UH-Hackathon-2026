@@ -39,10 +39,16 @@ export function SpeedControl() {
   const [draft, setDraft] = useState<string | null>(null);
   // Escape leaves the field too, and that blur must not apply what was typed.
   const cancelled = useRef(false);
+  const [rejected, setRejected] = useState(false);
 
   const apply = (text: string) => {
     const parsed = parseSpeed(text);
-    if (parsed !== null) setSpeed(parsed); // otherwise the previous value stands
+    if (parsed !== null) setSpeed(parsed);
+    else if (text.trim() !== '') {
+      // not a speed: the previous value stands, and the field flashes so the visitor sees it was refused
+      setRejected(true);
+      window.setTimeout(() => setRejected(false), 900);
+    }
     setDraft(null);
   };
 
@@ -64,7 +70,7 @@ export function SpeedControl() {
   };
 
   return (
-    <label className="btn btn-field" data-testid="speed-control" title={`Simulated hours per second, ${MIN_SPEED} to ${MAX_SPEED}`}>
+    <label className={`btn btn-field ${rejected ? 'btn-field-rejected' : ''}`} data-rejected={rejected ? 'true' : undefined} data-testid="speed-control" title={`Simulated hours per second, ${MIN_SPEED} to ${MAX_SPEED}`}>
       <span>Speed:</span>
       <input
         id="speed-input"
@@ -80,6 +86,7 @@ export function SpeedControl() {
           else apply(e.currentTarget.value);
         }}
         onKeyDown={onKeyDown}
+        aria-invalid={rejected ? true : undefined}
         aria-label={`Speed, simulated hours per second, ${MIN_SPEED} to ${MAX_SPEED}`}
         data-testid="speed-input"
       />

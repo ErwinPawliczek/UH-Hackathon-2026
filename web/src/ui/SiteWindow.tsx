@@ -39,6 +39,7 @@ import { DraggableWindow } from './DraggableWindow';
 import { openSupplyOptions } from './economyView';
 import { FlowsheetView } from './Flowsheet';
 import { SiteBadge } from './SiteIcon';
+import { SITE_LIMITED } from './eventKinds';
 import {
   buildFlowsheet, fmtHours, fmtTph, streamLabel, unitLive, type FlowUnitNode, type Flowsheet,
 } from './flowsheet';
@@ -79,7 +80,13 @@ export function stateWords(sheet: Flowsheet | null, world: WorldSpec, snap: Snap
   if (shut.length > 0) return { text: `Shut down: ${shut.join(', ')}${tail}`, alarm: true };
   if (restarting.length > 0) return { text: `Restarting: ${restarting.join(', ')}${tail}`, alarm: true };
   if (holding.length > 0) return { text: `Holding at minimum rate: ${holding.join(', ')}${tail}`, alarm: hurt > 0 };
-  if (sheet === null) return { text: 'Running', alarm: false };
+  if (sheet === null) return { text: snap.siteStatus[siteIdx] === SITE_LIMITED ? 'Running, limited' : 'Running', alarm: false };
+  if (snap.siteStatus[siteIdx] === SITE_LIMITED) {
+    // a supply or demand shock is on: say what is cut and to how much
+    const pct = Math.round(headline(sheet, world, snap).throughput * 100);
+    const what = procs.length > 0 && procs.every((p) => p.boundary === 'sink') ? 'Demand' : 'Output';
+    return { text: `${what} ${pct <= 100 ? 'cut' : 'raised'} to ${pct}%${tail}`, alarm: hurt > 0 };
+  }
   return { text: `Running at ${Math.round(headline(sheet, world, snap).throughput * 100)}% of design${tail}`, alarm: hurt > 0 };
 }
 
@@ -464,7 +471,7 @@ export function SiteWindow() {
       // the title bar is the header: icon, name and state — and still the drag handle
       header={(
         <div className="flex items-center gap-2.5" data-testid="site-header">
-          <SiteBadge preset={site.preset} icon={22} down={snap.siteStatus[siteIdx] === 3} />
+          <SiteBadge preset={site.preset} icon={22} down={snap.siteStatus[siteIdx] === 3} limited={snap.siteStatus[siteIdx] === SITE_LIMITED} />
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-base font-bold leading-tight text-ink">{site.name}</h2>
             <p className="truncate text-xs leading-tight" style={{ color: state.alarm ? 'var(--alarm)' : 'var(--muted)' }} data-testid="site-state">{state.text}</p>

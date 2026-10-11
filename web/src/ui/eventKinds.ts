@@ -4,7 +4,10 @@
 import type { SimEvent } from '../engine/events';
 
 /** Alarm red is reserved for bad states and the disruptions a visitor triggers. */
-export const CRITICAL_EVENTS = new Set(['stockout', 'unit_failed', 'process_shutdown', 'site_shutdown', 'route_break', 'scenario', 'user_outage']);
+export const CRITICAL_EVENTS = new Set(['stockout', 'unit_failed', 'process_shutdown', 'site_shutdown', 'route_break', 'supply_shock', 'demand_shock', 'scenario', 'user_outage']);
+
+/** Snapshot site status for a site that runs with its output or demand cut by a shock. */
+export const SITE_LIMITED = 5;
 
 /** Every order logs a dispatch and a delivery: hundreds a day on the full map. */
 const ROUTINE_EVENTS = new Set(['dispatch', 'delivered']);
@@ -53,7 +56,14 @@ const USER_LABELS: Record<string, string> = {
   rewind: 'back in time',
 };
 
+/** Engine entry types whose name is jargon, in plain words. */
+const ENGINE_LABELS: Record<string, string> = {
+  supply_shock: 'output cut',
+  demand_shock: 'demand changed',
+  shock_ended: 'back to normal',
+};
+
 /** An event type as a label: "route reopened", "unit failed", "you: order". */
 export function eventLabel(e: SimEvent): string {
-  return USER_LABELS[e.type] ?? e.type.replace(/_/g, ' ');
+  return USER_LABELS[e.type] ?? ENGINE_LABELS[e.type] ?? e.type.replace(/_/g, ' ');
 }

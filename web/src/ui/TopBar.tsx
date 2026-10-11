@@ -12,7 +12,7 @@
 import { useId } from 'react';
 import { useSim } from '../store/sim';
 import { SCENARIOS } from '../engine/events';
-import { scenariosFor, type EngineScenario } from '../engine/scenarios';
+import { activeScenarios, scenariosFor, type EngineScenario } from '../engine/scenarios';
 import { DropdownMenu } from './DropdownMenu';
 import { SpeedControl } from './SpeedControl';
 import { fmtClock } from './format';
@@ -77,7 +77,8 @@ export function TopBar() {
   const error = useSim((s) => s.error);
   const backendKind = useSim((s) => s.backendKind);
   const world = useSim((s) => s.world);
-  const triggered = useSim((s) => s.triggered);
+  const triggeredAll = useSim((s) => s.triggered);
+  const triggeredAt = useSim((s) => s.triggeredAt);
   const live = useSim((s) => s.sendCommand !== null);
   const logOpen = useWindows((s) => s.windows[LOG_WINDOW_ID]?.open === true);
   const rewindOpen = useWindows((s) => s.windows[REWIND_WINDOW_ID]?.open === true);
@@ -87,6 +88,8 @@ export function TopBar() {
 
   const { togglePlay, setScenario, triggerScenario } = useSim.getState();
   const engineScenarios = backendKind === 'http' ? scenariosFor(world) : [];
+  // a scenario whose duration has passed is over: the button goes back to "Scenario" and its entry can be picked again
+  const triggered = activeScenarios(engineScenarios, triggeredAll, triggeredAt, Number(tick ?? 0));
 
   return (
     // z-[60]: above every floating window (they stack from 20 up, see DraggableWindow),

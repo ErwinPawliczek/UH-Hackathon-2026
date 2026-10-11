@@ -118,3 +118,15 @@ describe('triggerScenario', () => {
     expect(s.error).toContain('unresolvable site');
   });
 });
+
+describe('activeScenarios', () => {
+  it("drops a scenario once its duration has passed, so it can be run again", async () => {
+    const { ENGINE_SCENARIOS, activeScenarios, scenarioTicks } = await import('./scenarios');
+    const refinery = ENGINE_SCENARIOS.find((x) => x.key === 'refinery_crude_unit')!;
+    expect(scenarioTicks(refinery)).toBe(168 * 4);
+    const at = { refinery_crude_unit: 100 };
+    expect(activeScenarios(ENGINE_SCENARIOS, ['refinery_crude_unit'], at, 100 + 671)).toEqual(['refinery_crude_unit']);
+    expect(activeScenarios(ENGINE_SCENARIOS, ['refinery_crude_unit'], at, 100 + 672)).toEqual([]);
+    expect(activeScenarios(ENGINE_SCENARIOS, [], {}, 5)).toEqual([]);
+  });
+});

@@ -16,7 +16,7 @@ export function useSimEngine(): void {
   // session lifecycle: reopen when any session-defining setting changes.
   // Every new run opens paused at day 0 and waits for "Start simulation".
   useEffect(() => {
-    useSim.setState({ playing: false, started: false });
+    useSim.setState({ playing: false, started: false, ended: false });
     return openEngineSession({ kind: backendKind, seed, scenario, world: worldName });
   }, [backendKind, seed, scenario, worldName, retryNonce]);
 
