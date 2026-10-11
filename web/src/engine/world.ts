@@ -125,16 +125,16 @@ export type VehicleClassKey =
 /** §3.4 vehicle classes; sceneLength is the 3D glyph size in scene units (km), sized for visibility. */
 export const VEHICLE_CLASSES: Record<
   VehicleClassKey,
-  { label: string; capacityT: number; speedKmh: number; sceneLength: number; sceneWidth: number }
+  { label: string; capacityT: number; speedKmh: number; /** t/h a bay loads or unloads it at (catalog load_t_h) */ loadTph: number; sceneLength: number; sceneWidth: number }
 > = {
-  TRUCK_TANK: { label: 'Truck (tank)', capacityT: 25, speedKmh: 70, sceneLength: 5, sceneWidth: 2.2 },
-  TRUCK_PRESS: { label: 'Truck (pressurised)', capacityT: 20, speedKmh: 70, sceneLength: 5, sceneWidth: 2.2 },
-  TRUCK_BULK: { label: 'Truck (bulk)', capacityT: 25, speedKmh: 70, sceneLength: 5, sceneWidth: 2.2 },
-  BARGE_TANK: { label: 'Barge (tank)', capacityT: 2000, speedKmh: 12, sceneLength: 11, sceneWidth: 3.5 },
-  BARGE_DRY: { label: 'Barge (dry)', capacityT: 1500, speedKmh: 12, sceneLength: 10, sceneWidth: 3.5 },
-  SHIP_TANK: { label: 'Ship (tanker)', capacityT: 40000, speedKmh: 26, sceneLength: 20, sceneWidth: 5 },
-  SHIP_GAS: { label: 'Ship (gas)', capacityT: 12000, speedKmh: 30, sceneLength: 18, sceneWidth: 5 },
-  SHIP_DRY: { label: 'Ship (bulk)', capacityT: 20000, speedKmh: 24, sceneLength: 18, sceneWidth: 5 },
+  TRUCK_TANK: { label: 'Truck (tank)', capacityT: 25, speedKmh: 70, loadTph: 50, sceneLength: 5, sceneWidth: 2.2 },
+  TRUCK_PRESS: { label: 'Truck (pressurised)', capacityT: 20, speedKmh: 70, loadTph: 40, sceneLength: 5, sceneWidth: 2.2 },
+  TRUCK_BULK: { label: 'Truck (bulk)', capacityT: 25, speedKmh: 70, loadTph: 50, sceneLength: 5, sceneWidth: 2.2 },
+  BARGE_TANK: { label: 'Barge (tank)', capacityT: 2000, speedKmh: 12, loadTph: 400, sceneLength: 11, sceneWidth: 3.5 },
+  BARGE_DRY: { label: 'Barge (dry)', capacityT: 1500, speedKmh: 12, loadTph: 300, sceneLength: 10, sceneWidth: 3.5 },
+  SHIP_TANK: { label: 'Ship (tanker)', capacityT: 40000, speedKmh: 26, loadTph: 2500, sceneLength: 20, sceneWidth: 5 },
+  SHIP_GAS: { label: 'Ship (gas)', capacityT: 12000, speedKmh: 30, loadTph: 800, sceneLength: 18, sceneWidth: 5 },
+  SHIP_DRY: { label: 'Ship (bulk)', capacityT: 20000, speedKmh: 24, loadTph: 1000, sceneLength: 18, sceneWidth: 5 },
 };
 
 export interface VehicleSpec {

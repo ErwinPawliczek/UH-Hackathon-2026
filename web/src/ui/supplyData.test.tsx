@@ -169,7 +169,11 @@ describe('SupplyDetail', () => {
 
   it('marks the usual supplier, a supplier that is down, lateness and what blocks an option', () => {
     expect(text).toMatch(/Steam cracker \(flex\) usual shut down/);
-    expect(text).toContain('too late by 7.4 h');
+    // the blocked option says why it is blocked and nothing about timing
+    expect(text).not.toContain('too late');
+    expect(html.match(/data-testid="supply-option-timing"/g)).toHaveLength(2);
+    const late = renderToStaticMarkup(<SupplyDetail detail={{ ...detail, options: [option({ door_to_door_h: 80 })] }} presetOf={() => ''} onSupplier={() => undefined} />);
+    expect(late).toContain('too late by 7.4 h');
     expect(text).toContain('Cannot be used now: the seller does not have that much free stock.');
   });
 });

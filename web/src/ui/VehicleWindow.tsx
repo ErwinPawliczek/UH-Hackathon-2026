@@ -1,6 +1,6 @@
 // The vehicle window: click a truck, barge or ship and see its trip — what it
 // is carrying, how much, where from and where to, how far it still has to go
-// and when it is due. A small draggable window that follows the selection:
+// and a live estimate of when the load gets there. A small draggable window that follows the selection:
 // it opens when a vehicle is picked and closing it clears the selection.
 //
 // The first line always says what it is doing with what and where, in plain
@@ -20,7 +20,7 @@ import { VEHICLE_CLASSES, type VehicleClassKey, type WorldSpec } from '../engine
 import { useSim } from '../store/sim';
 import { DraggableWindow } from './DraggableWindow';
 import { SiteBadge } from './SiteIcon';
-import { fmtClock, fmtDelta } from './format';
+import { fmtClock } from './format';
 import { materialName } from './materials';
 import { standingAt, vehicleLive } from './vehicleLive';
 
@@ -89,6 +89,42 @@ export function hoursToGo(d: VehicleDetail, speedKmh: number): number | null {
 export function tripProgress(d: VehicleDetail): number | null {
   if (!MOVING.has(d.status) || !(d.tripKm > 0)) return null;
   return Math.min(1, Math.max(0, 1 - d.remainingKm / d.tripKm));
+}
+
+/** "40 min", "2.1 h", "3.2 days". */
+export function fmtAbout(hours: number): string {
+  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))} min`;
+  if (hours < 48) return `${Math.round(hours * 10) / 10} h`;
+  return `${Math.round((hours / 24) * 10) / 10} days`;
+}
+
+/**
+ * A live estimate of when the load gets there, in words. It replaces the
+ * order's booked time, which is the moment of booking plus the loaded drive
+ * alone and so is passed on most trips before the vehicle has even loaded.
+ *
+ * Built from what is known now: the km left on the leg under way at the
+ * class's speed, loading and unloading at the class's bay rate, and, before
+ * the vehicle has loaded, the loaded drive as the engine worked it out at
+ * booking (etaTick - createdTick). Approximations: the class's top speed
+ * rather than each road's limit, and no time waiting for a bay.
+ */
+export function arrivalWords(d: VehicleDetail, spec: { speedKmh: number; loadTph: number } | undefined): string | null {
+  const o = d.order;
+  if (o === null || spec === undefined || !(spec.speedKmh > 0) || !(spec.loadTph > 0)) return null;
+  const drive = d.remainingKm / spec.speedKmh;
+  const onBoard = d.cargo?.tonnes ?? 0;
+  const unload = (d.cargo !== null ? onBoard : o.tonnes) / spec.loadTph;
+  const loadedDrive = Math.max(0, o.etaTick - o.createdTick) / 4;
+  switch (d.status) {
+    case 'to_dropoff': return `Arrives and unloads in about ${fmtAbout(drive + unload)}`;
+    case 'to_pickup': return `Picks up in about ${fmtAbout(drive)}, delivers about ${fmtAbout(o.tonnes / spec.loadTph + loadedDrive + unload)} after that`;
+    case 'queue_load': return `Delivers about ${fmtAbout(o.tonnes / spec.loadTph + loadedDrive + unload)} after it gets a bay to load`;
+    case 'loading': return `Delivers in about ${fmtAbout(Math.max(0, o.tonnes - onBoard) / spec.loadTph + loadedDrive + o.tonnes / spec.loadTph)}`;
+    case 'queue_unload': return `Unloads in about ${fmtAbout(unload)} once it gets a bay`;
+    case 'unloading': return `Unloaded in about ${fmtAbout(unload)}`;
+    default: return null;
+  }
 }
 
 const km = (v: number) => `${Math.round(v).toLocaleString('en-US')} km`;
@@ -210,7 +246,6 @@ export function VehicleWindow() {
   const idleAt = standingAt(world, live);
   const capacityT = d?.capacityT ?? spec?.capacityT ?? 0;
   const progress = d === null ? null : tripProgress(d);
-  const now = Number(snap.tick);
   const order = d?.order ?? null;
   const toGoH = d === null ? null : hoursToGo(d, spec?.speedKmh ?? 0);
 
@@ -255,7 +290,7 @@ export function VehicleWindow() {
               </span>
               <span className="text-muted">
                 of {km(d.tripKm)}
-                {toGoH !== null && ` · about ${toGoH < 1 ? `${Math.max(1, Math.round(toGoH * 60))} min` : `${Math.round(toGoH * 10) / 10} h`}`}
+                {toGoH !== null && ` · about ${fmtAbout(toGoH)}`}
               </span>
             </div>
             <div className="h-1.5 overflow-hidden rounded-sm bg-line-2">
@@ -282,10 +317,12 @@ export function VehicleWindow() {
                 <span className="block text-muted">placed {fmtClock(order.createdTick)}</span>
               </dd>
 
-              <dt className="label">Booked for</dt>
-              <dd className="data" data-testid="vehicle-eta">
-                {fmtClock(order.etaTick)} ({order.etaTick >= now ? fmtDelta(now, order.etaTick) : 'running late'})
-              </dd>
+              {d !== null && arrivalWords(d, spec) !== null && (
+                <>
+                  <dt className="label">Estimate</dt>
+                  <dd data-testid="vehicle-eta">{arrivalWords(d, spec)}</dd>
+                </>
+              )}
 
               {(order.priceUsdT > 0 || order.freightUsd > 0) && (
                 <>

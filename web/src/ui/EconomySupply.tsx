@@ -111,12 +111,16 @@ function OptionRow({ option, coverH, presetOf, onSupplier, onOrder, busy }: {
         <span className="data">{Math.round(option.km).toLocaleString('en-US')} km</span>
         <span className="text-muted">·</span>
         <span><span className="data">{fmtTrip(option.door_to_door_h)}</span> door to door</span>
-        <span className="text-muted">·</span>
-        {/* never colour alone: the words say it, the dot repeats it */}
-        <span className="inline-flex items-center gap-1">
-          <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${timing.ok ? 'bg-blue' : 'bg-alarm'}`} />
-          <span className={timing.ok ? '' : 'font-medium'}>{timing.words}</span>
-        </span>
+        {/* timing only for an option that can be used now; never colour alone: the words say it, the dot repeats it */}
+        {blocked === null && (
+          <>
+            <span className="text-muted">·</span>
+            <span className="inline-flex items-center gap-1" data-testid="supply-option-timing">
+              <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${timing.ok ? 'bg-blue' : 'bg-alarm'}`} />
+              <span className={timing.ok ? '' : 'font-medium'}>{timing.words}</span>
+            </span>
+          </>
+        )}
         <span className="text-muted">·</span>
         <span>can spare <span className="data">{fmtTonnes(option.free_t)}</span></span>
       </div>

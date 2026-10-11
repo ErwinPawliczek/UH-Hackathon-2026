@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { VehicleDetail } from '../engine/api';
 import { StubBackend } from '../engine/stubBackend';
 import { HttpBackend } from '../engine/httpBackend';
-import { hoursToGo, pendingSentence, tripProgress, tripSentence } from './VehicleWindow';
+import { arrivalWords, fmtAbout, hoursToGo, pendingSentence, tripProgress, tripSentence } from './VehicleWindow';
 import { materialName, materialTitle } from './materials';
 
 const base: VehicleDetail = {
@@ -129,5 +129,32 @@ describe('vehicle detail from the backends', () => {
     expect(d.remainingKm).toBeLessThanOrEqual(d.tripKm);
     expect(typeof tripSentence(d)).toBe('string');
     await expect(b.vehicle(id, 9999)).rejects.toThrow(/no such stub vehicle/);
+  });
+});
+
+describe('arrivalWords', () => {
+  const truck = { speedKmh: 70, loadTph: 50 };
+
+  it("estimates from what is left now, never from the booked time", () => {
+    // 142 km at 70 km/h, then 25 t off at 50 t/h
+    expect(arrivalWords(base, truck)).toBe('Arrives and unloads in about 2.5 h');
+    // to the pickup: 142 km; then load 0.5 h, the loaded drive as booked (60 ticks = 15 h), unload 0.5 h
+    expect(arrivalWords({ ...base, status: 'to_pickup', cargo: null }, truck))
+      .toBe('Picks up in about 2 h, delivers about 16 h after that');
+    expect(arrivalWords({ ...base, status: 'queue_load', cargo: null, remainingKm: 0 }, truck))
+      .toBe('Delivers about 16 h after it gets a bay to load');
+    expect(arrivalWords({ ...base, status: 'loading', cargo: { material: 'PE', tonnes: 10 }, remainingKm: 0 }, truck))
+      .toBe('Delivers in about 15.8 h');
+    expect(arrivalWords({ ...base, status: 'queue_unload', remainingKm: 0 }, truck)).toBe('Unloads in about 30 min once it gets a bay');
+    expect(arrivalWords({ ...base, status: 'unloading', cargo: { material: 'PE', tonnes: 5 }, remainingKm: 0 }, truck)).toBe('Unloaded in about 6 min');
+  });
+
+  it("never says running late, and says nothing when idle or when the class is unknown", () => {
+    const overdue = { ...base, order: { ...base.order!, etaTick: 1 } };
+    expect(arrivalWords(overdue, truck)).not.toMatch(/late/i);
+    expect(arrivalWords({ ...base, status: 'idle', order: null, cargo: null }, truck)).toBeNull();
+    expect(arrivalWords(base, undefined)).toBeNull();
+    expect(fmtAbout(0.01)).toBe('1 min');
+    expect(fmtAbout(60)).toBe('2.5 days');
   });
 });
