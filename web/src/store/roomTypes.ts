@@ -28,6 +28,8 @@ export interface RoomInfo {
   tick: number;
   /** simulated hours per real second while running */
   speed: number;
+  /** the world file the room runs; absent on older servers (the standard world) */
+  world?: string;
   /** whether fields and mines can be picked (the host's lobby switch); absent on older servers */
   allowSources?: boolean;
   players: RoomPlayer[];
@@ -136,3 +138,6 @@ export interface RoomSummary {
   /** average price paid per material, this session against nothing changed; absent on older servers */
   prices?: SummaryPrice[];
 }
+
+/** The world where prices drive buying, demand and plant rates. */
+export const MARKET_WORLD = 'erwin-market-v1';

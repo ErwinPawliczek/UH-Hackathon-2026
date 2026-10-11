@@ -12,7 +12,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { scenariosFor } from '../engine/scenarios';
 import { SceneCanvas } from '../scene/SceneCanvas';
 import { createRoom, roomSource, type RoomSource } from '../store/room';
-import { ownedName, playerColor, type HostAction, type RoomInfo, type RoomScore } from '../store/roomTypes';
+import { MARKET_WORLD, ownedName, playerColor, type HostAction, type RoomInfo, type RoomScore } from '../store/roomTypes';
 import { useSim } from '../store/sim';
 import { useRoom } from '../store/useRoom';
 import { useSummary } from '../store/useSummary';
@@ -56,8 +56,9 @@ function Mark() {
   );
 }
 
-function Landing({ onHost, busy, error }: { onHost: (password: string) => void; busy: boolean; error: string | null }) {
+function Landing({ onHost, busy, error }: { onHost: (password: string, market: boolean) => void; busy: boolean; error: string | null }) {
   const [password, setPassword] = useState('');
+  const [market, setMarket] = useState(false);
   return (
     <div className="flex h-dvh w-full flex-col items-center justify-center gap-6 bg-white text-ink">
       <Mark />
@@ -66,7 +67,7 @@ function Landing({ onHost, busy, error }: { onHost: (password: string) => void; 
         Everyone joins on a phone with a QR code, takes a plant, and cuts its rate, units and trading partners. You run the
         clock and break things from this screen.
       </p>
-      <form className="flex flex-col items-center gap-3" onSubmit={(e) => { e.preventDefault(); onHost(password); }}>
+      <form className="flex flex-col items-center gap-3" onSubmit={(e) => { e.preventDefault(); onHost(password, market); }}>
         <input
           type="password"
           className="w-64 border border-line bg-white px-3 py-2 text-center text-base text-ink outline-none focus:border-blue"
@@ -77,6 +78,9 @@ function Landing({ onHost, busy, error }: { onHost: (password: string) => void; 
           onChange={(e) => setPassword(e.target.value)}
           data-testid="host-password"
         />
+        <button type="button" className={`btn ${market ? 'btn-active' : ''}`} aria-pressed={market} onClick={() => setMarket(!market)} data-testid="host-market" title="Buyers time their orders by price, customers buy less when prices rise, and plants slow down when they lose money">
+          Market economics: {market ? 'on' : 'off'}
+        </button>
         <button type="submit" className="btn btn-primary btn-lg" disabled={busy} data-testid="host-create">
           {busy ? 'Opening a room…' : 'Start a session'}
         </button>
@@ -351,10 +355,10 @@ export function HostApp() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const host = (password: string) => {
+  const host = (password: string, market: boolean) => {
     setBusy(true);
     setError(null);
-    createRoom(password)
+    createRoom(password, market ? MARKET_WORLD : undefined)
       .then((h) => { sessionStorage.setItem(HOST_KEY, JSON.stringify(h)); setHosting(h); })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setBusy(false));

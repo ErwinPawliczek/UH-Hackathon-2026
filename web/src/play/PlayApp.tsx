@@ -13,12 +13,12 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { SceneCanvas } from '../scene/SceneCanvas';
 import { useSim } from '../store/sim';
 import { SiteBadge } from '../ui/SiteIcon';
-import { ownedName, playerColor } from '../store/roomTypes';
+import { MARKET_WORLD, ownedName, playerColor } from '../store/roomTypes';
 import { Sparkline } from '../ui/charts/Sparkline';
 import { fmtMomentWords } from '../ui/format';
 import { eventLabel } from '../ui/eventKinds';
 import {
-  fmtProfit, isHit, makesWords, minRate, myScore, othersWords, plantState,
+  PRICE_MAX, PRICE_MIN, PRICE_STEP, pctSigned, priceWords, fmtProfit, isHit, makesWords, minRate, myScore, othersWords, plantState,
   rankWords, rateWords, roomCode, siteUnits,
 } from './playLogic';
 import { openRoom, roomSource } from '../store/room';
@@ -297,7 +297,9 @@ function PlantSheet({ room, site, summary }: { room: RoomInfo; site: number; sum
   const seatId = usePlay((s) => s.seat?.playerId ?? null);
   const mine = summary?.players.find((p) => p.id === seatId);
   // what the slider shows: the player's own last setting until the server's figure catches up
+  const [markup, setMarkup] = useState<number | null>(null);
   const [share, setShare] = useState<number | null>(null);
+  const m = markup ?? score?.markup ?? 0;
   const units = useMemo(() => (world === null ? [] : siteUnits(world, site)), [world, site]);
   const [, tick] = useState(0);
   useEffect(() => {
@@ -350,6 +352,19 @@ function PlantSheet({ room, site, summary }: { room: RoomInfo; site: number; sum
         {error !== null ? error : waiting ? 'Sending…' : saved ? 'Saved: your settings are in.' : room.phase === 'lobby' ? 'Settings take effect when the host starts.' : ''}
       </p>
 
+      {room.world === MARKET_WORLD && (
+        <Slider
+          id="play-price"
+          label="Price"
+          value={m}
+          min={PRICE_MIN}
+          max={PRICE_MAX}
+          step={PRICE_STEP}
+          shown={pctSigned(m)}
+          words={priceWords(m)}
+          onChange={(v) => { setMarkup(v); usePlay.getState().setPrice(Math.round(v * 100) / 100); }}
+        />
+      )}
       <Slider
         id="play-rate"
         label="Rate"
