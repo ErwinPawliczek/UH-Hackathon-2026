@@ -26,7 +26,10 @@ RAW_GAS = 500.0          # gas plant design, t/h of raw gas
 FLEX_DESIGN = 44.0       # flex cracker design, t/h of furnace feed basis
 FLEX_TRAINS = [1, 1, 6]  # furnaces on ETHANE / LPG / NAPHTHA
 SINK_SHARE = 0.98        # customers take this share of what the chain can make
+PLANT_SPARE = 1.00       # plants are built to the balance. (Tried 1.10 with full product tanks:
+                         # any upset then gridlocks the whole world, so no spare here.)
 SOURCE_MARGIN = 1.03     # fields and the mine can make this much more than needed
+PRODUCT_GAP_H = None     # starting pickup gap (h) of product tanks; None keeps the engine's 4 h
 STYRENE_TO_PAINTS = 0.18 # share of styrene sold as monomer instead of made into PS
 PP_TO_PACKAGING = 0.60
 NORTH_PORT_BUNKER = 12.0 # t/h of fuel oil trucked to the north port
@@ -85,6 +88,12 @@ MAT_MODES = {"SALT": "road river sea", "LPG": "road river sea", "NAPHTHA": "road
 # sends salt, caustic and naphtha by barge and fuels, fuel oil and LPG by ship.
 # The fuel depot and Port terminal B take cargo by water only, so a short supply
 # can never turn into hundreds of truck orders for a ship-sized lane.
+#
+# Tank sizes follow one rule besides cover days: a by-product with a single
+# outlet (benzene, propylene, naphtha, solvent, cracker LPG and pygas) gets a
+# large tank, so an outage at that outlet does not shut the unit that makes it.
+# Small tanks there tie the refinery, the flex cracker and styrenics into a loop
+# that cannot restart once all three are down.
 SITES = {
     1: ("OIL_FIELD", (1, 0, 0)), 2: ("OIL_FIELD_B", (1, 0, 0)), 3: ("GAS_FIELD", (1, 0, 0)),
     4: ("SALT_MINE", (2, 1, 0)), 5: ("GAS_PLANT", (3, 1, 1)), 6: ("REFINERY", (4, 2, 2)),
@@ -232,42 +241,49 @@ def main():
             t["init_frac"] = init
         if lead is not None:
             t["lead_time_h"] = lead  # water-fed tanks: a barge or ship takes days, not hours
+        if role == "product" and PRODUCT_GAP_H:
+            t["pickup_gap_h"] = PRODUCT_GAP_H
         return t
 
-    P = lambda t, rate, trains=None: {"type": t, "design_t_h": round(rate, 3),
-                                      "trains": trains or [1]}
+    BOUNDARY = ("OIL_PRODUCTION", "GAS_PRODUCTION", "SALT_MINING")
+
+    def P(t, rate, trains=None):
+        is_sink = t.startswith(("FUEL_DEPOT_", "GAS_GRID_", "PACKAGING_", "CONSTRUCTION_",
+                                "CONSUMER_GOODS_", "PAINTS_", "PROCESS_INDUSTRIES_", "PORT_BUNKER_"))
+        scale = 1.0 if is_sink else PLANT_SPARE
+        return {"type": t, "design_t_h": round(rate * scale, 3), "trains": trains or [1]}
     half_crude = 0.5 * r["crude"] * SOURCE_MARGIN
     spec = {
         "OIL_FIELD": ([P("OIL_PRODUCTION", half_crude)], [T("CRUDE", "product", 5, 0.5)]),
         "OIL_FIELD_B": ([P("OIL_PRODUCTION", half_crude)], [T("CRUDE", "product", 5, 0.5)]),
         "GAS_FIELD": ([P("GAS_PRODUCTION", r["G"] * SOURCE_MARGIN)], [T("RAW_GAS", "product", 2, 0.5)]),
-        "SALT_MINE": ([P("SALT_MINING", r["salt"] * 1.05)], [T("SALT", "product", 10, 0.6)]),
+        "SALT_MINE": ([P("SALT_MINING", r["salt"] * SOURCE_MARGIN)], [T("SALT", "product", 10, 0.6)]),
         "GAS_PLANT": ([P("NGL_RECOVERY", r["G"])],
                       [T("RAW_GAS", "feed", 2), T("METHANE", "product", 3, 0.5),
-                       T("ETHANE", "product", 5, 0.5), T("LPG", "product", 12, 0.6),
-                       T("NAPHTHA", "product", 20, 0.6)]),
+                       T("ETHANE", "product", 20, 0.3), T("LPG", "product", 20, 0.4),
+                       T("NAPHTHA", "product", 60, 0.3)]),
         "REFINERY": ([P("CRUDE_DISTILLATION", r["crude"]), P("REFORMING", r["hn"]),
                       P("FCC", r["vgo"]), P("DIESEL_HDT", r["gasoil"])],
                      [T("CRUDE", "feed", 5), T("HEAVY_NAPHTHA", "both", 5), T("GASOIL", "both", 5),
-                      T("VGO", "both", 5), T("LPG", "product", 20, 0.5), T("NAPHTHA", "product", 14, 0.6),
+                      T("VGO", "both", 5), T("LPG", "product", 30, 0.4), T("NAPHTHA", "product", 45, 0.3),
                       T("JET", "product", 16, 0.4), T("GASOLINE", "product", 16, 0.4),
                       T("DIESEL", "product", 16, 0.4), T("FUEL_OIL", "product", 16, 0.4),
-                      T("SOLVENT", "product", 10, 0.5), T("BENZENE", "product", 10, 0.5),
-                      T("PROPYLENE", "product", 10, 0.5)]),
+                      T("SOLVENT", "product", 60, 0.3), T("BENZENE", "product", 120, 0.3),
+                      T("PROPYLENE", "product", 60, 0.3)]),
         "CRACKER_ETHANE": ([P("OLEFINS_GAS", r["E1"])],
                            [T("ETHANE", "feed", 5), T("ETHYLENE", "product", 7, 0.5),
-                            T("PROPYLENE", "product", 14, 0.4), T("LPG", "product", 14, 0.4),
+                            T("PROPYLENE", "product", 60, 0.3), T("LPG", "product", 60, 0.3),
                             # pygas is a trickle here: a big tank and a rare barge call
-                            T("BENZENE", "product", 30, 0.4), T("GASOLINE", "product", 400, 0.45),
-                            T("FUEL_OIL", "product", 30, 0.4)]),
+                            T("BENZENE", "product", 200, 0.3), T("GASOLINE", "product", 400, 0.45),
+                            T("FUEL_OIL", "product", 120, 0.3)]),
         "CRACKER_FLEX": ([P("OLEFINS_FLEX", FLEX_DESIGN, FLEX_TRAINS)],
                          [T("ETHANE", "feed", 5), T("LPG", "both", 10, 0.5, lead=TRUCK_LEAD), T("NAPHTHA", "feed", 12, 0.6, lead=64),
-                          T("ETHYLENE", "product", 7, 0.5), T("PROPYLENE", "product", 10, 0.4),
-                          T("BENZENE", "product", 14, 0.4), T("GASOLINE", "product", 40, 0.5),
-                          T("FUEL_OIL", "product", 20, 0.4)]),
+                          T("ETHYLENE", "product", 7, 0.5), T("PROPYLENE", "product", 45, 0.3),
+                          T("BENZENE", "product", 120, 0.3), T("GASOLINE", "product", 60, 0.4),
+                          T("FUEL_OIL", "product", 90, 0.3)]),
         "CHLOR_ALKALI": ([P("ELECTROLYSIS", r["chlorine"])],
                          [T("SALT", "feed", 10, 0.5, lead=56), T("CHLORINE", "product", 3, 0.4),
-                          T("CAUSTIC", "product", 10, 0.5)]),
+                          T("CAUSTIC", "product", 20, 0.4)]),
         "POLYETHYLENE": ([P("PE_POLYMERISATION", r["pe"])],
                          [T("ETHYLENE", "feed", 4), T("PE", "product", 7, 0.5)]),
         "POLYPROPYLENE": ([P("PP_POLYMERISATION", r["pp"])],
@@ -277,7 +293,7 @@ def main():
                     T("PVC", "product", 7, 0.5)]),
         "STYRENICS": ([P("STYRENE", r["styrene"]), P("PS", r["ps"])],
                       [T("BENZENE", "feed", 10, 0.5, lead=TRUCK_LEAD), T("ETHYLENE", "feed", 4), T("STYRENE", "both", 7),
-                       T("SOLVENT", "product", 30, 0.3), T("PS", "product", 7, 0.5)]),
+                       T("SOLVENT", "product", 120, 0.3), T("PS", "product", 7, 0.5)]),
         "FUEL_DEPOT": ([P("FUEL_DEPOT_GASOLINE", k * r["gasoline"]), P("FUEL_DEPOT_DIESEL", k * r["ref"]["DIESEL"]),
                         P("FUEL_DEPOT_JET", k * r["ref"]["JET"]), P("FUEL_DEPOT_LPG", k * r["lpg_to_depot"])],
                        [T("GASOLINE", "feed", 10, 0.42, lead=48), T("DIESEL", "feed", 10, 0.47, lead=48),
