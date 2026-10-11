@@ -35,6 +35,7 @@ struct RoomPlayer {
 struct RoomSite {
   std::string key, name, preset;
   bool playable = false;
+  bool source = false;  // a field or mine: makes a product from nothing, pickable only if the host allows
   std::vector<uint32_t> units;  // global unit indexes at the site
 };
 
@@ -55,6 +56,7 @@ class Room {
   crx_sim* sim;
   Phase phase = Phase::Lobby;
   double speed = 8.0;        // simulated hours per real second
+  bool allowSources = false;  // host's lobby switch: may players run fields and mines
   double tickDebt = 0.0;     // fractional ticks carried between clock beats
   std::string worldJson;     // static for the room's life
   std::string snapshot;      // the binary snapshot of the current tick

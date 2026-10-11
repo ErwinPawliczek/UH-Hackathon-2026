@@ -30,6 +30,8 @@ constexpr uint32_t kMaxTicksPerBeat = 4 * 64;  // one real second's worth at top
 const std::set<std::string> kNotPlayable = {"FUEL_DEPOT", "GAS_GRID", "PACKAGING", "CONSTRUCTION",
                                             "CONSUMER_GOODS", "PAINTS_COATINGS",
                                             "PROCESS_INDUSTRIES", "PORT_TERMINAL"};
+// Fields and mines have an output but no input: playable only when the host says so.
+const std::set<std::string> kSources = {"OIL_FIELD", "GAS_FIELD", "SALT_MINE"};
 
 std::mt19937_64& rng() {
   static std::mt19937_64 gen{std::random_device{}()};
@@ -130,6 +132,7 @@ Room::Room(std::string c, std::string h, crx_sim* s)
       rs.name = site.value("name", std::string());
       rs.preset = site.value("preset", std::string());
       rs.playable = kNotPlayable.count(rs.preset) == 0;
+      rs.source = kSources.count(rs.preset) != 0;
       if (site.contains("processes"))
         for (const json::json& proc : site["processes"])
           if (proc.contains("units"))
@@ -303,7 +306,7 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
                        {"key", s.key},
                        {"name", s.name},
                        {"preset", s.preset},
-                       {"playable", s.playable},
+                       {"playable", s.playable && (room->allowSources || !s.source)},
                        {"owner", owner[i].empty() ? json::json(nullptr) : json::json(owner[i])}});
     }
     sendJson(res, 200,
@@ -311,6 +314,7 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
                         {"phase", phaseName(room->phase)},
                         {"tick", room->tick},
                         {"speed", room->speed},
+                        {"allowSources", room->allowSources},
                         {"players", players},
                         {"sites", sites}}
                  .dump());
@@ -362,6 +366,9 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
     if (!room->sites[static_cast<size_t>(site)].playable)
       return sendJson(res, 200, no(room->sites[static_cast<size_t>(site)].name +
                                    " is a customer, not a plant to run"));
+    if (room->sites[static_cast<size_t>(site)].source && !room->allowSources)
+      return sendJson(res, 200, no(room->sites[static_cast<size_t>(site)].name +
+                                   " is a source, and the host has kept sources out of this session"));
     for (const RoomPlayer& p : room->players)
       if (p.site == site && p.id != me->id)
         return sendJson(res, 200, no(room->sites[static_cast<size_t>(site)].name +
@@ -404,6 +411,15 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
         return sendJson(res, 200, no("Give a speed from 0.1 to 64"));
       room->speed = std::clamp(b["speed"].get<double>(), kMinSpeed, kMaxSpeed);
       return sendJson(res, 200, json::json{{"ok", true}, {"speed", room->speed}}.dump());
+    }
+    if (action == "sources") {
+      if (room->phase != Room::Phase::Lobby)
+        return sendJson(res, 200, no("Which plants can be picked is set before the start"));
+      room->allowSources = b.value("allow", false);
+      if (!room->allowSources)  // anyone holding a field or mine picks again
+        for (RoomPlayer& p : room->players)
+          if (p.site >= 0 && room->sites[static_cast<size_t>(p.site)].source) p.site = -1;
+      return sendJson(res, 200, json::json{{"ok", true}, {"allowSources", room->allowSources}}.dump());
     }
     if (action == "end") {
       room->phase = Room::Phase::Ended;

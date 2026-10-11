@@ -109,7 +109,7 @@ function Players({ room }: { room: RoomInfo }) {
   );
 }
 
-function Lobby({ room, url, onStart, busy }: { room: RoomInfo; url: string; onStart: () => void; busy: boolean }) {
+function Lobby({ room, url, onStart, onSources, busy }: { room: RoomInfo; url: string; onStart: () => void; onSources: (allow: boolean) => void; busy: boolean }) {
   const free = room.sites.filter((s) => s.playable && s.owner === null).length;
   const taken = room.players.filter((p) => p.site !== null).length;
   return (
@@ -125,6 +125,9 @@ function Lobby({ room, url, onStart, busy }: { room: RoomInfo; url: string; onSt
           <div className="label mb-1">{room.players.length === 0 ? 'Players' : `${room.players.length} joined · ${taken} with a plant · ${free} plants free`}</div>
           <div className="max-h-[190px] overflow-auto"><Players room={room} /></div>
         </div>
+        <button className={`btn self-start ${room.allowSources ? 'btn-active' : ''}`} aria-pressed={room.allowSources === true} onClick={() => onSources(room.allowSources !== true)} disabled={busy} data-testid="host-sources">
+          Fields and mines: {room.allowSources ? 'can be picked' : 'not pickable'}
+        </button>
         <button className="btn btn-primary btn-lg self-stretch" onClick={onStart} disabled={busy} data-testid="host-start">Start collaborative simulation</button>
         <p className="text-xs text-muted">Plants nobody takes run themselves. Late joiners can still scan and take a free one.</p>
       </section>
@@ -245,6 +248,7 @@ function HostBar({ room, send, busy }: { room: RoomInfo; send: (a: HostAction) =
           />
         </>
       )}
+      {room.phase !== 'ended' && <button className="btn" onClick={() => { send({ action: 'scenario', command: { type: 'end_events' } }); setFired([]); }} disabled={busy} title="End every running scenario now" data-testid="host-end-events">End events</button>}
       <button className={`btn ${playersOnly ? 'btn-active' : ''}`} aria-pressed={playersOnly} onClick={() => setPlayersOnly(!playersOnly)} data-testid="host-players-only">Players only: {playersOnly ? 'on' : 'off'}</button>
       <span className="ml-auto text-xs text-muted">Code <span className="data text-ink">{room.code}</span> · {room.players.length} player{room.players.length === 1 ? '' : 's'}</span>
       {room.phase !== 'ended' && <button className="btn" onClick={() => { if (window.confirm('End the simulation for everyone?')) send({ action: 'end' }); }} data-testid="host-end">End simulation</button>}
@@ -276,7 +280,7 @@ function Game({ hosting, onLeave }: { hosting: Hosting; onLeave: () => void }) {
     <div className="relative h-dvh w-full overflow-hidden bg-white text-ink" data-testid="host-game">
       {world !== null && <SceneCanvas />}
       {room !== null && room.phase !== 'lobby' && <HostBar room={room} send={send} busy={busy} />}
-      {room !== null && room.phase === 'lobby' && <Lobby room={room} url={url} onStart={() => { send({ action: 'start' }); window.setTimeout(() => send({ action: 'speed', speed: 8 }), 400); }} busy={busy} />}
+      {room !== null && room.phase === 'lobby' && <Lobby room={room} url={url} onSources={(allow) => send({ action: 'sources', allow })} onStart={() => { send({ action: 'start' }); window.setTimeout(() => send({ action: 'speed', speed: 8 }), 400); }} busy={busy} />}
       {room !== null && room.phase !== 'lobby' && <Leaderboard source={source} room={room} />}
       {room !== null && room.phase !== 'lobby' && <Moves room={room} />}
       {(refused !== null || (error !== null && snap !== null)) && (
