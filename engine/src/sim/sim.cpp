@@ -29,8 +29,9 @@ std::unique_ptr<Sim> Sim::createGenerated(uint64_t seed, const worldgen::GenPara
   crx::Catalog catalog;
   if (!loadCatalogFromDir(CRX_DATA_DIR, catalog, error)) return nullptr;
   const crx::worldgen::CatalogView view = crx::worldgen::makeCatalogView(catalog);
-  const crx::worldgen::GenResult r =
-      crx::worldgen::generateWorld(seed, params, view, &realSimWarmup);
+  // Runtime session creation performs NO warm-up (PR #25 plan step 2): the
+  // real-Sim gate runs in tests only; structurally feasible worlds build as-is.
+  const crx::worldgen::GenResult r = crx::worldgen::generateWorld(seed, params, view);
   if (!r.ok) {
     error = "world generation rejected seed " + std::to_string(seed) + ":";
     for (const std::string& e : r.gate_errors) error += "\n  - " + e;
@@ -97,6 +98,8 @@ std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string&
   std::string preset;
   bool have_gen = false;
   worldgen::GenParams params;
+  bool have_seed = false, have_preset = false;  // config-key flags (preset pins the seed)
+  uint64_t pinned_seed = 0;
   if (config_json != nullptr && config_json[0] != '\0') {
     try {
       const json cfg = json::parse(config_json);
@@ -107,6 +110,7 @@ std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string&
             return nullptr;
           }
           it.value().get_to(seed);
+          have_seed = true;
         } else if (it.key() == "adaptation") {
           // §5.8 global switch: false gives comparison runs with all three
           // learned parameters frozen at their world initials.
@@ -136,6 +140,8 @@ std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string&
             error = "unknown world preset \"" + preset + "\"";
             return nullptr;
           }
+          have_preset = true;
+          pinned_seed = nw->seed;
           seed = nw->seed;  // a named preset pins its validated seed
         } else if (it.key() == "gen") {
           if (!it.value().is_object()) {
@@ -211,11 +217,17 @@ std::unique_ptr<Sim> Sim::createFromConfig(const char* config_json, std::string&
     error = "config gen/preset apply only to the generated default world";
     return nullptr;
   }
+  if (have_preset) seed = pinned_seed;  // --seed never overrides a preset (PR #25 plan step 3)
   std::unique_ptr<Sim> sim;
   if (world_kind == "sixsite") {
     sim = create(seed, error);
-  } else {
+  } else if (have_preset) {
+    sim = createGenerated(seed, error);  // named preset
+  } else if (have_seed) {
     sim = have_gen ? createGenerated(seed, params, error) : createGenerated(seed, error);
+  } else {
+    // No seed and no preset: the default world is a named preset (§6.7).
+    sim = createGenerated(worldgen::namedWorlds().front().seed, error);
   }
   if (sim) sim->state().adaptation = adaptation_override;
   return sim;

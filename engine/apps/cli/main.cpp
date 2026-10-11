@@ -167,6 +167,7 @@ int main(int argc, char** argv) {
   }
 
   uint64_t seed = 42;
+  bool explicit_seed = false;  // --seed present: arbitrary generator mode
   uint32_t ticks = 96 * 10;
   uint32_t report = 96;
   const char* out = "snapshot.bin";
@@ -175,6 +176,7 @@ int main(int argc, char** argv) {
   for (int i = 2; i + 1 < argc; i += 2) {
     if (std::strcmp(argv[i], "--seed") == 0) {
       seed = std::strtoull(argv[i + 1], nullptr, 10);
+      explicit_seed = true;
     } else if (std::strcmp(argv[i], "--ticks") == 0) {
       ticks = std::strtoul(argv[i + 1], nullptr, 10);
     } else if (std::strcmp(argv[i], "--report") == 0) {
@@ -224,11 +226,13 @@ int main(int argc, char** argv) {
   }
 
   json cfg;
-  cfg["seed"] = seed;
   if (world_sel == "sixsite") {
     cfg["world"] = "sixsite";
+    cfg["seed"] = seed;
   } else if (world_sel != "default") {
-    cfg["preset"] = world_sel;  // a named, warm-up-validated demo seed
+    cfg["preset"] = world_sel;  // a named preset pins its validated seed; --seed never overrides
+  } else if (explicit_seed) {
+    cfg["seed"] = seed;  // arbitrary generator mode (development)
   }
   const std::string cfg_str = cfg.dump();
   crx_sim* sim = crx_create(cfg_str.c_str());

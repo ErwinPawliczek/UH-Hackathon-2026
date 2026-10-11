@@ -239,50 +239,80 @@ std::vector<std::string> realSimWarmup(const worldgen::GeneratedWorld& gen,
     errors.push_back("warm-up: state init failed: " + err);
     return errors;
   }
+  // Corrected gate (PR #25 plan step 1). A world passes the 7-day check iff:
+  // (a) no PLANT process (boundary None) shuts down or holds at minimum for
+  // lack of feed, and (b) every END-DEMAND sink (boundary Sink, not hosted on
+  // the port) is served at >=95%. Port export and bunker sinks are optional
+  // surplus outlets — they never count as starved. A tank touching zero is
+  // not, by itself, a failure.
   constexpr uint32_t kTicksPerHour = 4;  // kTickHours = 0.25
   sim->step(35 * 24 * kTicksPerHour);    // ramp-up: start-up transient excluded
   const crx::sim::World& w = sim->world();
-  // TEMP DIAGNOSTIC: daily level trace for the dry-out suspects and their
-  // suppliers — removed once the balance question is answered.
-  if (std::getenv("CRX_WARMUP_DEBUG") != nullptr) {
-    const size_t n = w.tanks.size();
-    for (uint32_t i = 0; i < n; ++i) {
-      const std::string& sn = w.sites[w.tanks[i].site.v].name;
-      const std::string& mk = w.catalog.materials[w.tanks[i].material].key;
-      if ((sn.find("Eastbrook") != std::string::npos && (mk == "LPG" || mk == "CAUSTIC")) ||
-          (sn.find("Refinery A") != std::string::npos && mk == "LPG") ||
-          (sn.find("Chlor-alkali") != std::string::npos && mk == "CAUSTIC")) {
-        std::fprintf(stderr, "DBG tank %u %s/%s cap=%.1f level=%.2f\n", i, sn.c_str(),
-                     mk.c_str(), w.tanks[i].capacity_t, sim->state().tank[i].level_t);
+
+  const size_t nProc = w.processes.size();
+  const auto sitePresetKey = [&](uint32_t site) -> std::string {
+    const int preset = w.sites[site].preset;
+    return preset >= 0 ? w.catalog.site_presets[static_cast<size_t>(preset)].key
+                       : std::string{};
+  };
+  std::vector<char> endDemand(nProc, 0), plant(nProc, 0);
+  for (size_t p = 0; p < nProc; ++p) {
+    const crx::ProcessType& type = w.catalog.process_types[w.processes[p].type];
+    if (type.boundary == crx::Boundary::Sink &&
+        sitePresetKey(w.processes[p].site.v) != "PORT_TERMINAL")
+      endDemand[p] = 1;  // city / industry end-demand sink
+    else if (type.boundary == crx::Boundary::None) plant[p] = 1;
+    // Boundary::Source flows and port-hosted sinks (export, bunker) are
+    // model-boundary flows — optional outlets, never gated.
+  }
+
+  // A plant is feed-limited when it is not Running while one of its feed
+  // tanks (a material the type consumes through a mapped tank) is empty.
+  std::vector<std::vector<uint32_t>> feedTanks(nProc);
+  for (size_t p = 0; p < nProc; ++p) {
+    const crx::ProcessType& type = w.catalog.process_types[w.processes[p].type];
+    for (size_t m = 0; m < type.net.size(); ++m)
+      for (const auto& s : type.net[m])
+        if (s.t_per_t < 0 && s.slot < w.processes[p].tank_of.size()) {
+          const uint32_t tank = w.processes[p].tank_of[s.slot].v;
+          if (tank < w.tanks.size()) feedTanks[p].push_back(tank);
+        }
+  }
+
+  constexpr uint32_t kTailDays = 7;
+  const uint32_t kTailTicks = kTailDays * 24 * kTicksPerHour;
+  std::vector<uint32_t> starvedTicks(nProc, 0), feedLimitedTicks(nProc, 0);
+  for (uint32_t t = 0; t < kTailTicks; ++t) {
+    sim->step(1);
+    const crx::sim::State& st = sim->state();
+    for (size_t p = 0; p < nProc; ++p) {
+      if (endDemand[p] && st.sink_starved[p] != 0) ++starvedTicks[p];
+      if (plant[p] && st.proc[p].status != crx::sim::ProcStatus::Running) {
+        for (uint32_t tank : feedTanks[p])
+          if (st.tank[tank].level_t <= 1e-6) {
+            ++feedLimitedTicks[p];
+            break;
+          }
       }
     }
   }
-  for (uint32_t day = 0; day < 7; ++day) {
-    sim->step(24 * kTicksPerHour);
-    const crx::sim::State& st = sim->state();
-    if (std::getenv("CRX_WARMUP_DEBUG") != nullptr) {
-      for (uint32_t i = 0; i < w.tanks.size(); ++i) {
-        const std::string& sn = w.sites[w.tanks[i].site.v].name;
-        const std::string& mk = w.catalog.materials[w.tanks[i].material].key;
-        if ((sn.find("Eastbrook") != std::string::npos && (mk == "LPG" || mk == "CAUSTIC")) ||
-            (sn.find("Refinery A") != std::string::npos && mk == "LPG") ||
-            (sn.find("Chlor-alkali") != std::string::npos && mk == "CAUSTIC")) {
-          std::fprintf(stderr, "DBG day %u tank %u %s/%s level=%.2f\n", day, i, sn.c_str(),
-                       mk.c_str(), st.tank[i].level_t);
-        }
-      }
+
+  for (size_t p = 0; p < nProc; ++p) {
+    const std::string where = w.sites[w.processes[p].site.v].name + "/" +
+                              w.catalog.process_types[w.processes[p].type].key;
+    if (endDemand[p] && starvedTicks[p] > kTailTicks / 20) {  // service < 95%
+      const double served = 100.0 * (1.0 - static_cast<double>(starvedTicks[p]) /
+                                               static_cast<double>(kTailTicks));
+      errors.push_back("warm-up: end-demand sink " + where + " served only " +
+                       std::to_string(served) + "% over the tail");
     }
-    for (size_t p = 0; p < st.sink_starved.size(); ++p)
-      if (st.sink_starved[p] != 0)
-        errors.push_back("warm-up: " + w.sites[w.processes[p].site.v].name + "/" +
-                         w.catalog.process_types[w.processes[p].type].key +
-                         " starved during warm-up");
-    for (size_t t = 0; t < w.tanks.size(); ++t)
-      if (w.tanks[t].capacity_t > 0 && st.tank[t].level_t <= 1e-6)
-        errors.push_back("warm-up: tank " + w.tanks[t].key + " ran dry during warm-up");
+    if (plant[p] && feedLimitedTicks[p] > 0)
+      errors.push_back("warm-up: plant " + where + " feed-limited for " +
+                       std::to_string(feedLimitedTicks[p]) + " of " +
+                       std::to_string(kTailTicks) + " tail ticks");
   }
   return errors;
-}
+}  // realSimWarmup
 
 }  // namespace sim
 }  // namespace crx
