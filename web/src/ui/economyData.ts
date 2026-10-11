@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { EconomyReply, ForecastReply, SimBackend } from '../engine/api';
 import { sessionRequest } from '../store/engineSession';
 import { useSim } from '../store/sim';
+import { materialName, materialTitle } from './materials';
 
 export const TICKS_PER_DAY = 96;
 
@@ -95,33 +96,10 @@ export function nothingBroken(f: ForecastReply): boolean {
   return f.disruptions === 0 && Math.abs(f.delta.cost_usd) < 1 && f.countdown.length === 0;
 }
 
-/**
- * Material keys in plain words, as they read inside a sentence. (Local until
- * the shared ui/materials map lands; swap to that one then.)
- */
-const MATERIAL_WORDS: Record<string, string> = {
-  CRUDE: 'crude oil', RAW_GAS: 'raw gas', SALT: 'salt', METHANE: 'methane', ETHANE: 'ethane', LPG: 'LPG',
-  NAPHTHA: 'naphtha', GASOLINE: 'gasoline', JET: 'jet fuel', DIESEL: 'diesel', FUEL_OIL: 'fuel oil',
-  SOLVENT: 'solvent', BENZENE: 'benzene', ETHYLENE: 'ethylene', PROPYLENE: 'propylene', CHLORINE: 'chlorine',
-  CAUSTIC: 'caustic soda', STYRENE: 'styrene', PE: 'polyethylene', PP: 'polypropylene', PVC: 'PVC', PS: 'polystyrene',
-  VCM: 'vinyl chloride', HEAVY_NAPHTHA: 'heavy naphtha', GASOIL: 'gas oil', VGO: 'vacuum gas oil',
-};
-
-/** A material key as words: "FUEL_OIL" → "fuel oil"; an unknown key in lower case with spaces. */
-export function materialWords(key: string): string {
-  return MATERIAL_WORDS[key] ?? key.toLowerCase().replace(/_/g, ' ');
-}
-
-/** The same, to start a label: "Fuel oil", "LPG". */
-export function materialTitle(key: string): string {
-  const words = materialWords(key);
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
 /** "Polyethylene shuts down in 6 days 18 hours" / "Gas grid runs dry of methane in 3 hours" / "… is already shut down". */
 export function countdownSentence(row: ForecastReply['countdown'][number]): string {
   const dry = row.kind === 'runs_dry';
-  const what = materialWords(row.what);
+  const what = materialName(row.what);
   if (row.already) return dry ? `${row.name} is already out of ${what}` : `${row.name} is already shut down`;
   const when = fmtDuration(row.hours_from_now);
   return dry ? `${row.name} runs dry of ${what} in ${when}` : `${row.name} shuts down in ${when}`;
@@ -241,9 +219,19 @@ export function cumulative(values: number[]): number[] {
   return values.map((v) => (acc += v));
 }
 
-/** Day number of each bucket (the first bucket is day 1). */
-export function bucketDays(reply: Pick<EconomyReply, 'buckets' | 'bucketH'>): number[] {
-  return Array.from({ length: reply.buckets }, (_, i) => 1 + (i * reply.bucketH) / 24);
+/** The tick each bucket starts at: the x of its value on a chart (bucket 0 is day 1). */
+export function bucketTicks(reply: Pick<EconomyReply, 'buckets' | 'bucketH'>): number[] {
+  return Array.from({ length: reply.buckets }, (_, i) => i * reply.bucketH * 4);
+}
+
+/**
+ * How many buckets are complete. The last bucket of a reply is still filling
+ * unless the run stands exactly on a bucket boundary; a per-day chart leaves
+ * it out so its last point is a whole day, not a dip.
+ */
+export function fullBuckets(reply: Pick<EconomyReply, 'buckets' | 'bucketH' | 'tick'>): number {
+  const partial = reply.tick % (reply.bucketH * 4) !== 0;
+  return partial ? Math.max(1, reply.buckets - 1) : reply.buckets;
 }
 
 export type Measure = 'usd' | 't';
