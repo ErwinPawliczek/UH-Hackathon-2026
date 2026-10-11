@@ -119,11 +119,15 @@ struct Unit {
   double cap_per_train_t_h = 0;
 };
 
-// Tonnes a unit passes per tonne of process basis: its mode-0 recipe in-sum
-// (1 when the unit has no inputs, i.e. a source). Not 1 everywhere — a
+// Tonnes a unit passes per tonne of process basis: its recipe in-sum,
+// weighted over the modes the process runs by their share of the feed (1
+// when the unit has no inputs, i.e. a source). Not 1 everywhere — a
 // chlor-alkali cell passes 2.156 t per tonne of chlorine, a VCM unit 1.6 —
-// so unit capacity (sized here) and R_max (control) must use the same value.
-double unitThroughputPerBasis(const UnitSlot& slot);
+// and not the same in every mode: a flex cracker's pygas unit passes 0.02 t
+// per tonne on ethane and 0.22 on naphtha, so at 1:1:6 it sees 0.176. Unit
+// capacity (sized in the world builder) and R_max (control) must use the
+// same value, so both come here.
+double unitThroughputPerBasis(const UnitSlot& slot, const std::vector<double>& mode_share);
 
 struct Pipeline {
   TankId from, to;

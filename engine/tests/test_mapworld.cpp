@@ -378,13 +378,71 @@ TEST_CASE("M7: every unit passes 110 % of its process's design rate") {
         const UnitSlot& slot = type.units[w.units[u].slot];
         // What control.cpp's R_max makes of this unit with all trains online.
         const double r_max =
-            w.units[u].cap_per_train_t_h * slot.trains / unitThroughputPerBasis(slot);
+            w.units[u].cap_per_train_t_h * slot.trains /
+            unitThroughputPerBasis(slot, proc.mode_share);
         CHECK_MESSAGE(r_max == doctest::Approx(1.10 * proc.design_rate_t_h),
                       w.name << " " << w.sites[proc.site.v].key << "/" << type.key << " unit "
                              << slot.key << ": R_max " << r_max << " vs design "
                              << proc.design_rate_t_h);
       }
     }
+  }
+
+  // What the client shows as a unit's load: its inflow at the process's
+  // design rate and mode mix, against what its trains can pass. With every
+  // train online that is 100/110 for every unit, never above (the flex
+  // cracker's pygas unit read 801% while capacity was sized on the ethane
+  // mode alone and the cracker ran mostly on naphtha).
+  for (const Sim* sim : {six.get(), map.get()}) {
+    const World& w = sim->world();
+    for (size_t p = 0; p < w.processes.size(); ++p) {
+      const Process& proc = w.processes[p];
+      const ProcessType& type = w.catalog.process_types[proc.type];
+      if (type.boundary != Boundary::None) continue;
+      size_t active_modes = 0, only_mode = 0;
+      for (size_t m = 0; m < proc.mode_share.size(); ++m)
+        if (proc.mode_share[m] > 0.0) {
+          ++active_modes;
+          only_mode = m;
+        }
+      for (uint32_t u = proc.units.begin; u < rangeEnd(proc.units); ++u) {
+        const UnitSlot& slot = type.units[w.units[u].slot];
+        double inflow = 0;  // t/h into the unit at design
+        for (size_t m = 0; m < slot.by_mode.size() && m < proc.mode_share.size(); ++m)
+          for (const Stream& s : slot.by_mode[m].in)
+            inflow += s.t_per_t * proc.mode_share[m] * proc.design_rate_t_h;
+        const double capacity = w.units[u].cap_per_train_t_h * slot.trains;
+        if (inflow > 0)
+          CHECK_MESSAGE(inflow / capacity == doctest::Approx(1.0 / 1.10),
+                        w.name << " " << w.sites[proc.site.v].key << "/" << type.key << " unit "
+                               << slot.key << ": load " << inflow / capacity);
+        CHECK(inflow <= capacity * (1.0 / 1.10) * (1.0 + 1e-9));
+        // A plant that runs one mode is sized exactly as before: 110% of
+        // design times that mode's in-sum, to the last bit.
+        if (active_modes == 1) {
+          double in = 0;
+          for (const Stream& s : slot.by_mode[only_mode].in) in += s.t_per_t;
+          if (!(in > 0.0)) in = 1.0;
+          CHECK(w.units[u].cap_per_train_t_h == 1.10 * proc.design_rate_t_h * in / slot.trains);
+        }
+      }
+    }
+  }
+  // The unit that showed it: the flex cracker's pygas train, on the map's 1:1:6 mix.
+  {
+    const World& w = map->world();
+    bool found = false;
+    for (uint32_t u = 0; u < w.units.size(); ++u) {
+      const Process& proc = w.processes[w.units[u].process.v];
+      const ProcessType& type = w.catalog.process_types[proc.type];
+      if (type.key != "OLEFINS_FLEX" || type.units[w.units[u].slot].key != "SC-BTX") continue;
+      found = true;
+      const double mix = (1 * 0.02 + 1 * 0.07 + 6 * 0.22) / 8.0;  // pygas per tonne of feed
+      CHECK(unitThroughputPerBasis(type.units[w.units[u].slot], proc.mode_share) ==
+            doctest::Approx(mix));
+      CHECK(w.units[u].cap_per_train_t_h == doctest::Approx(1.10 * proc.design_rate_t_h * mix));
+    }
+    CHECK(found);
   }
 
   // And in the run: with no outage, no plant on the map is held below its
