@@ -102,9 +102,10 @@ export function nextPassWords(d: SourcingDetail): string {
   const pass = d.next_pass;
   if (pass === null) return 'This tank is not bought for: it is filled by pipeline.';
   if (pass.lots.length === 0) {
-    return d.tank.want_t > 0.5
-      ? 'The next ordering round will book nothing: no supplier can fill a load right now.'
-      : 'The next ordering round will book nothing: the tank has enough on hand and on the way.';
+    const nothing = 'The next ordering round will book nothing';
+    if (d.tank.want_t <= 0.5 || d.tank.urgency <= 0) return `${nothing}: what is on hand and on the way is above its reorder point.`;
+    if (d.options.some((o) => o.feasible_now)) return `${nothing}: it is waiting until it needs most of a vehicle load.`;
+    return `${nothing}: no supplier can fill a load right now.`;
   }
   const bySeller = new Map<string, { loads: number; tonnes: number; cls: string }>();
   for (const lot of pass.lots) {
