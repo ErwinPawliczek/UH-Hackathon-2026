@@ -16,8 +16,16 @@ import { DEFAULT_WORLD, STORAGE_KEY, dropLegacyPersistedState, backendOverride, 
 
 export type Selection = { kind: 'site' | 'vehicle'; index: number } | null;
 
-/** Ticks advanced per step (every 250 ms while playing). */
-export const SPEEDS = [4, 16, 64] as const;
+/**
+ * Ticks advanced per step (every 250 ms while playing). One tick is 15
+ * simulated minutes, so 1× runs one simulated hour per real second, 4× four
+ * hours, 16× sixteen hours and 64× 2⅔ days.
+ */
+export const SPEEDS = [1, 4, 16, 64] as const;
+/** The speed a visitor starts at: slow enough to follow one truck. */
+export const DEFAULT_SPEED = 1;
+/** Persisted-settings schema version; bump when a saved value must be reset. */
+const SETTINGS_VERSION = 1;
 export const TICKS_PER_DAY = 96;
 /** Simulation horizon in days (§9). */
 export const HORIZON_DAYS = 60;
@@ -80,7 +88,7 @@ export const useSim = create<SimState>()(
     (set, get) => ({
       seed: 42,
       scenario: 'none',
-      speed: 16,
+      speed: DEFAULT_SPEED,
 
       backendKind: 'http',
       worldName: DEFAULT_WORLD,
@@ -148,6 +156,14 @@ export const useSim = create<SimState>()(
     }),
     {
       name: STORAGE_KEY,
+      version: SETTINGS_VERSION,
+      // Version 0 was saved when 16× was the default; a visitor who never
+      // chose a speed must land on the new 1× default, so the saved speed is
+      // dropped once and everything else is kept.
+      migrate: (persisted, version) => {
+        const saved = (typeof persisted === 'object' && persisted !== null ? persisted : {}) as Record<string, unknown>;
+        return version < 1 ? { ...saved, speed: DEFAULT_SPEED } : saved;
+      },
       partialize: (s) => ({
         seed: s.seed,
         scenario: s.scenario,
