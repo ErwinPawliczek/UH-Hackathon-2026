@@ -11,6 +11,7 @@ import { SiteInspector } from './ui/SiteInspector';
 import { VehicleWindow } from './ui/VehicleWindow';
 import { RewindWindow } from './ui/RewindWindow';
 import { SitesKey } from './ui/SitesKey';
+import { EconomyWindow } from './ui/EconomyWindow';
 import { EventLog } from './ui/EventLog';
 
 function InspectorPanel() {
@@ -48,6 +49,7 @@ export default function App() {
       <EventLog />
       <RewindWindow />
       <SitesKey />
+      <EconomyWindow />
       <VehicleWindow />
 
       {/* A new run waits here, paused at day 0, until the visitor starts it. */}

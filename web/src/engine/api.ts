@@ -75,6 +75,68 @@ export interface VehicleDetail {
   tripKm: number;
 }
 
+/** One branch of a forecast: the run carried forward with, or without, what is broken now. */
+export interface ForecastBranch {
+  from_tick: number;
+  to_tick: number;
+  totals: {
+    demand_t: number; unmet_t: number; unmet_usd: number; freight_usd: number; energy_usd: number;
+    inventory_usd: number; inventory_change_usd: number; service: number; shutdown_h: number;
+  };
+  customers: {
+    site: string; site_index: number; name: string; process: string; process_name: string; material: string;
+    demand_t: number; served_t: number; service: number; dry_at_start: boolean; first_dry_tick: number | null;
+  }[];
+  plants: {
+    site: string; site_index: number; name: string; process: string; process_name: string;
+    down_h: number; down_at_start: boolean; first_down_tick: number | null;
+  }[];
+}
+
+/** POST /api/sim/{id}/forecast — what the disruptions active now cost over the coming days. */
+export interface ForecastReply {
+  tick: number;
+  to_tick: number;
+  days: number;
+  /** how many disruptions are active at `tick`; 0 means nothing is broken */
+  disruptions: number;
+  with: ForecastBranch;
+  without: ForecastBranch;
+  /** with minus without; cost_usd = unmet_usd - inventory_usd + energy_usd + freight_usd */
+  delta: {
+    cost_usd: number; unmet_usd: number; freight_usd: number; energy_usd: number; inventory_usd: number;
+    unmet_t: number; service: number; shutdown_h: number;
+  };
+  /** what stops next, soonest first */
+  countdown: {
+    site: string; site_index: number; name: string; kind: 'shuts_down' | 'runs_dry' | string; what: string;
+    tick: number; hours_from_now: number; already: boolean;
+  }[];
+}
+
+/** GET /api/sim/{id}/economy?bucket_h= — the run so far in buckets: one value per bucket in every array. */
+export interface EconomyReply {
+  tick: number;
+  bucketH: number;
+  buckets: number;
+  materials: {
+    key: string; name: string; basePriceUsdT: number;
+    orderedT: number[]; lots: number[]; spendUsd: number[]; freightUsd: number[]; deliveredT: number[];
+    priceIndex?: number[];
+  }[];
+  byClass: { cls: string; tonnes: number[]; tonneKm: number[]; freightUsd: number[] }[];
+  totals: {
+    spendUsd: number[]; freightUsd: number[]; energyUsd: number[]; unmetUsd: number[]; unmetT: number[];
+    demandT: number[]; service: number[]; shutdownH: number[];
+  };
+  plants: {
+    site: string; site_index: number; name: string; process: string; process_name: string; index: number;
+    designRateTph: number; rateMin: number[]; rateMean: number[]; rateMax: number[];
+    /** lowest rate the process can hold, as a share of design, when the engine reports it */
+    turndown?: number;
+  }[];
+}
+
 export interface SimBackend {
   readonly kind: BackendKind;
   /** POST /api/sim — create a session from config; reply { id }. */
@@ -95,6 +157,10 @@ export interface SimBackend {
   series(id: string, kind: number, refId: number): Promise<number[]>;
   /** GET /api/sim/{id}/vehicle?index= — one vehicle's cargo, order and route. */
   vehicle(id: string, index: number): Promise<VehicleDetail>;
+  /** POST /api/sim/{id}/forecast — the next `days` with and without the disruptions active now. (Optional: test doubles may leave it out.) */
+  forecast?(id: string, days: number): Promise<ForecastReply>;
+  /** GET /api/sim/{id}/economy?bucket_h= — orders, spend, freight and plant rates of the run so far, per bucket. (Optional, as above.) */
+  economy?(id: string, bucketH: number): Promise<EconomyReply>;
   /**
    * POST /api/sim/{id}/rewind — make the session exactly what it was at
    * `tick` (commands issued at that tick or later are forgotten). Afterwards
