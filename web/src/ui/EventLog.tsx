@@ -5,7 +5,8 @@
 // "Consequences" (shutdowns and restarts, stockouts, failures and repairs as
 // the engine logs them, routes closing and reopening, cancelled orders) and
 // "Deliveries" (dispatches and deliveries, hundreds a day on the full map).
-// Clicking a row selects the site it happened at.
+// Clicking a row opens the site it happened at; a row with no site (going
+// back in time, a route closing) is plain text and does not look clickable.
 //
 // Whose entry it is comes from the entry itself: the client writes the
 // visitor's actions with a negative sequence number (store/userNotes.ts);
@@ -44,6 +45,43 @@ export function logRows(events: SimEvent[], tick: number, show: LogFilter, limit
     rows.push(e);
   }
   return rows;
+}
+
+/**
+ * One line of the log. An entry that happened at a site is a button that
+ * opens that site's window; one that did not is not a button and has no
+ * hover state or pointer, so nothing looks clickable that is not.
+ */
+export function LogRow({ event: e, onOpenSite }: { event: SimEvent; onOpenSite: (site: number) => void }) {
+  const mark = eventMark(e);
+  const cells = (
+    <>
+      <span className="w-20 shrink-0 text-muted">{fmtClock(e.tick)}</span>
+      <span className="label flex w-36 shrink-0 items-center gap-1.5" style={{ color: mark.color === 'var(--alarm)' ? 'var(--alarm)' : undefined }}>
+        {mark.shape === 'diamond' && (
+          <span aria-hidden="true" className="inline-block h-2 w-2 shrink-0 rotate-45" style={{ backgroundColor: mark.color }} />
+        )}
+        {eventLabel(e)}
+      </span>
+      <span className="min-w-0 flex-1 break-words">{e.text}</span>
+    </>
+  );
+  const site = e.site;
+  if (site === undefined || !Number.isInteger(site) || site < 0) {
+    return <div className="flex w-full items-baseline gap-2 px-3 py-1.5 text-left" data-testid="log-row">{cells}</div>;
+  }
+  return (
+    <button
+      type="button"
+      className="flex w-full cursor-pointer items-baseline gap-2 px-3 py-1.5 text-left hover:bg-panel-2"
+      onClick={() => onOpenSite(site)}
+      title="Open this site"
+      data-testid="log-row"
+      data-site={site}
+    >
+      {cells}
+    </button>
+  );
 }
 
 export function EventLog() {
@@ -91,19 +129,7 @@ export function EventLog() {
       <ul className="data divide-y divide-line" data-testid="event-log">
         {rows.map((e) => (
           <li key={e.seq}>
-            <button
-              className="flex w-full cursor-pointer items-baseline gap-2 px-3 py-1.5 text-left hover:bg-panel-2"
-              onClick={() => e.site !== undefined && select({ kind: 'site', index: e.site })}
-            >
-              <span className="w-20 shrink-0 text-muted">{fmtClock(e.tick)}</span>
-              <span className="label flex w-36 shrink-0 items-center gap-1.5" style={{ color: eventMark(e).color === 'var(--alarm)' ? 'var(--alarm)' : undefined }}>
-                {eventMark(e).shape === 'diamond' && (
-                  <span aria-hidden="true" className="inline-block h-2 w-2 shrink-0 rotate-45" style={{ backgroundColor: eventMark(e).color }} />
-                )}
-                {eventLabel(e)}
-              </span>
-              <span className="min-w-0 flex-1 break-words">{e.text}</span>
-            </button>
+            <LogRow event={e} onOpenSite={(site) => select({ kind: 'site', index: site })} />
           </li>
         ))}
         {rows.length === 0 && (
