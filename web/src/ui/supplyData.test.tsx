@@ -229,3 +229,14 @@ describe('openSupplyOptions', () => {
     expect(useEconomyView.getState().supplyTank).toEqual({ site: 10, material: 'PROPYLENE' });
   });
 });
+
+describe('sellerSplitWords', () => {
+  it('says both states when the site and the product disagree, and nothing otherwise', async () => {
+    const { sellerSplitWords } = await import('./supplyData');
+    const o = (seller_state: string, seller_site_state?: string) => ({ seller_name: 'Refinery', seller_state, seller_site_state } as never);
+    expect(sellerSplitWords(o('running'), 'DIESEL')).toBeNull();
+    expect(sellerSplitWords(o('running', 'running'), 'DIESEL')).toBeNull();
+    expect(sellerSplitWords(o('running', 'shut_down'), 'DIESEL')).toBe('Refinery: partly shut down, still supplying diesel');
+    expect(sellerSplitWords(o('shut_down', 'running'), 'JET')).toContain('the unit that makes jet fuel is shut down');
+  });
+});

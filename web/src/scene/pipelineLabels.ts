@@ -128,6 +128,10 @@ const LABEL_CSS =
 
 /** Pixels the text sits off the line, to the side it reads above. */
 const OFFSET_PX = 8;
+/** Text sizes to try, as a share of full size: a name shrinks before it hides. */
+const SHRINK_STEPS = [1, 0.86, 0.74] as const;
+/** Smallest share of full size a name is drawn at when the camera pulls back. */
+const MIN_ZOOM_SCALE = 0.7;
 /** Re-choose places every this many frames (the camera moves slowly against text size). */
 const PLACE_EVERY = 8;
 
@@ -142,7 +146,7 @@ const overlaps = (a: Rect, b: Rect) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1
 
 export class PipelineLabels {
   private readonly overlay: HTMLDivElement;
-  private readonly items: { el: HTMLSpanElement; spots: LabelSpot[]; choice: number; width: number }[] = [];
+  private readonly items: { el: HTMLSpanElement; spots: LabelSpot[]; choice: number; width: number; scale: number }[] = [];
   private readonly a = new THREE.Vector3();
   private readonly b = new THREE.Vector3();
   private width = 0;
@@ -169,7 +173,7 @@ export class PipelineLabels {
       el.textContent = pipelineName(pipe.material);
       el.style.visibility = 'hidden';
       this.overlay.appendChild(el);
-      this.items.push({ el, spots: spots[i], choice: 0, width: 0 });
+      this.items.push({ el, spots: spots[i], choice: 0, width: 0, scale: 1 });
     });
   }
 
@@ -206,14 +210,14 @@ export class PipelineLabels {
    * a few small boxes along the text — one box round slanted text would
    * claim far more of the screen than the text does.
    */
-  private static boxes(p: { x: number; y: number; angle: number }, width: number): Rect[] {
+  private static boxes(p: { x: number; y: number; angle: number }, width: number, scale = 1): Rect[] {
     const cos = Math.cos(p.angle);
     const sin = Math.sin(p.angle);
     // the text sits OFFSET_PX off the line, on its upper side
     const cx = p.x + sin * OFFSET_PX;
     const cy = p.y - cos * OFFSET_PX;
     const parts = Math.max(1, Math.round(width / 22));
-    const half = 8;
+    const half = 8 * scale;
     const out: Rect[] = [];
     for (let i = 0; i < parts; i++) {
       const along = ((i + 0.5) / parts - 0.5) * width;
@@ -225,8 +229,10 @@ export class PipelineLabels {
   }
 
   /** Move every name to its pipeline on screen; call once per rendered frame. */
-  update(camera: THREE.Camera): void {
+  update(camera: THREE.Camera, zoom = 1): void {
     if (this.width <= 0 || this.height <= 0) return;
+    // pulled back, the map is smaller on screen: the names shrink with it (never grow past full size)
+    const zoomScale = Math.min(1, Math.max(MIN_ZOOM_SCALE, zoom));
     const replace = this.frame++ % PLACE_EVERY === 0;
     let taken: Rect[] = [];
     if (replace) {
@@ -241,16 +247,22 @@ export class PipelineLabels {
     }
     for (const item of this.items) {
       if (replace) {
-        item.width = item.el.offsetWidth || 7 * (item.el.textContent?.length ?? 12);
+        const full = item.el.offsetWidth || 7 * (item.el.textContent?.length ?? 12);
         let picked = -1;
-        for (let c = 0; c < item.spots.length; c++) {
-          const p = this.project(item.spots[c], camera);
-          if (p === null) continue;
-          const boxes = PipelineLabels.boxes(p, item.width);
-          if (boxes.some((box) => taken.some((t) => overlaps(box, t)))) continue;
-          taken.push(...boxes);
-          picked = c;
-          break;
+        // full size first; a name that fits nowhere tries again smaller before it hides
+        shrink: for (const step of SHRINK_STEPS) {
+          const scale = step * zoomScale;
+          for (let c = 0; c < item.spots.length; c++) {
+            const p = this.project(item.spots[c], camera);
+            if (p === null) continue;
+            const boxes = PipelineLabels.boxes(p, full * scale, scale);
+            if (boxes.some((box) => taken.some((t) => overlaps(box, t)))) continue;
+            taken.push(...boxes);
+            picked = c;
+            item.scale = scale;
+            item.width = full * scale;
+            break shrink;
+          }
         }
         item.choice = picked;
       }
@@ -262,7 +274,7 @@ export class PipelineLabels {
       item.el.style.visibility = 'visible';
       item.el.style.transform =
         `translate(${p.x.toFixed(1)}px,${p.y.toFixed(1)}px) translate(-50%,-50%) ` +
-        `rotate(${p.angle.toFixed(4)}rad) translate(0,${-OFFSET_PX}px)`;
+        `rotate(${p.angle.toFixed(4)}rad) translate(0,${-OFFSET_PX}px) scale(${item.scale.toFixed(3)})`;
     }
   }
 

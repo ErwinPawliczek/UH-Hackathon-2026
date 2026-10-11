@@ -24,7 +24,7 @@ import { useEconomyView } from './economyView';
 import { fmtMomentWords } from './format';
 import {
   blockedWords, cashWords, cutOff, fmtCover, fmtTrip, inTime, nextPassWords, optionCash, orderBookedWords, orderCommand,
-  orderRefusedWords, sortByCover, stateWords, supplierDown, tankHeadline, tankLabel, useSourcingDetail, useSourcingList,
+  orderRefusedWords, sellerSplitWords, sortByCover, stateWords, supplierDown, tankHeadline, tankLabel, useSourcingDetail, useSourcingList,
   vehicleWords, weighedWords, type PlaceOrderReply,
 } from './supplyData';
 
@@ -71,8 +71,13 @@ function TankRow({ tank, preset, chosen, onPick }: { tank: SourcingTank; preset:
   );
 }
 
-function OptionRow({ option, coverH, presetOf, onSupplier, onOrder, busy }: {
+/** Hand-placed orders kept in the list. */
+const MAX_BOOKINGS = 6;
+
+function OptionRow({ option, material, coverH, presetOf, onSupplier, onOrder, busy }: {
   option: SourcingOption;
+  /** the product this tank buys */
+  material: string;
   coverH: number | null;
   presetOf: (site: number) => string;
   onSupplier: (site: number) => void;
@@ -83,6 +88,7 @@ function OptionRow({ option, coverH, presetOf, onSupplier, onOrder, busy }: {
   const blocked = blockedWords(option);
   const timing = inTime(option, coverH);
   const sellerDown = supplierDown(option.seller_state);
+  const split = sellerSplitWords(option, material);
   // what a tonne will actually cost: the booked price plus freight
   const cash = optionCash(option);
   const weighed = weighedWords(option);
@@ -141,6 +147,7 @@ function OptionRow({ option, coverH, presetOf, onSupplier, onOrder, busy }: {
           </button>
         )}
       </div>
+      {split !== null && <div className="mt-0.5 pl-7 text-xs text-ink" data-testid="supply-option-split">{split}.</div>}
       {blocked !== null && (
         <div className="mt-0.5 flex items-center gap-1 pl-7 text-xs text-ink">
           <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full bg-alarm" />
@@ -152,7 +159,7 @@ function OptionRow({ option, coverH, presetOf, onSupplier, onOrder, busy }: {
 }
 
 /** The chosen tank: where it stands and every way to fill it. */
-export function SupplyDetail({ detail, presetOf, onSupplier, onOrder, busy, note = null }: {
+export function SupplyDetail({ detail, presetOf, onSupplier, onOrder, busy, note = null, bookings = [] }: {
   detail: SourcingDetail;
   presetOf: (site: number) => string;
   onSupplier: (site: number) => void;
@@ -160,6 +167,8 @@ export function SupplyDetail({ detail, presetOf, onSupplier, onOrder, busy, note
   busy?: boolean;
   /** what became of the last order placed for this tank */
   note?: { ok: boolean; text: string } | null;
+  /** what was booked by hand in this session, newest first */
+  bookings?: { id: number; text: string }[];
 }) {
   const t = detail.tank;
   return (
@@ -177,6 +186,14 @@ export function SupplyDetail({ detail, presetOf, onSupplier, onOrder, busy, note
           <span>{note.text}</span>
         </p>
       )}
+      {bookings.length > 0 && (
+        <div className="mt-2" data-testid="supply-bookings">
+          <div className="label mb-0.5">Booked by you this session</div>
+          <ul className="text-xs text-ink">
+            {bookings.map((b) => <li key={b.id} className="border-t border-line py-0.5">{b.text}</li>)}
+          </ul>
+        </div>
+      )}
       <div className="label mb-0.5 mt-3">
         {detail.options.length === 0 ? 'No one can supply it' : `${detail.options.length} way${detail.options.length === 1 ? '' : 's'} to supply it`}
       </div>
@@ -190,7 +207,7 @@ export function SupplyDetail({ detail, presetOf, onSupplier, onOrder, busy, note
       ) : (
         <ul>
           {detail.options.map((o) => (
-            <OptionRow key={`${o.seller}-${o.cls}`} option={o} coverH={t.cover_h} presetOf={presetOf} onSupplier={onSupplier} onOrder={onOrder} busy={busy} />
+            <OptionRow key={`${o.seller}-${o.cls}`} option={o} material={t.material} coverH={t.cover_h} presetOf={presetOf} onSupplier={onSupplier} onOrder={onOrder} busy={busy} />
           ))}
         </ul>
       )}
@@ -216,6 +233,8 @@ export function EconomySupply({ open }: { open: boolean }) {
   const [note, setNote] = useState<{ tank: string; ok: boolean; text: string } | null>(null);
   /** an order placed here that no vehicle has taken yet */
   const [awaiting, setAwaiting] = useState<{ id: number; epoch: number; tank: string; booked: string } | null>(null);
+  /** this session's hand-placed orders, newest first; emptied when the run is replaced or goes back in time */
+  const [bookings, setBookings] = useState<{ id: number; epoch: number; text: string }[]>([]);
   const canOrder = useSim((s) => s.sendCommand !== null);
   const epoch = useSim((s) => s.runEpoch);
   const list = useSourcingList(open, nonce);
@@ -259,7 +278,9 @@ export function EconomySupply({ open }: { open: boolean }) {
         if (reply.ok === true && reply.order !== undefined) {
           const booked = orderBookedWords(reply.order, option.seller_name, option.door_to_door_h);
           setNote({ tank: forTank, ok: true, text: `Booked ${booked}. Waiting for a vehicle (the next dispatch is on the hour).` });
-          setAwaiting({ id: reply.order.id, epoch: useSim.getState().runEpoch, tank: forTank, booked });
+          const at = useSim.getState();
+          setAwaiting({ id: reply.order.id, epoch: at.runEpoch, tank: forTank, booked });
+          setBookings((list) => [{ id: reply.order!.id, epoch: at.runEpoch, text: `${fmtClock(Number(at.snap?.tick ?? 0))}: ${booked}, for ${tank.name}` }, ...list].slice(0, MAX_BOOKINGS));
         } else {
           setNote({ tank: forTank, ok: false, text: `Not booked. ${orderRefusedWords(reply)}` });
         }
@@ -349,6 +370,7 @@ export function EconomySupply({ open }: { open: boolean }) {
             onOrder={canOrder ? placeOrder : undefined}
             busy={busy}
             note={note !== null && note.tank === tankKey ? note : null}
+            bookings={bookings.filter((b) => b.epoch === epoch)}
           />
         ) : (
           <p className="py-4 text-sm text-muted">

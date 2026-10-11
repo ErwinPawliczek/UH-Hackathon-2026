@@ -82,14 +82,34 @@ export function SceneCanvas() {
       useSim.getState().select(hit);
     };
     canvas.addEventListener('pointerdown', onDown);
+    // double-click on empty map: back to the start view
+    const onDouble = (e: MouseEvent) => {
+      const scene = sceneRef.current;
+      if (scene !== null && scene.pick(e.clientX, e.clientY) === null) scene.resetView();
+    };
     canvas.addEventListener('pointerup', onUp);
+    canvas.addEventListener('dblclick', onDouble);
     return () => {
+      canvas.removeEventListener('dblclick', onDouble);
       canvas.removeEventListener('pointerdown', onDown);
       canvas.removeEventListener('pointerup', onUp);
     };
   }, []);
 
   return (
-    <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-label="Simulation map" />
+    <>
+      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-label="Simulation map" />
+      <div className="absolute bottom-4 right-4 z-10">
+      <button
+        type="button"
+        className="btn"
+        onClick={() => sceneRef.current?.resetView()}
+        title="Show the whole map again (or double-click empty map)"
+        data-testid="reset-view"
+      >
+        Reset view
+      </button>
+      </div>
+    </>
   );
 }

@@ -105,6 +105,25 @@ export function countdownSentence(row: ForecastReply['countdown'][number]): stri
   return dry ? `${row.name} runs dry of ${what} in ${when}` : `${row.name} shuts down in ${when}`;
 }
 
+/** Product thrown away because its tank was full: part of the stock figure, null when there is none (or the engine does not say). */
+export function rejectedPart(f: ForecastReply): { usd: number; tonnes: number } | null {
+  const usd = f.delta.rejected_usd ?? 0;
+  if (!(Math.abs(usd) >= 1)) return null;
+  return { usd, tonnes: f.delta.rejected_t ?? 0 };
+}
+
+/** A top for a value axis whose quarter marks are round numbers: 0, 6, 12, 18, 24 hours; $0, $250, $500 … */
+export function roundCeil(max: number, step = 0): number {
+  if (step > 0) return Math.max(step, Math.ceil(max / step - 1e-9) * step);
+  if (!(max > 0)) return 1;
+  const pow = Math.pow(10, Math.floor(Math.log10(max)));
+  for (const m of [1, 1.2, 1.6, 2, 2.4, 3.2, 4, 6, 8, 10]) if (m * pow >= max - 1e-9) return m * pow;
+  return 10 * pow;
+}
+
+/** Real milliseconds a session fetch waits after the one before it, when a caller asks for a floor. */
+export const MIN_REFETCH_MS = 2000;
+
 export interface Polled<T> {
   data: T | null;
   /** why the last fetch failed, when it did */
@@ -124,10 +143,13 @@ export function useSessionData<T>(
   open: boolean,
   key: string,
   fetcher: (backend: SimBackend, id: string) => Promise<T>,
+  /** real milliseconds to leave between one fetch starting and the next (0: none) */
+  minGapMs = 0,
 ): Polled<T> {
   const epoch = useSim((s) => s.runEpoch);
   const [state, setState] = useState<Polled<T> & { epoch: number }>({ data: null, error: null, loading: false, epoch });
   const inFlight = useRef(false);
+  const lastStart = useRef(-Infinity);
   const wanted = useRef('');
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
@@ -137,13 +159,21 @@ export function useSessionData<T>(
     const want = `${epoch}|${key}`;
     wanted.current = want;
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const run = () => {
       if (inFlight.current) return; // the fetch in flight re-checks when it lands
+      const wait = lastStart.current + minGapMs - performance.now();
+      if (wait > 0) {
+        // too soon after the last one: ask once the gap has passed, for whatever is wanted then
+        if (timer === null) timer = setTimeout(() => { timer = null; if (!cancelled) run(); }, wait);
+        return;
+      }
       const asked = wanted.current;
       const askedEpoch = epoch;
       const request = sessionRequest((backend, id) => fetcherRef.current(backend, id));
       if (request === null) return;
       inFlight.current = true;
+      lastStart.current = performance.now();
       setState((s) => ({ ...s, loading: true, ...(s.epoch !== askedEpoch ? { data: null, error: null, epoch: askedEpoch } : {}) }));
       request
         .then(
@@ -163,8 +193,9 @@ export function useSessionData<T>(
     run();
     return () => {
       cancelled = true;
+      if (timer !== null) clearTimeout(timer);
     };
-  }, [open, key, epoch]);
+  }, [open, key, epoch, minGapMs]);
 
   // data from a run that is gone is never shown
   return state.epoch === epoch ? state : { data: null, error: null, loading: state.loading };
@@ -208,7 +239,7 @@ export function useEconomy(open: boolean): Polled<EconomyReply> {
   return useSessionData(open, `${day}`, (backend, id) => {
     if (backend.economy === undefined) return Promise.reject(new Error('This view needs the hosted engine.'));
     return backend.economy(id, ECONOMY_BUCKET_H);
-  });
+  }, MIN_REFETCH_MS);
 }
 
 export const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);

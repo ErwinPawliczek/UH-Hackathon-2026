@@ -106,6 +106,8 @@ export interface ForecastReply {
   delta: {
     cost_usd: number; unmet_usd: number; freight_usd: number; energy_usd: number; inventory_usd: number;
     unmet_t: number; service: number; shutdown_h: number;
+    /** product thrown away because its tank was full; already inside inventory_usd (absent on older engines) */
+    rejected_t?: number; rejected_usd?: number;
   };
   /** what stops next, soonest first */
   countdown: {
@@ -173,6 +175,8 @@ export interface SourcingOption {
   seller_index: number;
   seller_name: string;
   seller_state: SupplierState;
+  /** the seller's site as a whole, which can differ from the process that makes this product (absent on older engines) */
+  seller_site_state?: SupplierState;
   stock_t: number;
   /** stock not already promised to someone else */
   free_t: number;

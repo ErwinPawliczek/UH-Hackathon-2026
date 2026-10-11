@@ -23,7 +23,7 @@ import { SiteBadge } from './SiteIcon';
 import { EconomySupply } from './EconomySupply';
 import { EconomyProcurement, EconomyProduction } from './EconomyTabs';
 import { ECONOMY_WINDOW_AT, ECONOMY_WINDOW_ID, useEconomyView, type EconomyTab } from './economyView';
-import { costParts, countdownSentence, fmtMoney, fmtTonnes, nothingBroken, useForecast } from './economyData';
+import { costParts, rejectedPart, countdownSentence, fmtMoney, fmtTonnes, nothingBroken, useForecast } from './economyData';
 import { fmtClock, fmtMomentWords } from './format';
 import { useWindows } from './windows';
 
@@ -163,11 +163,12 @@ function Headline({ f }: { f: ForecastReply }) {
 
 function Breakdown({ f }: { f: ForecastReply }) {
   const parts = costParts(f);
+  const rejected = rejectedPart(f);
   return (
     <table className="w-full text-sm" data-testid="economy-impact-breakdown">
       <caption className="label mb-1 text-left">Where it comes from</caption>
       <tbody>
-        {parts.map((p) => (
+        {parts.flatMap((p) => [
           <tr key={p.key} className="border-t border-line">
             <th scope="row" className="w-40 py-1 pr-3 text-left font-medium text-ink">{p.label}</th>
             <td className="py-1 pr-3 text-muted">{p.note}</td>
@@ -175,8 +176,18 @@ function Breakdown({ f }: { f: ForecastReply }) {
               {p.usd > 0 ? '+' : ''}
               {fmtMoney(p.usd)}
             </td>
-          </tr>
-        ))}
+          </tr>,
+          // inside the stock figure, so it is shown under it and not added to the total
+          p.key === 'stock' && rejected !== null ? (
+            <tr key="rejected" data-testid="economy-impact-rejected">
+              <th scope="row" className="py-0.5 pl-4 pr-3 text-left text-xs font-normal text-muted">of which product rejected</th>
+              <td className="py-0.5 pr-3 text-xs text-muted">
+                {rejected.tonnes >= 0.5 ? `${fmtTonnes(rejected.tonnes)} made with nowhere to put it` : 'made with nowhere to put it'}
+              </td>
+              <td className="data py-0.5 text-right text-xs text-muted">{fmtMoney(rejected.usd)}</td>
+            </tr>
+          ) : null,
+        ])}
         <tr className="border-t border-line-2">
           <th scope="row" className="py-1 pr-3 text-left font-semibold text-ink">Total</th>
           <td />
