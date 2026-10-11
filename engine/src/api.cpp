@@ -5,9 +5,14 @@
 // one self-describing binary snapshot of typed arrays for per-frame data.
 // Array 0 carries the tank signals f/u/h, arrays 1/2 process rate and
 // status, array 3 unit trains online, arrays 6–8 vehicles, 10 edge
-// availability, 11 the market price index (§5.6).
+// availability, 11 the market price index (§5.6). Version 2 appends arrays
+// 12–14: per vehicle the client route id it is driving, progress along that
+// route's polyline, and the tick its current activity ends — the client
+// renders movement from these snapshot fields, not from any world payload
+// schedule.
 #include "crx/api.h"
 
+#include "sim/routes.h"
 #include "sim/sim.h"
 
 #include "crx/rng.h"
@@ -28,8 +33,8 @@ using crx::sim::Sim;
 
 namespace {
 
-constexpr uint32_t kSnapshotVersion = 1;
-constexpr uint32_t kNArrays = 12;
+constexpr uint32_t kSnapshotVersion = 2;
+constexpr uint32_t kNArrays = 15;
 constexpr uint32_t kHeaderBytes = 20;  // magic4 + version4 + tick8 + count4
 
 // Snapshot array table: scalar kind and count per array. Counts are
@@ -50,6 +55,10 @@ struct ApiSim {
   std::unique_ptr<Sim> sim;
   mutable std::string reply;  // scratch: points at the last command/event reply
   std::string world_json;
+  // Client route index per world edge (world JSON routes[] order), filled by
+  // buildWorldJson and read by the snapshot writer (array 12). UINT32_MAX
+  // where an edge has no client route (none today — every edge gets one).
+  std::vector<uint32_t> edge_route;
   mutable std::vector<double> kpis;
   std::vector<float> terrain;
   mutable std::vector<uint8_t> snap;
@@ -61,13 +70,14 @@ struct ApiSim {
     sim = Sim::create(seed, error);
     if (sim == nullptr) throw std::runtime_error(error);
     buildTerrain(seed, terrain);
-    buildWorldJson(*sim, terrain, world_json);
+    buildWorldJson(*sim, terrain, world_json, edge_route);
   }
 
   ApiSim(const ApiSim& other)
       : sim(std::make_unique<Sim>(*other.sim)),
         reply(other.reply),
         world_json(other.world_json),
+        edge_route(other.edge_route),
         kpis(other.kpis),
         terrain(other.terrain),
         snap{},
@@ -75,7 +85,7 @@ struct ApiSim {
   ApiSim& operator=(const ApiSim&) = delete;
 
   static void buildWorldJson(const Sim& s, const std::vector<float>& terrain,
-                             std::string& out);
+                             std::string& out, std::vector<uint32_t>& edge_route);
   static void buildTerrain(uint64_t seed, std::vector<float>& out);
 };
 
@@ -83,7 +93,7 @@ ApiSim* asApi(crx_sim* s) { return reinterpret_cast<ApiSim*>(s); }
 const ApiSim* asApi(const crx_sim* s) { return reinterpret_cast<const ApiSim*>(s); }
 
 void ApiSim::buildWorldJson(const Sim& s, const std::vector<float>& terrain,
-                            std::string& out) {
+                            std::string& out, std::vector<uint32_t>& edge_route) {
   const auto& w = s.world();
   const auto& cat = w.catalog;
   json mats = json::array();
@@ -140,21 +150,24 @@ void ApiSim::buildWorldJson(const Sim& s, const std::vector<float>& terrain,
                      {"drawTph", tank.design_out_t_h}});
   }
 
-  // One route per road edge, in edge order; fleet lanes reference these below.
-  std::vector<uint32_t> roadRoute(w.edges.size(), UINT32_MAX);
+  // One route per edge, in edge order, every mode — vehicles (trucks, barges,
+  // ships alike) map their current edge to a client route by this index. The
+  // edge → route mapping lands in edge_route for the snapshot writer.
   json routes = json::array();
-  const auto roadMode = crx::sim::modeIndex(crx::Mode::Road);
+  edge_route.assign(w.edges.size(), UINT32_MAX);
   for (uint32_t e = 0; e < w.edges.size(); ++e) {
     const auto& edge = w.edges[e];
-    if (crx::sim::modeIndex(edge.mode) != roadMode) continue;
-    roadRoute[e] = static_cast<uint32_t>(routes.size());
     const int sa = w.nodes[edge.a].site, sb = w.nodes[edge.b].site;
+    const char* mode = edge.mode == crx::Mode::River
+                           ? "river"
+                           : edge.mode == crx::Mode::Sea ? "sea" : "road";
     json pts = json::array();
     for (uint32_t i = edge.polyline.begin;
          i < edge.polyline.begin + edge.polyline.count; ++i)
       pts.push_back({w.polyline_xy[2 * i], w.polyline_xy[2 * i + 1]});
+    edge_route[e] = static_cast<uint32_t>(routes.size());
     routes.push_back(
-        {{"mode", "road"},
+        {{"mode", mode},
          {"ends", {sa >= 0 ? w.sites[sa].name : "off-map",
                    sb >= 0 ? w.sites[sb].name : "off-map"}},
          {"sites", {sa >= 0 ? json(sa) : json(nullptr),
@@ -178,60 +191,25 @@ void ApiSim::buildWorldJson(const Sim& s, const std::vector<float>& terrain,
                                                 w.sites[to.site.v].y_km})})}});
   }
 
+  // Fleet manifest only: class and the commodity lane's cargo. Live movement
+  // (assigned route, progress, ETA) is snapshot state — arrays 12–14 — never
+  // a world payload schedule. The former "static display lane" fields
+  // (route/loopTicks/phase) fabricated a <4 h shuttle loop that contradicted
+  // the dispatch ledger's multi-hour deliveries; they are gone.
   json vehicles = json::array();
   for (const auto& f : w.fleet) {
     const auto& vc = cat.vehicle_classes[f.cls];
-    // Static display lane: the first contract the vehicle can serve from its
-    // home site, mapped to that span's road edge. Live dispatch (and the
-    // snapshot arrays) own the actual movement; this only seats the sprite.
-    uint32_t route = UINT32_MAX;
-    std::string cargo;
-    const int home = static_cast<int>(f.home.v);
-    const uint32_t homeNode = w.sites[f.home.v].node[roadMode];
+    std::string cargo = cat.materials.front().key;
     for (const auto& c : w.contracts) {
       const auto& from = w.tanks[c.seller.v];
       const auto& to = w.tanks[c.buyer.v];
-      if (from.site.v != static_cast<uint32_t>(home) &&
-          to.site.v != static_cast<uint32_t>(home))
-        continue;
-      const int other = from.site.v == static_cast<uint32_t>(home)
-                            ? to.site.v
-                            : from.site.v;
-      cargo = cat.materials[from.material].key;
-      const uint32_t otherNode = w.sites[other].node[roadMode];
-      for (uint32_t e = 0; e < w.edges.size() && route == UINT32_MAX; ++e) {
-        if (roadRoute[e] == UINT32_MAX) continue;
-        const auto& edge = w.edges[e];
-        if ((edge.a == homeNode && edge.b == otherNode) ||
-            (edge.a == otherNode && edge.b == homeNode))
-          route = roadRoute[e];
+      if (from.site.v == static_cast<uint32_t>(f.home.v) ||
+          to.site.v == static_cast<uint32_t>(f.home.v)) {
+        cargo = cat.materials[from.material].key;
+        break;
       }
-      break;
     }
-    if (route == UINT32_MAX) {
-      // No contract lane: park the vehicle on the first road edge at home.
-      for (uint32_t e = 0; e < w.edges.size() && route == UINT32_MAX; ++e) {
-        if (roadRoute[e] == UINT32_MAX) continue;
-        if (w.edges[e].a == homeNode || w.edges[e].b == homeNode)
-          route = roadRoute[e];
-      }
-      if (route == UINT32_MAX) route = 0;
-    }
-    if (cargo.empty()) cargo = cat.materials.front().key;
-    // One leg = one-way traversal of the lane's edge, in ticks.
-    double hours = 0;
-    for (uint32_t e = 0; e < w.edges.size(); ++e) {
-      if (roadRoute[e] != route) continue;
-      hours = w.edges[e].length_km / std::max(1.0, w.edges[e].speed_kmh);
-      break;
-    }
-    const double loopTicks =
-        std::max(1.0, std::ceil(hours / crx::sim::kTickHours));
-    vehicles.push_back({{"cls", vc.key},
-                        {"cargo", cargo},
-                        {"route", route},
-                        {"loopTicks", loopTicks},
-                        {"phase", 0.0}});
+    vehicles.push_back({{"cls", vc.key}, {"cargo", cargo}});
   }
 
   json heights = json::array();
@@ -310,7 +288,8 @@ void ApiSim::buildTerrain(uint64_t seed, std::vector<float>& out) {
   }
 }
 
-void buildSnapshot(const Sim& sim, std::vector<uint8_t>& snap) {
+void buildSnapshot(const Sim& sim, const std::vector<uint32_t>& edge_route,
+                   std::vector<uint8_t>& snap) {
   const auto& w = sim.world();
   const auto& st = sim.state();
   const auto& signals = sim.signals;
@@ -337,6 +316,9 @@ void buildSnapshot(const Sim& sim, std::vector<uint8_t>& snap) {
       {kF32, nPipes},      // 9 pipelines: flow/capacity
       {kU8, nEdges},       // 10 edges: open flag
       {kF32, nMats},       // 11 price index
+      {kU32, nVeh},        // 12 vehicles: client route id (v2, UINT32_MAX = none)
+      {kF32, nVeh},        // 13 vehicles: progress 0..1 along that route (v2)
+      {kU32, nVeh},        // 14 vehicles: tick the current activity ends (v2)
   };
 
   uint32_t offset = align4(kHeaderBytes + 8 * kNArrays);
@@ -416,6 +398,60 @@ void buildSnapshot(const Sim& sim, std::vector<uint8_t>& snap) {
     vehB[2 * v + 1] =
         vs.cargo_t > 1e-9 ? static_cast<uint8_t>(vs.cargo_material) : 255u;
     vehOrder[v] = vs.order;
+    // 12–14 (v2): assigned route, progress and activity ETA — the client
+    // interpolates movement along the route polyline from these. All three
+    // are pure functions of (World, State) computed here, so they stay
+    // deterministic and outside the hashed state (no wall clock anywhere).
+    auto* vehRoute = reinterpret_cast<uint32_t*>(snap.data() + offsets[12]);
+    auto* vehProg = reinterpret_cast<float*>(snap.data() + offsets[13]);
+    auto* vehEta = reinterpret_cast<uint32_t*>(snap.data() + offsets[14]);
+    const uint32_t kNone = UINT32_MAX;
+    using crx::sim::VehStatus;
+    vehRoute[v] = kNone;
+    vehProg[v] = 0.0f;
+    vehEta[v] = kNone;
+    if (vs.edge != UINT32_MAX && vs.edge < edge_route.size() &&
+        edge_route[vs.edge] != UINT32_MAX) {
+      const auto& edge = w.edges[vs.edge];
+      // Same direction convention as advanceTravel: reverse means the vehicle
+      // travels b→a against the polyline's stored order.
+      const bool reverse =
+          vs.leg < vs.route_nodes.size() && vs.route_nodes[vs.leg] == edge.b;
+      const double frac =
+          vs.edge_pos_km / std::max(edge.length_km, 1e-9);
+      vehRoute[v] = edge_route[vs.edge];
+      vehProg[v] = static_cast<float>(std::clamp(reverse ? 1.0 - frac : frac, 0.0, 1.0));
+    }
+    // Activity-end ETA in ticks: remaining travel along the planned route
+    // (current edge remainder, then the legs ahead at per-edge speeds), or
+    // the rest of the load/unload at the class's bay rate. Queue waits are
+    // contention-dependent and stay unestimated (kNone).
+    double etaHours = -1.0;
+    if (vs.status == VehStatus::ToPickup || vs.status == VehStatus::ToDropoff) {
+      etaHours = 0.0;
+      if (vs.edge != UINT32_MAX) {
+        const auto& edge = w.edges[vs.edge];
+        etaHours += (edge.length_km - vs.edge_pos_km) /
+                    std::max(1.0, std::min(edge.speed_kmh, vc.speed_kmh));
+      }
+      for (uint32_t i = vs.leg + 1; i + 1 < vs.route_nodes.size(); ++i) {
+        const uint32_t e =
+            edgeBetween(w, vc.mode, vs.route_nodes[i], vs.route_nodes[i + 1]);
+        if (e == UINT32_MAX) {
+          etaHours = -1.0;  // route hole (closure mid-plan): not derivable
+          break;
+        }
+        etaHours += w.edges[e].length_km /
+                    std::max(1.0, std::min(w.edges[e].speed_kmh, vc.speed_kmh));
+      }
+    } else if (vs.status == VehStatus::Loading && vs.order < st.order.size()) {
+      etaHours = (st.order[vs.order].qty_t - vs.moved_t) / std::max(1e-9, vc.load_t_h);
+    } else if (vs.status == VehStatus::Unloading && vs.order < st.order.size()) {
+      etaHours = vs.cargo_t / std::max(1e-9, vc.load_t_h);
+    }
+    if (etaHours >= 0.0)
+      vehEta[v] = static_cast<uint32_t>(
+          tick + static_cast<uint64_t>(std::ceil(etaHours / crx::sim::kTickHours - 1e-9)));
   }
   // 10 edges: availability per route-graph edge (0 = closed by event).
   auto* edgeArr = snap.data() + offsets[10];
@@ -447,7 +483,7 @@ crx_sim* crx_create(const char* config_json) {
     auto* api = new ApiSim();
     api->sim = std::move(sim);
     ApiSim::buildTerrain(api->sim->world().seed, api->terrain);
-    ApiSim::buildWorldJson(*api->sim, api->terrain, api->world_json);
+    ApiSim::buildWorldJson(*api->sim, api->terrain, api->world_json, api->edge_route);
     return reinterpret_cast<crx_sim*>(api);
   } catch (const std::exception& e) {
     std::fprintf(stderr, "crx_create: %s\n", e.what());
@@ -487,7 +523,7 @@ const float* crx_terrain(const crx_sim* sim, uint32_t* n) {
 const uint8_t* crx_snapshot(crx_sim* sim, uint32_t* bytes) {
   ApiSim* api = asApi(sim);
   if (api->snap_dirty) {
-    buildSnapshot(*api->sim, api->snap);
+    buildSnapshot(*api->sim, api->edge_route, api->snap);
     api->snap_dirty = false;
   }
   *bytes = static_cast<uint32_t>(api->snap.size());
