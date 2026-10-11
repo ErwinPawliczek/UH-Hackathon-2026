@@ -17,11 +17,26 @@ import { DEFAULT_WORLD, STORAGE_KEY, dropLegacyPersistedState, backendOverride, 
 export type Selection = { kind: 'site' | 'vehicle'; index: number } | null;
 
 /**
- * Ticks advanced per step (every 250 ms while playing). One tick is 15
- * simulated minutes, so 1× runs one simulated hour per real second, 4× four
- * hours, 16× sixteen hours and 64× 2⅔ days.
+ * Speeds a visitor can pick. One tick is 15 simulated minutes. At 1× and
+ * above the engine is stepped every 250 ms by that many ticks: 1× runs one
+ * simulated hour per real second, 4× four hours, 16× sixteen hours and 64×
+ * 2⅔ days. Below 1× a step stays one tick and the interval stretches
+ * instead: 0.5× is one tick every 500 ms, two real seconds per simulated
+ * hour — slow enough to watch a single truck drive.
  */
-export const SPEEDS = [1, 4, 16, 64] as const;
+export const SPEEDS = [0.5, 1, 4, 16, 64] as const;
+/** Real milliseconds between steps at 1× and above. */
+export const BASE_STEP_MS = 250;
+
+/** Ticks one step advances at this speed: the speed itself, never less than one. */
+export function ticksPerStep(speed: number): number {
+  return Math.max(1, Math.round(speed));
+}
+
+/** Real milliseconds from one step to the next at this speed: 250, stretched below 1×. */
+export function stepIntervalFor(speed: number): number {
+  return speed > 0 && speed < 1 ? Math.round(BASE_STEP_MS / speed) : BASE_STEP_MS;
+}
 /** The speed a visitor starts at: slow enough to follow one truck. */
 export const DEFAULT_SPEED = 1;
 /** Persisted-settings schema version; bump when a saved value must be reset. */
@@ -51,6 +66,13 @@ export interface SimState {
   prevSnap: Snapshot | null;
   /** performance.now() of the last snapshot, for frame interpolation */
   snapAt: number;
+  /**
+   * Real milliseconds between the snapshot now shown and the next one
+   * expected while the run is playing: 500 at 0.5×, 250 at every other
+   * speed. Follows the speed setting at once, so it is right mid-run too.
+   * Frame interpolation spreads one snapshot-to-snapshot move over this long.
+   */
+  stepIntervalMs: number;
   /**
    * Changes whenever the run's timeline is replaced rather than advanced: a
    * new session, or going back in time. Anything that buffers state across
@@ -117,6 +139,7 @@ export const useSim = create<SimState>()(
       snap: null,
       prevSnap: null,
       snapAt: 0,
+      stepIntervalMs: stepIntervalFor(DEFAULT_SPEED),
       runEpoch: 0,
       events: [],
       lastSeq: -1,
@@ -130,7 +153,7 @@ export const useSim = create<SimState>()(
 
       setSeed: (seed) => set({ seed: Math.max(0, Math.floor(seed)) }),
       setScenario: (scenario) => set({ scenario }),
-      setSpeed: (speed) => set({ speed }),
+      setSpeed: (speed) => set({ speed, stepIntervalMs: stepIntervalFor(speed) }),
       togglePlay: () => set((s) => ({ playing: !s.playing, started: true })),
       select: (selected) => set({ selected }),
       setWorld: (world) => set({ world }),
@@ -189,6 +212,12 @@ export const useSim = create<SimState>()(
       migrate: (persisted, version) => {
         const saved = (typeof persisted === 'object' && persisted !== null ? persisted : {}) as Record<string, unknown>;
         return version < 1 ? { ...saved, speed: DEFAULT_SPEED } : saved;
+      },
+      // The step interval is derived from the speed, so a saved speed brings
+      // its interval with it.
+      merge: (persisted, current) => {
+        const merged = { ...current, ...(persisted as Partial<SimState>) };
+        return { ...merged, stepIntervalMs: stepIntervalFor(merged.speed) };
       },
       partialize: (s) => ({
         seed: s.seed,

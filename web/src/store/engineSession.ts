@@ -1,7 +1,7 @@
 // The sim engine session and step loop, framework-free so the session
 // lifecycle is unit-testable without a DOM: openEngineSession creates a
 // backend session for the current settings and pushes the first snapshot;
-// startStepLoop advances it on a fixed 250 ms cadence while playing and pulls
+// startStepLoop advances it at the chosen speed while playing and pulls
 // incremental events after each step. useSimEngine mounts these on effects.
 // A failed session surfaces the store's error state — the UI shows the
 // retryable engine-unavailable overlay; it never falls back to another
@@ -17,9 +17,10 @@ import { createBackend } from '../engine/api';
 import type { BackendKind, SimBackend } from '../engine/api';
 import { HttpError } from '../engine/httpBackend';
 import { resolveWorld } from '../engine/world';
-import { useSim } from './sim';
+import { BASE_STEP_MS, ticksPerStep, useSim } from './sim';
 
-const STEP_MS = 250;
+/** A step may start this many ms early: the timer that paces it is not exact. */
+const STEP_SLACK_MS = 40;
 
 /** The live backend session; null between sessions and while one is opening. */
 let session: { id: string; backend: SimBackend } | null = null;
@@ -232,22 +233,31 @@ export async function recoverFromGoneSession(ticks: number): Promise<void> {
 }
 
 /**
- * Fixed-cadence step loop, created once and kept for the app's lifetime:
- * settings changes replace the session, not the loop. Reads playing state at
- * tick time and skips while a step is in flight (HTTP latency). Returns a
- * cleanup that stops the timer.
+ * The step loop, created once and kept for the app's lifetime: settings
+ * changes replace the session, not the loop. A 250 ms timer paces it; a step
+ * starts when the store's step interval has passed since the last one
+ * started (every firing at 1× and above, every second firing at 0.5×), and
+ * advances `ticksPerStep(speed)` ticks. Speed and playing state are read at
+ * firing time, so a speed change mid-run takes effect on the next step
+ * without skipping or doubling one; a step still in flight (HTTP latency) is
+ * never overlapped. Returns a cleanup that stops the timer.
  */
 export function startStepLoop(): () => void {
   let inFlight = false;
+  let lastStepAt = -Infinity;
   const timer = setInterval(() => {
     const s = useSim.getState();
     if (!s.playing || inFlight) return;
     const current = session;
     if (current === null) return;
+    const now = performance.now();
+    if (now - lastStepAt < s.stepIntervalMs - STEP_SLACK_MS) return; // not due yet (0.5×)
+    lastStepAt = now;
+    const ticks = ticksPerStep(s.speed);
     inFlight = true;
     void (async () => {
       try {
-        const snap = await serial(() => current.backend.step(current.id, s.speed));
+        const snap = await serial(() => current.backend.step(current.id, ticks));
         useSim.getState().pushSnapshot(snap);
         const { lastSeq } = useSim.getState();
         const events = await current.backend.events(current.id, lastSeq);
@@ -255,7 +265,7 @@ export function startStepLoop(): () => void {
         useSim.getState().setError(null);
       } catch (err) {
         if (isGoneSession(err)) {
-          void recoverFromGoneSession(s.speed);
+          void recoverFromGoneSession(ticks);
         } else {
           useSim.getState().setError(err instanceof Error ? err.message : String(err));
         }
@@ -263,6 +273,6 @@ export function startStepLoop(): () => void {
         inFlight = false;
       }
     })();
-  }, STEP_MS);
+  }, BASE_STEP_MS);
   return () => clearInterval(timer);
 }

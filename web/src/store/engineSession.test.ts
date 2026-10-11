@@ -171,6 +171,43 @@ describe('session lifecycle', () => {
     cleanup();
   });
 
+  it('at 0.5× steps one tick every 500 ms; a speed change takes effect on the next step', async () => {
+    const backend = fakeBackend();
+    const cleanupOpen = openEngineSession({ kind: 'http', seed: 42, scenario: 'none' }, backend);
+    await vi.waitFor(() => expect(engineSession()?.id).toBe('sim-1'));
+    backend.step.mockClear(); // drop the opening step(0)
+
+    useSim.getState().setSpeed(0.5);
+    useSim.setState({ playing: true, error: null });
+    const stopLoop = startStepLoop();
+    await new Promise((resolve) => setTimeout(resolve, 1350));
+    const slow = backend.step.mock.calls.map((c) => c[1]);
+    // 1350 ms at one step per 500 ms: steps near 250, 750 and 1250 — never the 5 of a 250 ms cadence
+    expect(slow.length).toBeGreaterThanOrEqual(2);
+    expect(slow.length).toBeLessThanOrEqual(3);
+    expect(slow.every((ticks) => ticks === 1)).toBe(true);
+
+    // faster mid-run: the very next steps carry the new tick count, 250 ms apart
+    backend.step.mockClear();
+    useSim.getState().setSpeed(4);
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    const fast = backend.step.mock.calls.map((c) => c[1]);
+    expect(fast.length).toBeGreaterThanOrEqual(2);
+    expect(fast.length).toBeLessThanOrEqual(4);
+    expect(fast.every((ticks) => ticks === 4)).toBe(true);
+
+    // pausing stops it dead
+    useSim.setState({ playing: false });
+    await flush();
+    backend.step.mockClear();
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(backend.step).not.toHaveBeenCalled();
+
+    stopLoop();
+    cleanupOpen();
+    useSim.getState().setSpeed(1);
+  });
+
   it('going back in time reloads the run and forgets what came after', async () => {
     const backend = fakeBackend();
     backend.step.mockImplementation(async (_id: string, _ticks: number) => decode(encodeStub(42, 288)));

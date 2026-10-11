@@ -100,10 +100,33 @@ describe('store boot', () => {
     expect(useSim.getState().speed).toBe(1);
   });
 
-  it('starts at 1× and offers 1×, 4×, 16× and 64×', async () => {
+  it('starts at 1× and offers 0.5×, 1×, 4×, 16× and 64×', async () => {
     const { useSim, SPEEDS } = await importStore();
     expect(useSim.getState().speed).toBe(1);
-    expect([...SPEEDS]).toEqual([1, 4, 16, 64]);
+    expect([...SPEEDS]).toEqual([0.5, 1, 4, 16, 64]);
+  });
+
+  it('0.5× is one tick every 500 ms; every other speed steps every 250 ms', async () => {
+    const { useSim, SPEEDS, ticksPerStep, stepIntervalFor } = await importStore();
+    expect(SPEEDS.map((s) => [ticksPerStep(s), stepIntervalFor(s)])).toEqual([
+      [1, 500], [1, 250], [4, 250], [16, 250], [64, 250],
+    ]);
+    // the store's interval follows the speed setting at once
+    expect(useSim.getState().stepIntervalMs).toBe(250);
+    useSim.getState().setSpeed(0.5);
+    expect(useSim.getState().stepIntervalMs).toBe(500);
+    useSim.getState().setSpeed(16);
+    expect(useSim.getState().stepIntervalMs).toBe(250);
+  });
+
+  it('a saved 0.5× comes back with its 500 ms interval', async () => {
+    storage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ state: { seed: 7, scenario: 'none', speed: 0.5 }, version: 1 }),
+    );
+    const { useSim } = await importStore();
+    expect(useSim.getState().speed).toBe(0.5);
+    expect(useSim.getState().stepIntervalMs).toBe(500);
   });
 
   it('opens paused and not started; the first play starts the run', async () => {
