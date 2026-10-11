@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest';
 import type { VehicleDetail } from '../engine/api';
 import { StubBackend } from '../engine/stubBackend';
 import { HttpBackend } from '../engine/httpBackend';
-import { tripProgress, tripSentence } from './VehicleWindow';
+import { hoursToGo, pendingSentence, tripProgress, tripSentence } from './VehicleWindow';
+import { materialName, materialTitle } from './materials';
 
 const base: VehicleDetail = {
   index: 59, cls: 'TRUCK_BULK', capacityT: 25, status: 'to_dropoff',
@@ -22,24 +23,24 @@ const base: VehicleDetail = {
 };
 
 describe('tripSentence', () => {
-  it('says what is on board and where it is going', () => {
-    expect(tripSentence(base)).toBe('Carrying 25 t of PE to Packaging.');
-  });
-
-  it('says an empty vehicle is on its way to load', () => {
+  it('always names the cargo, in plain words, and the place', () => {
+    expect(tripSentence(base)).toBe('Carrying 25 t of polyethylene to Packaging.');
     expect(tripSentence({ ...base, status: 'to_pickup', cargo: null }))
-      .toBe('Empty, on the way to load 25 t of PE at Polyethylene.');
+      .toBe('Driving to pick up 25 t of polyethylene at Polyethylene.');
+    expect(tripSentence({ ...base, status: 'queue_load', cargo: null }))
+      .toBe('Waiting for a bay to load 25 t of polyethylene at Polyethylene.');
+    expect(tripSentence({ ...base, status: 'loading', cargo: { material: 'PE', tonnes: 12.5 } }))
+      .toBe('Loading 25 t of polyethylene at Polyethylene — 12.5 t on board so far.');
+    expect(tripSentence({ ...base, status: 'queue_unload' }))
+      .toBe('Carrying 25 t of polyethylene, waiting for a bay to unload at Packaging.');
+    expect(tripSentence({ ...base, status: 'unloading', cargo: { material: 'PE', tonnes: 8 } }))
+      .toBe('Unloading polyethylene at Packaging — 8 t still on board.');
   });
 
-  it('covers queueing, loading and unloading', () => {
-    expect(tripSentence({ ...base, status: 'queue_load', cargo: null }))
-      .toBe('Empty, waiting for a bay to load 25 t of PE at Polyethylene.');
-    expect(tripSentence({ ...base, status: 'loading', cargo: { material: 'PE', tonnes: 12.5 } }))
-      .toBe('Loading 25 t of PE at Polyethylene — 12.5 t on board so far.');
-    expect(tripSentence({ ...base, status: 'queue_unload' }))
-      .toBe('Carrying 25 t of PE, waiting for a bay to unload at Packaging.');
-    expect(tripSentence({ ...base, status: 'unloading', cargo: { material: 'PE', tonnes: 8 } }))
-      .toBe('Unloading PE at Packaging — 8 t still on board.');
+  it('reads like Erwin\'s example for a pressurised truck', () => {
+    const order = { ...base.order!, material: 'PROPYLENE', tonnes: 20, from: { site: 7, key: 'CRACKER_FLEX', name: 'Steam cracker (flex)' } };
+    expect(tripSentence({ ...base, status: 'to_pickup', cargo: null, order }))
+      .toBe('Driving to pick up 20 t of propylene at Steam cracker (flex).');
   });
 
   it('says where an idle vehicle is, since it is not drawn', () => {
@@ -50,7 +51,38 @@ describe('tripSentence', () => {
 
   it('writes large lots without decimals', () => {
     const ship = { ...base, cargo: { material: 'GASOLINE', tonnes: 3312.4 } };
-    expect(tripSentence(ship)).toBe('Carrying 3,312 t of GASOLINE to Packaging.');
+    expect(tripSentence(ship)).toBe('Carrying 3,312 t of gasoline to Packaging.');
+  });
+});
+
+describe('before the trip is known', () => {
+  it('says the details are loading, never a bare ellipsis', () => {
+    expect(pendingSentence('to_pickup', null, null)).toBe('Driving to pick up (loading details…)');
+    expect(pendingSentence('to_dropoff', null, null)).toBe('Carrying a load (loading details…)');
+    expect(pendingSentence('idle', 'Refinery', null)).toBe('Idle at Refinery, not shown on the map.');
+  });
+
+  it('says so when the details could not be loaded', () => {
+    expect(pendingSentence('to_pickup', null, 'GET /vehicle -> 404'))
+      .toBe('Driving to pick up — the trip details could not be loaded (GET /vehicle -> 404).');
+  });
+});
+
+describe('material names', () => {
+  it('uses the names people say, not the keys', () => {
+    expect(materialName('PE')).toBe('polyethylene');
+    expect(materialName('PROPYLENE')).toBe('propylene');
+    expect(materialName('FUEL_OIL')).toBe('fuel oil');
+    expect(materialName('LPG')).toBe('LPG');
+    expect(materialName('PVC')).toBe('PVC');
+    expect(materialTitle('HEAVY_NAPHTHA')).toBe('Heavy naphtha');
+    expect(materialTitle('CAUSTIC')).toBe('Caustic soda');
+  });
+
+  it('tidies a key it does not know and leaves internal stream names alone', () => {
+    expect(materialName('SOMETHING_NEW')).toBe('something new');
+    expect(materialName('wet_cl2')).toBe('wet cl2');
+    expect(materialTitle('brine')).toBe('Brine');
   });
 });
 
@@ -59,6 +91,12 @@ describe('tripProgress', () => {
     expect(tripProgress(base)).toBeCloseTo(1 - 142 / 279, 6);
     expect(tripProgress({ ...base, remainingKm: 0 })).toBe(1);
     expect(tripProgress({ ...base, remainingKm: 400 })).toBe(0); // never negative
+  });
+
+  it('estimates the time left from the distance left and the class speed', () => {
+    expect(hoursToGo(base, 70)).toBeCloseTo(142 / 70, 6);
+    expect(hoursToGo({ ...base, status: 'loading' }, 70)).toBeNull();
+    expect(hoursToGo(base, 0)).toBeNull();
   });
 
   it('is absent when the vehicle is not driving or the trip has no length', () => {

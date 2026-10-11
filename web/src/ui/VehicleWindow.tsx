@@ -3,19 +3,25 @@
 // and when it is due. A small draggable window that follows the selection:
 // it opens when a vehicle is picked and closing it clears the selection.
 //
+// The first line always says what it is doing with what and where, in plain
+// material names ("Driving to pick up 20 t of propylene at Steam cracker
+// (flex)"). While the trip is still being fetched it says so, and if the
+// fetch fails it says that too — never a bare ellipsis.
+//
 // The trip comes from the engine (GET /vehicle), fetched when a vehicle is
 // selected, again whenever its order or status changes in the snapshot, and
 // every couple of seconds while it is moving so the distance left keeps up.
 // It is kept in the store as `selectedVehicleDetail` — the map reads its
 // `path` to highlight the route; nothing here draws on the map.
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { SiteRef, VehicleDetail } from '../engine/api';
 import { VEHICLE_CLASSES, type VehicleClassKey, type WorldSpec } from '../engine/world';
 import { useSim } from '../store/sim';
 import { DraggableWindow } from './DraggableWindow';
 import { SiteBadge } from './SiteIcon';
 import { fmtClock, fmtDelta } from './format';
+import { materialName } from './materials';
 import { standingAt, vehicleLive } from './vehicleLive';
 
 export const VEHICLE_WINDOW_ID = 'vehicle';
@@ -28,10 +34,10 @@ const MOVING = new Set(['to_pickup', 'to_dropoff']);
 export const STATUS_WORDS: Record<string, string> = {
   idle: 'Idle',
   to_pickup: 'Driving to pick up',
-  queue_load: 'Waiting for a loading bay',
+  queue_load: 'Waiting for a bay to load',
   loading: 'Loading',
-  to_dropoff: 'Delivering',
-  queue_unload: 'Waiting for an unloading bay',
+  to_dropoff: 'Carrying a load',
+  queue_unload: 'Waiting for a bay to unload',
   unloading: 'Unloading',
 };
 
@@ -40,23 +46,43 @@ const STATUS_BY_NUMBER = ['idle', 'to_pickup', 'queue_load', 'loading', 'to_drop
 
 const tonnes = (t: number) => `${t >= 100 ? Math.round(t).toLocaleString('en-US') : Math.round(t * 10) / 10} t`;
 
-/** What the vehicle is doing, in one sentence. */
+/**
+ * What the vehicle is doing, in one sentence that always names the cargo and
+ * the place: "Driving to pick up 20 t of propylene at Steam cracker (flex)."
+ */
 export function tripSentence(d: VehicleDetail, idleAt: string | null = null): string {
   const o = d.order;
   if (o === null || d.status === 'idle') {
     return idleAt === null ? 'Idle, not shown on the map.' : `Idle at ${idleAt}, not shown on the map.`;
   }
-  const lot = `${tonnes(o.tonnes)} of ${o.material}`;
-  const onBoard = d.cargo !== null ? `${tonnes(d.cargo.tonnes)} of ${d.cargo.material}` : lot;
+  const what = materialName(o.material);
+  const lot = `${tonnes(o.tonnes)} of ${what}`;
+  const onBoard = d.cargo !== null ? `${tonnes(d.cargo.tonnes)} of ${materialName(d.cargo.material)}` : lot;
   switch (d.status) {
-    case 'to_pickup': return `Empty, on the way to load ${lot} at ${o.from.name}.`;
-    case 'queue_load': return `Empty, waiting for a bay to load ${lot} at ${o.from.name}.`;
+    case 'to_pickup': return `Driving to pick up ${lot} at ${o.from.name}.`;
+    case 'queue_load': return `Waiting for a bay to load ${lot} at ${o.from.name}.`;
     case 'loading': return `Loading ${lot} at ${o.from.name}${d.cargo !== null ? ` — ${tonnes(d.cargo.tonnes)} on board so far` : ''}.`;
     case 'to_dropoff': return `Carrying ${onBoard} to ${o.to.name}.`;
     case 'queue_unload': return `Carrying ${onBoard}, waiting for a bay to unload at ${o.to.name}.`;
-    case 'unloading': return `Unloading ${o.material} at ${o.to.name}${d.cargo !== null ? ` — ${tonnes(d.cargo.tonnes)} still on board` : ''}.`;
+    case 'unloading': return `Unloading ${what} at ${o.to.name}${d.cargo !== null ? ` — ${tonnes(d.cargo.tonnes)} still on board` : ''}.`;
     default: return `${STATUS_WORDS[d.status] ?? d.status}: ${lot}.`;
   }
+}
+
+/**
+ * The first line before the trip is known: the status in words, and that the
+ * details are on their way — or that they could not be fetched.
+ */
+export function pendingSentence(status: string, idleAt: string | null, failure: string | null): string {
+  if (status === 'idle') return idleAt === null ? 'Idle, not shown on the map.' : `Idle at ${idleAt}, not shown on the map.`;
+  const words = STATUS_WORDS[status] ?? status;
+  return failure === null ? `${words} (loading details…)` : `${words} — the trip details could not be loaded (${failure}).`;
+}
+
+/** Hours the rest of the drive should take at the class's speed; null when it is not driving. */
+export function hoursToGo(d: VehicleDetail, speedKmh: number): number | null {
+  if (!MOVING.has(d.status) || !(speedKmh > 0)) return null;
+  return d.remainingKm / speedKmh;
 }
 
 /** How far along its current drive the vehicle is, 0..1; null when it is not driving. */
@@ -124,13 +150,15 @@ function TripEnd({ label, end, world }: { label: string; end: SiteRef; world: Wo
  * fetch on select, when its order or status changes, on a rewind, and every
  * two seconds while it is driving and the run is playing.
  */
-function useSelectedVehicleDetail(vehIdx: number | null): void {
+function useSelectedVehicleDetail(vehIdx: number | null): string | null {
   const fetchVehicle = useSim((s) => s.fetchVehicle);
   const orderId = useSim((s) => (vehIdx === null ? null : s.snap?.vehOrder[vehIdx] ?? null));
   const status = useSim((s) => (vehIdx === null ? null : s.snap?.vehStatus[2 * vehIdx] ?? null));
   const runEpoch = useSim((s) => s.runEpoch);
   const playing = useSim((s) => s.playing);
   const moving = status === 1 || status === 4;
+  /** why the last fetch failed, for the vehicle it failed for */
+  const [failure, setFailure] = useState<{ veh: number; reason: string } | null>(null);
 
   useEffect(() => {
     if (vehIdx === null || fetchVehicle === null) return;
@@ -141,11 +169,13 @@ function useSelectedVehicleDetail(vehIdx: number | null): void {
           const sel = useSim.getState().selected;
           if (!stale && sel !== null && sel.kind === 'vehicle' && sel.index === vehIdx) {
             useSim.setState({ selectedVehicleDetail: detail });
+            setFailure(null);
           }
         })
-        .catch(() => {
-          // an engine without the route (or a session just replaced): the
-          // window falls back to what the snapshot alone says
+        .catch((err: unknown) => {
+          // an engine without the endpoint, or a session just replaced: the
+          // window says so and shows what the snapshot alone knows
+          if (!stale) setFailure({ veh: vehIdx, reason: err instanceof Error ? err.message : String(err) });
         });
     };
     load();
@@ -155,6 +185,7 @@ function useSelectedVehicleDetail(vehIdx: number | null): void {
       if (timer !== null) clearInterval(timer);
     };
   }, [vehIdx, fetchVehicle, orderId, status, runEpoch, moving, playing]);
+  return failure !== null && failure.veh === vehIdx ? failure.reason : null;
 }
 
 export function VehicleWindow() {
@@ -164,7 +195,7 @@ export function VehicleWindow() {
   const detail = useSim((s) => s.selectedVehicleDetail);
   const select = useSim((s) => s.select);
   const vehIdx = selected !== null && selected.kind === 'vehicle' ? selected.index : null;
-  useSelectedVehicleDetail(vehIdx);
+  const failure = useSelectedVehicleDetail(vehIdx);
 
   const veh = vehIdx === null || world === null ? undefined : world.vehicles[vehIdx];
   const open = vehIdx !== null && world !== null && snap !== null && veh !== undefined;
@@ -180,6 +211,7 @@ export function VehicleWindow() {
   const progress = d === null ? null : tripProgress(d);
   const now = Number(snap.tick);
   const order = d?.order ?? null;
+  const toGoH = d === null ? null : hoursToGo(d, spec?.speedKmh ?? 0);
 
   return (
     <DraggableWindow
@@ -192,14 +224,11 @@ export function VehicleWindow() {
       at={{ x: Math.max(16, (typeof window === 'undefined' ? 1366 : window.innerWidth) - 356), y: 72 }}
     >
       <div className="flex flex-col gap-3 p-3 text-xs" data-testid="vehicle-window">
+        {/* the status line: always what, how much and where */}
         <div className="flex items-start gap-2">
           <ModeIcon cls={veh.cls} />
-          <p className="min-w-0 flex-1 text-sm leading-snug text-ink" data-testid="vehicle-sentence">
-            {d !== null
-              ? tripSentence(d, idleAt)
-              : status === 'idle'
-                ? (idleAt === null ? 'Idle, not shown on the map.' : `Idle at ${idleAt}, not shown on the map.`)
-                : `${STATUS_WORDS[status] ?? status}…`}
+          <p className="min-w-0 flex-1 text-sm leading-snug text-ink" data-testid="vehicle-status">
+            {d !== null ? tripSentence(d, idleAt) : pendingSentence(status, idleAt, failure)}
           </p>
         </div>
 
@@ -217,7 +246,10 @@ export function VehicleWindow() {
               <span className="text-ink">
                 {km(d.remainingKm)} to go{d.legDestination !== null ? ` to ${d.legDestination.name}` : ''}
               </span>
-              <span className="text-muted">of {km(d.tripKm)}</span>
+              <span className="text-muted">
+                of {km(d.tripKm)}
+                {toGoH !== null && ` · about ${toGoH < 1 ? `${Math.max(1, Math.round(toGoH * 60))} min` : `${Math.round(toGoH * 10) / 10} h`}`}
+              </span>
             </div>
             <div className="h-1.5 overflow-hidden rounded-sm bg-line-2">
               <div className="h-full rounded-sm bg-blue" style={{ width: `${progress * 100}%` }} />
@@ -226,14 +258,11 @@ export function VehicleWindow() {
         )}
 
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-ink">
-          <dt className="label">Status</dt>
-          <dd data-testid="vehicle-status">{STATUS_WORDS[status] ?? status}</dd>
-
           <dt className="label">On board</dt>
           <dd data-testid="vehicle-load">
             {d !== null
               ? d.cargo !== null
-                ? `${tonnes(d.cargo.tonnes)} of ${d.cargo.material}${capacityT > 0 ? ` (${Math.round((d.cargo.tonnes / capacityT) * 100)}% of ${tonnes(capacityT)})` : ''}`
+                ? `${tonnes(d.cargo.tonnes)} of ${materialName(d.cargo.material)}${capacityT > 0 ? ` (${Math.round((d.cargo.tonnes / capacityT) * 100)}% of ${tonnes(capacityT)})` : ''}`
                 : `Empty${capacityT > 0 ? ` (carries up to ${tonnes(capacityT)})` : ''}`
               : `${Math.round(live.fill * 100)}%${capacityT > 0 ? ` of ${tonnes(capacityT)}` : ''}`}
           </dd>
@@ -242,13 +271,13 @@ export function VehicleWindow() {
             <>
               <dt className="label">Order</dt>
               <dd className="data">
-                #{order.id} · {tonnes(order.tonnes)} {order.material}
+                #{order.id} · {tonnes(order.tonnes)} of {materialName(order.material)}
                 <span className="block text-muted">placed {fmtClock(order.createdTick)}</span>
               </dd>
 
-              <dt className="label">Due</dt>
+              <dt className="label">Booked for</dt>
               <dd className="data" data-testid="vehicle-eta">
-                {fmtClock(order.etaTick)} ({order.etaTick >= now ? fmtDelta(now, order.etaTick) : 'overdue'})
+                {fmtClock(order.etaTick)} ({order.etaTick >= now ? fmtDelta(now, order.etaTick) : 'running late'})
               </dd>
 
               {(order.priceUsdT > 0 || order.freightUsd > 0) && (
