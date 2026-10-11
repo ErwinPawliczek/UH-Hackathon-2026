@@ -115,13 +115,23 @@ export function siteOwnerColors(room: Pick<RoomInfo, 'sites' | 'players'> | null
 }
 
 /** One run's totals in a room summary: the room itself, or the same run with nobody's changes. */
-export interface SummaryTotals { lostSalesUsd: number; deliveredT: number; plantsStoppedNow: number }
+export interface SummaryTotals {
+  /** sales customers went without: notServedUsd + pricedOutUsd where the server splits them */
+  lostSalesUsd: number;
+  /** wanted and not delivered */
+  notServedUsd?: number;
+  /** given up because the price was too high (market world) */
+  pricedOutUsd?: number;
+  deliveredT: number;
+  plantsStoppedNow: number;
+}
 export interface SummarySite {
   site: number; name: string; owner: string | null; ownerName: string | null;
   status: number; baselineStatus: number;
   stoppedHours: number; baselineStoppedHours: number;
   outputT: number; baselineOutputT: number;
   lostSalesUsd: number; baselineLostSalesUsd: number;
+  notServedUsd?: number; pricedOutUsd?: number;
   /** clearly worse than in the run with no changes */
   broken: boolean;
 }
