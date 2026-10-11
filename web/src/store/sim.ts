@@ -6,6 +6,7 @@
 // parameter — for tests and local development — can pick the in-page stub.
 // The engine loop lives in a hook that feeds this store.
 
+import type { RoomInfo } from './roomTypes';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Snapshot } from '../engine/snapshot';
@@ -114,6 +115,11 @@ export interface SimState {
   ended: boolean;
   /** this run is on a map drawn in the map builder, not the default world */
   customMap: boolean;
+  /** the multiplayer room this app is showing, as last polled; null in a private run (see store/room.ts) */
+  room: RoomInfo | null;
+  /** the site this player owns in the room: ringed and badged "yours" on the map; null for the host or a watcher */
+  mySite: number | null;
+  setMySite: (site: number | null) => void;
   /**
    * Live backend command dispatcher, wired by the engine session; null
    * between sessions. A command the engine accepts leaves a note in the log
@@ -202,6 +208,9 @@ export const useSim = create<SimState>()(
       error: null,
       ended: false,
       customMap: false,
+      room: null,
+      mySite: null,
+      setMySite: (mySite) => set({ mySite }),
       sendCommand: null,
       fetchVehicle: null,
       fetchSeries: null,

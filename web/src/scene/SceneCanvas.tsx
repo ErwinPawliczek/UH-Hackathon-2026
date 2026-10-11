@@ -45,6 +45,7 @@ export function SceneCanvas() {
       const dt = (now - last) / 1000;
       last = now;
       const st = useSim.getState();
+      scene.setMine(st.room !== null ? st.mySite : null);
       if (st.snap !== null) {
         // real time between snapshots (longer below speed 1)
         const stepMs = st.stepIntervalMs ?? 250;

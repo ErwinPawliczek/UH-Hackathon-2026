@@ -6,6 +6,8 @@ import { EDITOR_PATH, leaveCustomMap } from './store/customMap';
 import { useEffect } from 'react';
 import { useSimEngine } from './store/useSimEngine';
 import { useSim } from './store/sim';
+import { useRoom } from './store/useRoom';
+import { roomFromLocation } from './store/room';
 import { SceneCanvas } from './scene/SceneCanvas';
 import { TopBar } from './ui/TopBar';
 import { EngineErrorOverlay, RunEndedOverlay } from './ui/EngineErrorOverlay';
@@ -17,7 +19,10 @@ import { EconomyWindow } from './ui/EconomyWindow';
 import { EventLog } from './ui/EventLog';
 
 export default function App() {
-  useSimEngine();
+  // `?room=CODE`: show that multiplayer room, watched and never stepped, in place of a private run
+  const roomCode = roomFromLocation();
+  useSimEngine(roomCode === null);
+  useRoom(roomCode);
   const world = useSim((s) => s.world);
   const snap = useSim((s) => s.snap);
   const error = useSim((s) => s.error);
@@ -49,7 +54,7 @@ export default function App() {
       <SiteWindow />
 
       {/* A new run waits here, paused at day 0, until the visitor starts it. */}
-      {world !== null && snap !== null && !started && error === null && (
+      {world !== null && snap !== null && !started && error === null && roomCode === null && (
         <div className="pointer-events-none absolute inset-x-0 bottom-8 z-10 flex flex-col items-center gap-2">
           {queued > 0 && (
             <p className="chamfer chamfer-sm px-3 py-1.5 text-xs text-ink" data-testid="scenario-queued">
