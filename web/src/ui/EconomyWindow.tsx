@@ -21,6 +21,7 @@ import { useSim } from '../store/sim';
 import { DraggableWindow } from './DraggableWindow';
 import { SiteBadge } from './SiteIcon';
 import { EconomySupply } from './EconomySupply';
+import { EconomyPrices } from './EconomyPrices';
 import { EconomyProcurement, EconomyProduction } from './EconomyTabs';
 import { ECONOMY_WINDOW_AT, ECONOMY_WINDOW_ID, useEconomyView, type EconomyTab } from './economyView';
 import { costParts, rejectedPart, countdownSentence, fmtMoney, fmtTonnes, nothingBroken, useForecast } from './economyData';
@@ -33,6 +34,7 @@ const WIDTH = 720;
 export const FORECAST_DAYS = 30;
 
 const TABS: { key: EconomyTab; label: string }[] = [
+  { key: 'prices', label: 'Prices' },
   { key: 'procurement', label: 'Procurement' },
   { key: 'production', label: 'Production' },
   { key: 'impact', label: 'Disruption impact' },
@@ -60,6 +62,7 @@ export function EconomyWindow() {
           </button>
         ))}
       </div>
+      {tab === 'prices' && <EconomyPrices open={open} />}
       {tab === 'procurement' && <EconomyProcurement open={open} />}
       {tab === 'production' && <EconomyProduction open={open} />}
       {tab === 'impact' && <ImpactTab open={open} />}

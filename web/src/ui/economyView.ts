@@ -9,7 +9,7 @@ export const ECONOMY_WINDOW_ID = 'economy';
 /** Where the window first appears: under the top bar, to the right. */
 export const ECONOMY_WINDOW_AT = { x: 630, y: 68 };
 
-export type EconomyTab = 'procurement' | 'production' | 'impact' | 'supply';
+export type EconomyTab = 'prices' | 'procurement' | 'production' | 'impact' | 'supply';
 
 export interface EconomyViewState {
   tab: EconomyTab;
@@ -20,7 +20,7 @@ export interface EconomyViewState {
 }
 
 export const useEconomyView = create<EconomyViewState>()((set) => ({
-  tab: 'procurement',
+  tab: 'prices',
   supplyTank: null,
   setTab: (tab) => set({ tab }),
   chooseSupplyTank: (site, material) => set({ supplyTank: { site, material } }),
