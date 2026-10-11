@@ -4,6 +4,7 @@
 
 #include "sim/adaptation.h"
 #include "sim/routes.h"
+#include "sim/words.h"
 
 #include <algorithm>
 #include <cmath>
@@ -165,8 +166,12 @@ void stepDispatch(const World& world, State& state, PathCache& paths, Recorder& 
       seller.reserved_out_t = std::max(0.0, seller.reserved_out_t - o.qty_t);
       buyer.inbound_t = std::max(0.0, buyer.inbound_t - o.qty_t);
       logEvent(rec, state.tick, "order_cancelled", world.tanks[o.to].key, vc.key,
-               "order " + std::to_string(oi) + " (" + world.catalog.materials[o.material].key +
-                   " " + fmtQty(o.qty_t) + " t): no " + vc.key + " can carry it");
+               "An order for " + tonnesText(o.qty_t) + " of " +
+                   materialWord(world.catalog, o.material) + " from " +
+                   world.sites[world.tanks[o.from].site.v].name + " to " +
+                   world.sites[world.tanks[o.to].site.v].name + " was dropped: " +
+                   vehicleWord(vc.key).substr(vehicleWord(vc.key).find(' ') + 1) +
+                   "s cannot get it there now");
       continue;
     }
 
@@ -201,8 +206,14 @@ void stepDispatch(const World& world, State& state, PathCache& paths, Recorder& 
     vs.edge = kNoEdge;
     vs.edge_pos_km = 0;
     logEvent(rec, state.tick, "dispatch", world.sites[world.fleet[best].home.v].key, vc.key,
-             "vehicle " + std::to_string(best) + " → order " + std::to_string(oi) + " (" +
-                 world.catalog.materials[o.material].key + " " + fmtQty(o.qty_t) + " t)");
+             [&] {
+               std::string v = vehicleWord(vc.key);  // "a bulk truck" -> "A bulk truck"
+               v[0] = 'A';
+               return v + " was sent for " + tonnesText(o.qty_t) + " of " +
+                      materialWord(world.catalog, o.material) + " from " +
+                      world.sites[world.tanks[o.from].site.v].name + " to " +
+                      world.sites[world.tanks[o.to].site.v].name;
+             }());
   }
 }
 
@@ -316,7 +327,9 @@ void stepTransport(const World& world, State& state, PathCache& paths, Recorder&
       vs.cargo_t = 0;
       logEvent(rec, state.tick, "delivered", world.tanks[o.to].key,
                world.catalog.materials[o.material].key,
-               fmtQty(o.qty_t) + " t in " + fmtQty(lead_h) + " h");
+               tonnesText(o.qty_t) + " of " + materialWord(world.catalog, o.material) +
+                   " delivered to " + world.sites[world.tanks[o.to].site.v].name + " after " +
+                   fmtQty(lead_h) + " h");
     }
   }
 }
