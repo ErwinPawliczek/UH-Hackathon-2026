@@ -73,7 +73,6 @@ bool buildGeneratedWorld(const Catalog& catalog, const worldgen::GeneratedWorld&
     const SiteId sid{static_cast<uint32_t>(s)};
     const int preset_idx = catalog.findPreset(ws.preset);
     if (preset_idx < 0) return fail("unknown site preset " + ws.preset);
-    const SitePreset& preset = catalog.site_presets[static_cast<size_t>(preset_idx)];
 
     Site site;
     site.key = ws.name;
@@ -84,7 +83,9 @@ bool buildGeneratedWorld(const Catalog& catalog, const worldgen::GeneratedWorld&
     for (int m = 0; m < kModeCount; ++m) {
       const NodeId& n = ws.node[static_cast<size_t>(m)];
       site.node[static_cast<size_t>(m)] = n.valid() ? n.v : kNoNode;
-      site.bays[static_cast<size_t>(m)] = preset.bays[static_cast<size_t>(m)];
+      // Bays come from the generated world (the sizing scales them to the
+      // site's designed throughput), not from the preset floor.
+      site.bays[static_cast<size_t>(m)] = ws.bays[static_cast<size_t>(m)];
     }
     site.tanks.begin = static_cast<uint32_t>(out.tanks.size());
     for (uint32_t t = 0; t < ws.tanks.count; ++t) {

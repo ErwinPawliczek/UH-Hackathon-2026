@@ -609,6 +609,35 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
   for (const auto& d : out.processes) {
     const ProcessInfo* p = catalog.process(d.type);
     if (p == nullptr) continue;
+    // Flex crackers run a blended feed (three real modes at the demand
+    // constants' shares) — the same blend the composition's traded-net
+    // fix-up applies. A single d.mode cannot express that blend, so weight
+    // the three real modes here; otherwise this design matches no mode and
+    // its tank designs silently lose every process stream.
+    if (d.type == "OLEFINS_FLEX") {
+      const ProcessInfo* of = catalog.process("OLEFINS_FLEX");
+      if (of != nullptr) {
+        const double mix[3] = {dc.flex_ethane, dc.flex_lpg, dc.flex_naphtha};
+        const char* feeds[3] = {"ETHANE", "LPG", "NAPHTHA"};
+        for (size_t mi = 0; mi < of->modes.size(); ++mi) {
+          int k = -1;
+          for (int j = 0; j < 3; ++j)
+            if (of->modes[mi] == feeds[j]) k = j;
+          if (k < 0 || mix[k] <= 0.0) continue;
+          for (const NetStream& st : of->by_mode[mi].in) {
+            const MaterialInfo* m = catalog.material(st.material);
+            if (m == nullptr || m->kind != MatKind::Traded) continue;
+            tf[{d.site, st.material}].out += st.t_per_t * mix[k] * d.rate_t_h;
+          }
+          for (const NetStream& st : of->by_mode[mi].out) {
+            const MaterialInfo* m = catalog.material(st.material);
+            if (m == nullptr || m->kind != MatKind::Traded) continue;
+            tf[{d.site, st.material}].in += st.t_per_t * mix[k] * d.rate_t_h;
+          }
+        }
+      }
+      continue;
+    }
     for (size_t mi = 0; mi < p->modes.size(); ++mi) {
       if (p->modes[mi] != d.mode) continue;
       for (const NetStream& s : p->by_mode[mi].in) {
@@ -688,7 +717,13 @@ SizingResult sizeWorld(const CatalogView& catalog, const GenParams& params,
     const bool both_river = routes.siteNode(f.from_site, Mode::River) >= 0 &&
                             routes.siteNode(f.to_site, Mode::River) >= 0;
     Pick pick;
-    if (mi->phase == Phase::Liquid && both_sea && valid(by_mode[2])) {
+    // Short liquid legs move by truck: a barge's ~17 h cycle cannot absorb
+    // the many short refinery-to-city lanes, and queueing there starves the
+    // refineries (product tanks fill, plants shut down). Barges and ships
+    // keep the long lanes, where their per-tonne cost wins.
+    if (mi->phase == Phase::Liquid && valid(by_mode[0]) && by_mode[0].arc <= 120.0) {
+      pick = by_mode[0];  // short lane: road
+    } else if (mi->phase == Phase::Liquid && both_sea && valid(by_mode[2])) {
       pick = by_mode[2];  // coastal pair: sea lanes
     } else if (mi->phase == Phase::Liquid && both_river && valid(by_mode[1])) {
       pick = by_mode[1];  // inland pair: the river

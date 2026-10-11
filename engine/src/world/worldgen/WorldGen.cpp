@@ -61,6 +61,11 @@ GeneratedWorld assemble(uint64_t seed, const GenParams& params, const Frame& fra
   // -- sites: one per slot, named by preset with a per-preset ordinal (city
   // sinks take the city's name).
   std::map<std::string, int> ordinal;
+  // Designed throughput per site (t/h, in+out) — the basis for bay scaling.
+  std::vector<double> site_throughput(slots.size(), 0.0);
+  for (const SizingResult::TankDesign& t : sizing.tanks)
+    if (t.site < site_throughput.size())
+      site_throughput[t.site] += t.in_t_h + t.out_t_h;
   for (size_t s = 0; s < slots.size(); ++s) {
     const SiteSlot& slot = slots[s];
     const int n = ++ordinal[slot.preset];
@@ -82,9 +87,18 @@ GeneratedWorld assemble(uint64_t seed, const GenParams& params, const Frame& fra
       if (idx >= 0) ws.node[static_cast<size_t>(mi)] = NodeId{static_cast<uint32_t>(idx)};
     }
     if (const PresetInfo* preset = catalog.preset(slot.preset)) {
-      ws.bays[0] = preset->bays_road;
-      ws.bays[1] = preset->bays_river;
-      ws.bays[2] = preset->bays_sea;
+      // Preset bays are M1-scale floors. Scale them to the site's designed
+      // throughput so unload capacity never caps delivery: a truck bay turns
+      // ~24 loads/day (≈600 t), a river bay ~3 barges/day (≈6000 t), a sea
+      // bay ~1 ship/day (≈40000 t) at catalog load rates with queue margin.
+      // A preset bay count of 0 means that mode is not used at this site.
+      const double t_day = site_throughput[s] * 24.0;
+      const int road = preset->bays_road > 0 ? 1 + static_cast<int>(t_day / 600.0) : 0;
+      const int river = preset->bays_river > 0 ? 1 + static_cast<int>(t_day / 6000.0) : 0;
+      const int sea = preset->bays_sea > 0 ? 1 + static_cast<int>(t_day / 40000.0) : 0;
+      ws.bays[0] = static_cast<uint8_t>(std::clamp(std::max(road, static_cast<int>(preset->bays_road)), 0, 24));
+      ws.bays[1] = static_cast<uint8_t>(std::clamp(std::max(river, static_cast<int>(preset->bays_river)), 0, 12));
+      ws.bays[2] = static_cast<uint8_t>(std::clamp(std::max(sea, static_cast<int>(preset->bays_sea)), 0, 8));
     }
     ws.city = slot.city;
     w.sites.push_back(ws);

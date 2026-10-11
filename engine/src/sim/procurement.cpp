@@ -23,6 +23,13 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
                      ProcurementStats& out, Recorder& rec) {
   const Catalog& catalog = world.catalog;
 
+  // Idle vehicles per class, once per step: a class with nothing idle cannot
+  // serve a new lot promptly, so procurement should book an available class
+  // instead of queueing the lot behind every other barge-classed order.
+  std::vector<uint32_t> idle_by_cls(catalog.vehicle_classes.size(), 0);
+  for (size_t v = 0; v < world.fleet.size() && v < state.vehicle.size(); ++v)
+    if (state.vehicle[v].status == VehStatus::Idle) ++idle_by_cls[world.fleet[v].cls];
+
   // Collect buy-side requests: externally fed tanks with a consumer draw and
   // positive urgency (§5.6). Export tanks (§5.6 port rule) order at a fixed
   // low urgency and only match sellers above the 70% fill line.
@@ -85,6 +92,7 @@ void stepProcurement(const World& world, State& state, const PathCache& paths,
           if (!(mat.modes & (1u << static_cast<uint8_t>(vc.mode)))) continue;
           if (vc.carries != mat.phase) continue;
           if (vc.capacity_t <= 0.0 || vc.speed_kmh <= 0.0) continue;
+          if (idle_by_cls[cls] == 0) continue;  // no idle vehicle: the lot would queue
 
           // One lot = one vehicle load, clamped to what is wanted.
           const double lot_t = std::min(vc.capacity_t, want);

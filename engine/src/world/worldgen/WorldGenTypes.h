@@ -30,7 +30,7 @@ enum class TankRole : uint8_t { Feed = 0, Product = 1, Internal = 2, Both = 3 };
 
 // The small parameter set §6 fixes. Defaults describe the reference world.
 struct GenParams {
-  double map_w_km = 600.0;            // map extent, x
+  double map_w_km = 240.0;            // map extent, x
   double map_h_km = 400.0;            // map extent, y
   int    n_cities = 5;                // demand centres with rank-size populations
   double demand_scale = 1.0;          // scales every end demand
@@ -38,7 +38,7 @@ struct GenParams {
   double cover_multiplier = 1.0;      // scales every tank's cover days
   double top_population_m = 4.0;      // largest city, millions of people
   double rank_size_exponent = 1.0;    // Zipf exponent: pop_i = top / i^z
-  double city_min_spacing_km = 80.0;
+  double city_min_spacing_km = 55.0;
   double cracker_cluster_km = 25.0;   // derivative plants sit within this of a cracker
   double sea_leg_days = 18.0;         // OVERSEAS is a fixed ship-days out (~11,000 km)
   double ship_speed_kmh = 26.0;       // SHIP_TANK reference speed for the overseas leg
