@@ -1,7 +1,7 @@
 // The player's phone screen at /play/?room=CODE (MULTIPLAYER-CONTRACT.md).
 //
 // Three screens in one frame: give a name; pick a plant in the lobby; then
-// run that plant — its price, its rate and its units — and watch what that
+// run that plant — its rate, its trading partners and its units — and watch what that
 // does to its profit and its rank. The frame is a top bar (the mark and one
 // menu hexagon that holds everything else), the 3D map, and a bottom sheet
 // with two heights: a peek that leaves the map usable, and open.
@@ -18,8 +18,8 @@ import { Sparkline } from '../ui/charts/Sparkline';
 import { fmtMomentWords } from '../ui/format';
 import { eventLabel } from '../ui/eventKinds';
 import {
-  PRICE_MAX, PRICE_MIN, PRICE_STEP, fmtProfit, isHit, makesWords, minRate, myScore, othersWords, pctSigned, plantState,
-  priceWords, rankWords, rateWords, roomCode, siteUnits,
+  fmtProfit, isHit, makesWords, minRate, myScore, othersWords, plantState,
+  rankWords, rateWords, roomCode, siteUnits,
 } from './playLogic';
 import { openRoom, roomSource } from '../store/room';
 import { mockRoom, mockRoomWanted } from '../store/roomMock';
@@ -287,7 +287,7 @@ function PlantSheet({ room, site, summary }: { room: RoomInfo; site: number; sum
   const sending = usePlay((s) => s.sending);
   const confirmedAt = usePlay((s) => s.confirmedAt);
   const error = usePlay((s) => s.error);
-  const { setPrice, setRate, setUnit } = usePlay.getState();
+  const { setRate, setUnit } = usePlay.getState();
   const [open, setOpen] = useState(true);
   const { score } = myScore(scores, site);
   const damage = score?.damageUsd ?? 0;
@@ -297,7 +297,6 @@ function PlantSheet({ room, site, summary }: { room: RoomInfo; site: number; sum
   const seatId = usePlay((s) => s.seat?.playerId ?? null);
   const mine = summary?.players.find((p) => p.id === seatId);
   // what the slider shows: the player's own last setting until the server's figure catches up
-  const [markup, setMarkup] = useState<number | null>(null);
   const [share, setShare] = useState<number | null>(null);
   const units = useMemo(() => (world === null ? [] : siteUnits(world, site)), [world, site]);
   const [, tick] = useState(0);
@@ -309,7 +308,6 @@ function PlantSheet({ room, site, summary }: { room: RoomInfo; site: number; sum
   const spec = room.sites.find((s) => s.index === site);
   const state = plantState(snap, site);
   const low = minRate(world, site);
-  const m = markup ?? score?.markup ?? 0;
   const r = share ?? score?.rateShare ?? 1;
   const waiting = sending || Object.keys(pending).length > 0;
   const saved = confirmedAt !== null && performance.now() - confirmedAt < 4000;
@@ -352,17 +350,6 @@ function PlantSheet({ room, site, summary }: { room: RoomInfo; site: number; sum
         {error !== null ? error : waiting ? 'Sending…' : saved ? 'Saved: your settings are in.' : room.phase === 'lobby' ? 'Settings take effect when the host starts.' : ''}
       </p>
 
-      <Slider
-        id="play-price"
-        label="Price"
-        value={m}
-        min={PRICE_MIN}
-        max={PRICE_MAX}
-        step={PRICE_STEP}
-        shown={pctSigned(m)}
-        words={priceWords(m)}
-        onChange={(v) => { setMarkup(v); setPrice(Math.round(v * 100) / 100); }}
-      />
       <Slider
         id="play-rate"
         label="Rate"
@@ -456,7 +443,6 @@ function LogList() {
 
 const HOW = [
   'You run one plant. Everyone else runs theirs; the rest run themselves.',
-  'Price: ask more and you earn more per tonne but sell less. Ask less and you sell more.',
   'Rate: make less and you buy less feed. Units can be taken down and brought back.',
   'Trading: stop selling to one buyer, or stop buying from one supplier, and watch what it does to them.',
   'The host runs the clock and sets off trouble. Your score is the damage you do: sales customers lose because of your changes.',

@@ -63,7 +63,7 @@ function Landing({ onHost, busy, error }: { onHost: (password: string) => void; 
       <Mark />
       <h1 className="font-display text-4xl font-bold">Host a collaborative simulation</h1>
       <p className="max-w-[46ch] text-center text-base text-muted">
-        Everyone joins on a phone with a QR code, takes a plant, and sets its price, rate and units. You run the
+        Everyone joins on a phone with a QR code, takes a plant, and cuts its rate, units and trading partners. You run the
         clock and break things from this screen.
       </p>
       <form className="flex flex-col items-center gap-3" onSubmit={(e) => { e.preventDefault(); onHost(password); }}>
@@ -220,7 +220,7 @@ function Moves({ room }: { room: RoomInfo }) {
   return (
     <section className="chamfer pointer-events-auto absolute left-4 top-16 z-[5] w-[340px] p-3" style={CARD} data-testid="host-moves">
       <div className="label mb-1">Moves</div>
-      {moves.length === 0 && <p className="text-sm text-muted">Nothing yet. Every price change, cut, shutdown and blocked trade shows up here.</p>}
+      {moves.length === 0 && <p className="text-sm text-muted">Nothing yet. Every cut, shutdown and blocked trade shows up here.</p>}
       <ol className="scroll-steady max-h-[60vh] overflow-auto">
         {moves.map((e) => {
           const owner = e.player ?? (e.site === undefined ? null : ownerOf.get(e.site) ?? null);
