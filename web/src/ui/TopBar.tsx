@@ -7,7 +7,7 @@
 // at once, and the entry stays ticked for the rest of the run. On the in-page
 // stub it is the stub-era scripted-scenario setting (a session restart).
 
-import { useSim, SPEEDS, TICKS_PER_DAY } from '../store/sim';
+import { useSim, SPEEDS } from '../store/sim';
 import { SCENARIOS } from '../engine/events';
 import { scenariosFor } from '../engine/scenarios';
 import { fmtClock } from './format';
@@ -117,8 +117,6 @@ export function TopBar() {
       >
         Log
       </button>
-
-      <span className="data text-muted">{Math.floor(Number(tick ?? 0) / TICKS_PER_DAY)}/60 d</span>
 
       {error !== null && (
         <span
