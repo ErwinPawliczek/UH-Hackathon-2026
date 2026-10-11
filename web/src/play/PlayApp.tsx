@@ -488,7 +488,7 @@ export function PlayApp() {
 
   const me = mePlayer(room, seat);
   const source = usePlay((s) => s.source);
-  const summary = useSummary(room !== null && room.phase !== 'lobby' ? source : null);
+  const summary = useSummary(room !== null && room.phase !== 'lobby' ? source : null, 5000); // the summary is costly for the server: phones ask rarely
   // the session is over: straight to the summary
   const over = room?.phase === 'ended';
   useEffect(() => { if (over) setMenu('economy'); }, [over]);
