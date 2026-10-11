@@ -37,6 +37,7 @@ add_library(crx_engine STATIC
   engine/src/world/worldgen/CatalogData.cpp
   engine/src/world/worldgen/Feasibility.cpp
   engine/src/world/worldgen/Freeze.cpp
+  engine/src/world/worldgen/HandDrawn.cpp
   engine/src/world/worldgen/Geo.cpp
   engine/src/world/worldgen/Layout.cpp
   engine/src/world/worldgen/NamedWorlds.cpp

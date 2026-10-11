@@ -10,6 +10,7 @@
 #include "crx/catalog.h"
 #include "world/worldgen/CatalogView.h"
 #include "world/worldgen/Freeze.h"
+#include "world/worldgen/HandDrawn.h"
 #include "world/worldgen/WorldGen.h"
 #include "world/worldgen/WorldJson.h"
 
@@ -255,6 +256,45 @@ int main(int argc, char** argv) {
                 frozen.nProcesses(), frozen.units.size(), frozen.edges.size(),
                 frozen.nPipelines(), frozen.nVehicles(), frozen.contracts.size(), out);
     return 0;
+  }
+
+  if (cmd == "erwin-world") {
+    crx::Catalog catalog;
+    crx::worldgen::CatalogView view;
+    std::string cat_err;
+    if (!crx::loadCatalogFromDir(CRX_DATA_DIR, catalog, cat_err)) {
+      std::fprintf(stderr, "erwin-world: %s\n", cat_err.c_str());
+      return 1;
+    }
+    view = crx::worldgen::makeCatalogView(catalog);
+    crx::worldgen::GeneratedWorld world;
+    std::vector<crx::worldgen::HandDrawnGap> gaps;
+    std::string err;
+    const std::string path = CRX_DATA_DIR "/worlds/erwin-world-v1.json";
+    if (!crx::worldgen::loadHandDrawnWorld(path, view, world, gaps, err)) {
+      std::fprintf(stderr, "erwin-world: %s\n", err.c_str());
+      return 1;
+    }
+    std::printf("drawn world translated: sites %zu, nodes %zu, edges %zu, pipelines %zu\n",
+                world.sites.size(), world.nodes.size(), world.edges.size(),
+                world.pipelines.size());
+    size_t road = 0, river = 0, sea = 0;
+    for (const auto& s : world.sites) {
+      if (s.node[0].valid()) ++road;
+      if (s.node[1].valid()) ++river;
+      if (s.node[2].valid()) ++sea;
+    }
+    std::printf("site snaps: road %zu/%zu, river %zu, sea %zu\n", road, world.sites.size(),
+                river, sea);
+    std::printf("overseas gateway: %s\n", world.overseas_node.valid() ? "found" : "MISSING");
+    if (gaps.empty()) {
+      std::printf("gaps: none — every site and flow is usable as drawn\n");
+    } else {
+      std::printf("gaps: %zu\n", gaps.size());
+      for (const auto& gp : gaps)
+        std::printf("  - [%s] %s: %s\n", gp.site.c_str(), gp.item.c_str(), gp.missing.c_str());
+    }
+    return gaps.empty() ? 0 : 2;
   }
 
   json cfg;
