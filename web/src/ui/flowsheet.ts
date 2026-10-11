@@ -143,7 +143,7 @@ function unitNotes(unit: UnitSpec): FlowNote[] {
 
 /** Height a unit block needs: its text, its notes, and room for its ports. */
 export function unitHeight(notes: number, portsIn: number, portsOut: number): number {
-  const text = 62 + notes * 12 + 26; // key and name, trains and load, notes, the fail control
+  const text = 62 + notes * 12 + 34; // key and name, trains and load, notes, the Fail unit button
   const ports = (Math.max(portsIn, portsOut) + 1) * PORT_PITCH;
   return Math.max(text, ports);
 }
@@ -419,13 +419,21 @@ export function labelWidth(key: string, tph: number): number {
   return `${streamLabel(key)} ${fmtTph(tph)}`.length * LABEL_CHAR_PX;
 }
 
+/** Every stream leaves its source and enters its target level for at least this far (px). */
+export const STRAIGHT = 14;
+/** Least room (px) a bend is given between two level stretches. */
+const MIN_BEND = 16;
+
 /**
- * A smooth connector between two ports, as SVG path data: left to right for
- * an ordinary stream — level for `run` px beside its label (at the end the
- * label sits at), level again through each column it passes (`via`), and
- * curving in the gaps between; a recycle leaves to the right, swings under
- * the blocks (to `under`, a y below them) and comes back into its target
- * from the left.
+ * A connector between two ports, as SVG path data. Every bend is finished
+ * before the line reaches anything: it leaves its source level and enters
+ * its target level for at least STRAIGHT px, so an arrowhead is always
+ * horizontal and sits flush on the edge it points at. Beside its label (at
+ * the end the label sits at) the level stretch is as long as the label;
+ * through each column it passes (`via`) it is level across the column; the
+ * bends happen in the gaps between. A recycle leaves to the right, swings
+ * under the blocks (to `under`, a y below them) and comes back into its
+ * target from the left, level at both ends like any other stream.
  */
 export function edgePath(
   e: Pick<FlowEdge, 'x1' | 'y1' | 'x2' | 'y2'> & Partial<Pick<FlowEdge, 'recycle' | 'run' | 'labelAt' | 'via'>>,
@@ -433,7 +441,10 @@ export function edgePath(
 ): string {
   if (e.recycle === true) {
     const y = Math.max(under, e.y1, e.y2) + 18;
-    return `M${e.x1} ${e.y1}C${e.x1 + 46} ${e.y1} ${e.x1 + 46} ${y} ${e.x1 - 10} ${y}L${e.x2 + 10} ${y}C${e.x2 - 46} ${y} ${e.x2 - 46} ${e.y2} ${e.x2} ${e.y2}`;
+    const out = e.x1 + STRAIGHT;
+    const into = e.x2 - STRAIGHT;
+    return `M${e.x1} ${e.y1}L${out} ${e.y1}C${out + 34} ${e.y1} ${out + 34} ${y} ${out - 12} ${y}`
+      + `L${into + 12} ${y}C${into - 34} ${y} ${into - 34} ${e.y2} ${into} ${e.y2}L${e.x2} ${e.y2}`;
   }
   const via = e.via ?? [];
   const run = e.run ?? 0;
@@ -441,27 +452,25 @@ export function edgePath(
     const dx = Math.max(12, (bx - ax) / 2);
     return `C${ax + dx} ${ay} ${bx - dx} ${by} ${bx} ${by}`;
   };
-  let d = `M${e.x1} ${e.y1}`;
-  let cx = e.x1;
+  // level out of the source: the label's length when the label sits here, never less than STRAIGHT
+  let a = e.x1 + Math.max(STRAIGHT, e.labelAt === 'from' ? run : 0);
+  // level into the target: likewise
+  let b = e.x2 - Math.max(STRAIGHT, e.labelAt === 'to' ? run : 0);
+  // a long label gives way before a bend is squeezed out; the STRAIGHT stretches never do
+  const firstStop = via.length > 0 ? via[0].x0 : b;
+  const lastStart = via.length > 0 ? via[via.length - 1].x1 : a;
+  a = Math.max(e.x1 + STRAIGHT, Math.min(a, firstStop - MIN_BEND));
+  b = Math.min(e.x2 - STRAIGHT, Math.max(b, (via.length > 0 ? lastStart : a) + MIN_BEND));
+
+  let d = `M${e.x1} ${e.y1}L${a} ${e.y1}`;
+  let cx = a;
   let cy = e.y1;
-  // level beside a label at the source, keeping at least 24 px for the bend that follows
-  if (e.labelAt === 'from' && run > 0) {
-    const a = Math.max(e.x1, Math.min(e.x1 + run, (via[0]?.x0 ?? e.x2) - 24));
-    if (a > e.x1) {
-      d += `L${a} ${e.y1}`;
-      cx = a;
-    }
-  }
   for (const v of via) {
     d += `${bend(cx, cy, v.x0, v.y)}L${v.x1} ${v.y}`;
     cx = v.x1;
     cy = v.y;
   }
-  // level beside a label at the target, again leaving room for the bend
-  const b = e.labelAt === 'to' && run > 0 ? Math.min(e.x2, Math.max(cx + 24, e.x2 - run)) : e.x2;
-  d += bend(cx, cy, b, e.y2);
-  if (b < e.x2) d += `L${e.x2} ${e.y2}`;
-  return d;
+  return `${d}${bend(cx, cy, b, e.y2)}L${e.x2} ${e.y2}`;
 }
 
 // ---------------------------------------------------------------- live values

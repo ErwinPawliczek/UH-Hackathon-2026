@@ -6,7 +6,7 @@ import fixture from './__fixtures__/flowsheetSites.json';
 import type { Snapshot } from '../engine/snapshot';
 import type { WorldSpec } from '../engine/world';
 import {
-  buildFlowsheet, edgePath, fmtHours, fmtTph, labelWidth, streamLabel, tankLive, unitLive,
+  STRAIGHT, buildFlowsheet, edgePath, fmtHours, fmtTph, labelWidth, streamLabel, tankLive, unitLive,
   type FlowTankNode, type FlowUnitNode, type Flowsheet,
 } from './flowsheet';
 import {
@@ -81,7 +81,9 @@ describe('buildFlowsheet', () => {
         "VINYLS:edc",
       ]
     `);
-    expect(edgePath({ x1: 300, y1: 40, x2: 100, y2: 60, recycle: true }, 200)).toContain('L110 218');
+    // out level, under the blocks, back in level
+    expect(edgePath({ x1: 300, y1: 40, x2: 100, y2: 60, recycle: true }, 200))
+      .toBe('M300 40L314 40C348 40 348 218 302 218L98 218C52 218 52 60 86 60L100 60');
   });
 
   it('draws the refinery as one connected diagram through its shared tanks', () => {
@@ -160,14 +162,36 @@ describe('buildFlowsheet', () => {
     expect(buildFlowsheet(bare, 0)).toBeNull();
   });
 
-  it('draws connectors as left-to-right curves, level beside their label', () => {
-    expect(edgePath({ x1: 10, y1: 20, x2: 110, y2: 60 })).toBe('M10 20C60 20 60 60 110 60');
-    // a label at the source end: the line runs level for its length, then bends
-    expect(edgePath({ x1: 10, y1: 20, x2: 210, y2: 60, run: 60, labelAt: 'from' })).toBe('M10 20L70 20C140 20 140 60 210 60');
+  it('draws connectors that are level at both ends, so an arrowhead is never at an angle', () => {
+    // 14 px level out of the source, the bend, 14 px level into the target
+    expect(edgePath({ x1: 10, y1: 20, x2: 110, y2: 60 })).toBe('M10 20L24 20C60 20 60 60 96 60L110 60');
+    // a label at the source end: the line runs level for the label's length, then bends
+    expect(edgePath({ x1: 10, y1: 20, x2: 210, y2: 60, run: 60, labelAt: 'from' })).toBe('M10 20L70 20C133 20 133 60 196 60L210 60');
     // a label at the target end: the bend comes first, then the level run into the unit
-    expect(edgePath({ x1: 10, y1: 20, x2: 210, y2: 60, run: 60, labelAt: 'to' })).toBe('M10 20C80 20 80 60 150 60L210 60');
-    // never so long a run that nothing is left for the bend
-    expect(edgePath({ x1: 0, y1: 0, x2: 60, y2: 30, run: 500, labelAt: 'from' })).toBe('M0 0L36 0C48 0 48 30 60 30');
+    expect(edgePath({ x1: 10, y1: 20, x2: 210, y2: 60, run: 60, labelAt: 'to' })).toBe('M10 20L24 20C87 20 87 60 150 60L210 60');
+    // a label too long for its gap gives way; the level stretch into the target does not
+    expect(edgePath({ x1: 0, y1: 0, x2: 60, y2: 30, run: 500, labelAt: 'from' })).toBe('M0 0L30 0C42 0 34 30 46 30L60 30');
+  });
+
+  it('ends every stream of every site with a level stretch into its target and starts it with one', () => {
+    for (const key of ['CHLOR_ALKALI', 'REFINERY', 'CRACKER_FLEX', 'VINYLS', 'STYRENICS', 'FUEL_DEPOT', 'OIL_FIELD']) {
+      const s = sheetOf(key);
+      const under = Math.max(...s.nodes.map((n) => n.y + n.h));
+      for (const e of s.edges) {
+        const d = edgePath(e, under);
+        // starts: M x1 y1 L a y1 with a at least 14 px on
+        const start = /^M(-?[\d.]+) (-?[\d.]+)L(-?[\d.]+) (-?[\d.]+)/.exec(d);
+        expect(start).not.toBeNull();
+        expect(Number(start![4])).toBe(Number(start![2]));
+        expect(Number(start![3]) - Number(start![1])).toBeGreaterThanOrEqual(STRAIGHT - 1e-6);
+        // ends: … bx y2 L x2 y2 with the same y and at least 14 px of run
+        const end = /(-?[\d.]+) (-?[\d.]+)L(-?[\d.]+) (-?[\d.]+)$/.exec(d);
+        expect(end).not.toBeNull();
+        expect(Number(end![2])).toBe(Number(end![4]));
+        expect(Number(end![3]) - Number(end![1])).toBeGreaterThanOrEqual(STRAIGHT - 1e-6);
+        expect(Number(end![3])).toBe(e.x2);
+      }
+    }
   });
 
   it('routes a stream that skips columns through a lane of its own, clear of every block', () => {
@@ -193,7 +217,7 @@ describe('buildFlowsheet', () => {
     expect(long).toBeGreaterThan(5); // LPG, fuel oil, diesel… all cross several columns
     // a path through a lane is level across the column and curved in the gaps
     expect(edgePath({ x1: 0, y1: 10, x2: 300, y2: 50, via: [{ x0: 100, x1: 200, y: 80 }] }))
-      .toBe('M0 10C50 10 50 80 100 80L200 80C250 80 250 50 300 50');
+      .toBe('M0 10L14 10C57 10 57 80 100 80L200 80C243 80 243 50 286 50L300 50');
   });
 
   it('leaves room in every gap for the labels written there', () => {

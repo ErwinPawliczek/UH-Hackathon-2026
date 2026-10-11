@@ -1,6 +1,7 @@
 // The site window: click a plant and see what is going on inside it.
 //
-//   1. Header — the plant's icon, name and state in words.
+//   1. Header — the plant's icon, name and state in words. It is the window's
+//      title bar: there is no separate title strip above it.
 //   2. Process flow diagram — tanks, units and the streams between them, with
 //      live numbers on every one (Flowsheet.tsx); it scrolls sideways for a
 //      big site and can be widened with the expand button.
@@ -332,8 +333,18 @@ export function SiteWindow() {
   return (
     <DraggableWindow
       id={SITE_WINDOW_ID}
-      title={presetLabel(site.preset)}
+      title={`${site.name} (${presetLabel(site.preset)})`}
       width={width}
+      // the title bar is the header: icon, name and state — and still the drag handle
+      header={(
+        <div className="flex items-center gap-2.5" data-testid="site-header">
+          <SiteBadge preset={site.preset} icon={22} down={snap.siteStatus[siteIdx] === 3} />
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-base font-bold leading-tight text-ink">{site.name}</h2>
+            <p className="truncate text-xs leading-tight" style={{ color: state.alarm ? 'var(--alarm)' : 'var(--muted)' }} data-testid="site-state">{state.text}</p>
+          </div>
+        </div>
+      )}
       maxHeight="calc(100vh - 80px)"
       open
       onClose={() => select(null)}
@@ -345,14 +356,6 @@ export function SiteWindow() {
       ) : undefined}
     >
       <div className="flex flex-col gap-3 p-3 text-xs" data-testid="site-window">
-        <header className="flex items-center gap-2.5">
-          <SiteBadge preset={site.preset} icon={22} down={snap.siteStatus[siteIdx] === 3} />
-          <div className="min-w-0 flex-1">
-            <h2 className="truncate font-body text-base font-semibold leading-tight text-ink">{site.name}</h2>
-            <p className="truncate" style={{ color: state.alarm ? 'var(--alarm)' : 'var(--muted)' }} data-testid="site-state">{state.text}</p>
-          </div>
-        </header>
-
         {sheet === null ? (
           <p className="text-muted">This engine does not describe the process flows for this site, so there is no diagram to draw.</p>
         ) : (
