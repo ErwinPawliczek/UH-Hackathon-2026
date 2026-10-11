@@ -61,13 +61,16 @@ store it as the `FLY_API_TOKEN` GitHub secret; the deploy step then runs
 Railway is the documented fallback host — any Docker host runs the same
 image; only the DNS target changes.
 
-## Custom domain — DNS records for Erwin
+## Custom domain — DNS records
 
 The demo lives at **demo.petrogrid.xyz** (decided 2026-10-10; corrected from
 an earlier typo). The apex
 `petrogrid.xyz` and `www` belong to the main website — keep them pointed
-wherever the site is hosted, never at Fly. Because the demo is a subdomain,
-one CNAME record is all the DNS needs.
+wherever the site is hosted, never at Fly. The demo subdomain uses direct
+A/AAAA records at the registrar pointing at the `petrogrid` Fly app — **no
+CNAME and no record change is needed for the app rename**: the records
+already target the live app, so deploying with `app = "petrogrid"` lands on
+the same domain.
 
 1. Register the hostnames with Fly (provisions TLS certificates):
 
@@ -79,16 +82,16 @@ one CNAME record is all the DNS needs.
    `_acme-challenge` records — create them at the registrar, then check with
    `fly certs check demo.petrogrid.xyz`.
 
-2. Create this record at the registrar (the CNAME target is the app's
-   `fly.dev` name):
+2. DNS records (already in place at the registrar):
 
-   | Type  | Name   | Value                     | Notes |
-   |-------|--------|---------------------------|-------|
-   | CNAME | `demo` | `petrogrid.fly.dev.` | demo subdomain → Fly app |
+   | Type | Name  | Value               | Notes |
+   |------|-------|---------------------|-------|
+   | A    | `demo` | `66.241.125.211`   | Fly app IPv4 (anycast) |
+   | AAAA | `demo` | Fly app IPv6       | matching IPv6 address |
 
-3. Verify propagation, then `https://demo.petrogrid.xyz` should serve the
-   demo. Until DNS propagates, `https://<app>.fly.dev` always works — the
-   demo link is a DNS record swap, never a rebuild (§14).
+3. `https://demo.petrogrid.xyz` serves the demo from the same machine
+   `https://petrogrid.fly.dev` does — the domain is a DNS fact, not a
+   rebuild (§14).
 
 ## Notes
 
