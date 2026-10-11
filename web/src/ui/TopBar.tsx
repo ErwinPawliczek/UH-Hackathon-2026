@@ -111,7 +111,8 @@ export function TopBar() {
 
       {/* Start and Resume are the call to action (primary); Pause, while running, reads as the active state. */}
       <button className={`btn ${playing ? 'btn-active' : 'btn-primary'}`} onClick={togglePlay} data-testid="play-pause">
-        {!started ? <>▶ Start<span className="hidden lg:inline"> simulation</span></> : playing ? '⏸ Pause' : '▶ Resume'}
+        {/* one text run inside the button: as separate flex items the words lose the space between them */}
+        {!started ? <span>▶ Start<span className="hidden lg:inline"> simulation</span></span> : playing ? '⏸ Pause' : '▶ Resume'}
       </button>
 
       <SpeedControl />
@@ -153,7 +154,7 @@ export function TopBar() {
         aria-pressed={rewindOpen}
         data-testid="rewind-toggle"
       >
-        ↶ Back<span className="hidden lg:inline"> in time</span>
+        <span>↶ Back<span className="hidden lg:inline"> in time</span></span>
       </button>
       <button
         className={`btn ${sitesOpen ? 'btn-active' : ''}`}
