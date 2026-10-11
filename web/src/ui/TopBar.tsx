@@ -14,6 +14,7 @@ import { fmtClock } from './format';
 
 export function TopBar() {
   const playing = useSim((s) => s.playing);
+  const started = useSim((s) => s.started);
   const speed = useSim((s) => s.speed);
   const seed = useSim((s) => s.seed);
   const scenario = useSim((s) => s.scenario);
@@ -40,8 +41,9 @@ export function TopBar() {
         {tick === undefined ? '—' : fmtClock(Number(tick))}
       </span>
 
-      <button className={`btn ${playing ? 'btn-active' : ''}`} onClick={togglePlay} data-testid="play-pause">
-        {playing ? '⏸ Pause' : '▶ Play'}
+      {/* Before the first start this is the primary call to action; afterwards Pause / Resume. */}
+      <button className={`btn ${playing || !started ? 'btn-active' : ''}`} onClick={togglePlay} data-testid="play-pause">
+        {!started ? '▶ Start simulation' : playing ? '⏸ Pause' : '▶ Resume'}
       </button>
 
       <div className="flex items-center gap-1" role="group" aria-label="Simulation speed">

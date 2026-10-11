@@ -41,6 +41,12 @@ export interface SimState {
   backendKind: BackendKind;
   /** Named world the session asks the engine for; ?world= at bootstrap, no UI. */
   worldName: string;
+  /**
+   * False until the visitor starts the run: every session opens paused at
+   * day 0 behind a "Start simulation" button. True from the first start on,
+   * when the same control becomes Pause / Resume.
+   */
+  started: boolean;
   playing: boolean;
   world: WorldSpec | null;
   snap: Snapshot | null;
@@ -92,7 +98,8 @@ export const useSim = create<SimState>()(
 
       backendKind: 'http',
       worldName: DEFAULT_WORLD,
-      playing: true,
+      started: false,
+      playing: false,
       world: null,
       snap: null,
       prevSnap: null,
@@ -108,7 +115,7 @@ export const useSim = create<SimState>()(
       setSeed: (seed) => set({ seed: Math.max(0, Math.floor(seed)) }),
       setScenario: (scenario) => set({ scenario }),
       setSpeed: (speed) => set({ speed }),
-      togglePlay: () => set((s) => ({ playing: !s.playing })),
+      togglePlay: () => set((s) => ({ playing: !s.playing, started: true })),
       select: (selected) => set({ selected }),
       setWorld: (world) => set({ world }),
       pushSnapshot: (snap) =>

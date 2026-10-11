@@ -13,11 +13,12 @@ export function useSimEngine(): void {
   const worldName = useSim((s) => s.worldName);
   const retryNonce = useSim((s) => s.retryNonce);
 
-  // session lifecycle: reopen when any session-defining setting changes
-  useEffect(
-    () => openEngineSession({ kind: backendKind, seed, scenario, world: worldName }),
-    [backendKind, seed, scenario, worldName, retryNonce],
-  );
+  // session lifecycle: reopen when any session-defining setting changes.
+  // Every new run opens paused at day 0 and waits for "Start simulation".
+  useEffect(() => {
+    useSim.setState({ playing: false, started: false });
+    return openEngineSession({ kind: backendKind, seed, scenario, world: worldName });
+  }, [backendKind, seed, scenario, worldName, retryNonce]);
 
   // step loop: fixed cadence, created once — playing state is read at tick time
   useEffect(() => startStepLoop(), []);
