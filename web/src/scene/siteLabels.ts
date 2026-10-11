@@ -15,6 +15,7 @@ import * as THREE from 'three';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import type { WorldSpec } from '../engine/world';
 import { useSim } from '../store/sim';
+import { siteOwners } from '../store/roomTypes';
 import { siteBadgeSvg } from '../ui/siteIcons';
 import type { SiteAnchor } from './siteClusters';
 
@@ -63,6 +64,9 @@ export class SiteLabels {
   /** Site index of each label, and the state its badge currently shows. */
   private readonly labelSite: number[] = [];
   private readonly shown: number[] = [];
+  /** The owner line of each label, and what it shows now. */
+  private readonly owners: HTMLElement[] = [];
+  private readonly ownerShown: string[] = [];
   /** The styled box inside each label: badge and name in a row. */
   private readonly boxes: HTMLElement[] = [];
 
@@ -97,6 +101,16 @@ export class SiteLabels {
       const name = document.createElement('span');
       name.textContent = site.name;
       name.className = 'site-label-name';
+      // in a multiplayer room: who runs the plant, under its name (empty otherwise)
+      const owner = document.createElement('span');
+      owner.className = 'site-label-owner';
+      owner.style.cssText = 'display:none;font-size:10px;letter-spacing:0.04em;text-transform:none;margin-top:2px;';
+      const title = document.createElement('span');
+      title.textContent = site.name;
+      name.textContent = '';
+      name.append(title, owner);
+      this.owners.push(owner);
+      this.ownerShown.push('');
       box.appendChild(name);
       el.appendChild(box);
       this.boxes.push(box);
@@ -131,8 +145,34 @@ export class SiteLabels {
     this.renderer.render(this.scene, camera);
   }
 
+  /** In a room: each plant's owner under its name, and the player's own plant marked in blue. */
+  private syncOwners(): void {
+    const st = useSim.getState();
+    if (st.room === null && this.ownerShown.every((v) => v === '')) return;
+    const names = siteOwners(st.room, st.world?.sites.length ?? 0);
+    for (let i = 0; i < this.labels.length; i++) {
+      const site = this.labelSite[i];
+      const mine = st.room !== null && st.mySite === site;
+      const text = st.room === null ? '' : mine ? `${names[site] ?? 'You'} · yours` : names[site] ?? '';
+      const key = `${mine ? '*' : ''}${text}`;
+      if (key === this.ownerShown[i]) continue;
+      this.ownerShown[i] = key;
+      const el = this.owners[i];
+      el.textContent = text;
+      el.style.display = text === '' ? 'none' : 'block';
+      el.style.color = mine ? '#0f54ba' : '#5f656c';
+      el.style.fontWeight = mine ? '600' : '500';
+      const box = this.boxes[i];
+      box.dataset.owned = text === '' ? '' : mine ? 'mine' : 'other';
+      box.style.boxShadow = mine ? '0 0 0 2px #1764d6' : '';
+      box.style.padding = text === '' ? '1px 7px 1px 2px' : '3px 7px 3px 2px';
+      this.shown[i] = -1; // the state colours are laid over again below
+    }
+  }
+
   /** Restyle the badges whose site changed state since the last frame. */
   private syncStates(): void {
+    this.syncOwners();
     const status = useSim.getState().snap?.siteStatus;
     if (status === undefined) return;
     for (let i = 0; i < this.labels.length; i++) {

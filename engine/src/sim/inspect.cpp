@@ -726,5 +726,44 @@ std::string economyJson(const World& world, const State& state, const Recorder& 
   return doc.dump();
 }
 
+std::string scoresJson(const World& world, const State& state) {
+  struct Row {
+    size_t site;
+    double revenue, feed, freight, energy, profit, sold;
+  };
+  std::vector<Row> rows;
+  for (size_t s = 0; s < world.sites.size(); ++s) {
+    const Ledger& l = state.ledger[s];
+    const SiteTrade& t = state.site_trade[s];
+    Row r{s, l.revenue + t.pipe_revenue, l.feed_cost + t.pipe_feed_cost, l.freight,
+          l.energy_cost, 0.0, t.sold_t};
+    r.profit = r.revenue - r.feed - r.freight - r.energy;
+    rows.push_back(r);
+  }
+  // Rank by profit, ties to the lower site index so the order is stable.
+  std::vector<size_t> order(rows.size());
+  for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+  std::stable_sort(order.begin(), order.end(),
+                   [&](size_t a, size_t b) { return rows[a].profit > rows[b].profit; });
+  std::vector<int> rank(rows.size(), 0);
+  for (size_t i = 0; i < order.size(); ++i) rank[order[i]] = static_cast<int>(i) + 1;
+
+  json scores = json::array();
+  for (const Row& r : rows)
+    scores.push_back({{"site", r.site},
+                      {"key", world.sites[r.site].key},
+                      {"name", world.sites[r.site].name},
+                      {"profitUsd", r.profit},
+                      {"revenueUsd", r.revenue},
+                      {"feedUsd", r.feed},
+                      {"freightUsd", r.freight},
+                      {"energyUsd", r.energy},
+                      {"markup", state.site_markup[r.site]},
+                      {"rateShare", state.site_rate_share[r.site]},
+                      {"soldT", r.sold},
+                      {"rank", rank[r.site]}});
+  return json{{"tick", state.tick}, {"scores", scores}}.dump();
+}
+
 }  // namespace sim
 }  // namespace crx

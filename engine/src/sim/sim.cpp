@@ -75,6 +75,9 @@ std::unique_ptr<Sim> Sim::createOn(std::shared_ptr<World> world, uint64_t seed) 
   sim->state_.sink_starved.assign(w.processes.size(), 0);
   sim->state_.rate_override.assign(w.processes.size(), -1.0);
   sim->state_.proc_totals.assign(w.processes.size(), ProcTotals{});
+  sim->state_.site_markup.assign(w.sites.size(), 0.0);
+  sim->state_.site_rate_share.assign(w.sites.size(), 1.0);
+  sim->state_.site_trade.assign(w.sites.size(), SiteTrade{});
   // M2 logistics (§4.4): all edges open, market index at par, the fleet at
   // its home sites, no orders.
   sim->state_.edge_open.assign(w.edges.size(), 1);
@@ -252,6 +255,68 @@ std::string Sim::command(const std::string& json_cmd) {
         return json{{"ok", true}}.dump();
       }
       return json{{"ok", false}, {"error", "no process " + proc_key + " at site"}}.dump();
+    }
+
+    if (type == "set_price" || type == "site_rate") {
+      // A site's own commercial levers: a markup on what it asks for its
+      // products, and the share of design it runs at.
+      const bool price = type == "set_price";
+      int site = -1;
+      if (cmd.contains("site")) {
+        const json& v = cmd.at("site");
+        if (v.is_number_unsigned() && v.get<uint64_t>() < world_->sites.size())
+          site = static_cast<int>(v.get<uint64_t>());
+        else if (v.is_string())
+          site = world_->findSite(v.get<std::string>());
+      }
+      if (site < 0) return R"({"ok":false,"error":"There is no such site"})";
+      const Site& s = world_->sites[static_cast<size_t>(site)];
+      if (price) {
+        if (!cmd.contains("markup") || !cmd.at("markup").is_number())
+          return R"({"ok":false,"error":"Give a markup from -0.2 to 0.3"})";
+        const double markup = std::clamp(cmd.at("markup").get<double>(), -0.2, 0.3);
+        state_.site_markup[static_cast<size_t>(site)] = markup;
+        const int pct = static_cast<int>(std::lround(markup * 100.0));
+        logEvent(rec_, state_.tick, "price_set", s.key, "",
+                 s.name + ": asking price set " +
+                     (pct == 0 ? std::string("back to the market rule")
+                               : std::to_string(std::abs(pct)) + "% " +
+                                     (pct > 0 ? "above" : "below") + " the market rule"));
+        return json{{"ok", true}, {"markup", markup}}.dump();
+      }
+      if (!cmd.contains("share") || !cmd.at("share").is_number())
+        return R"({"ok":false,"error":"Give a rate as a share of design, up to 1"})";
+      // Below a process's turndown it would shut down, so the share stops at
+      // the highest turndown among the site's processes.
+      double floor = 0.0;
+      bool any = false;
+      for (const Process& proc : world_->processes)
+        if (proc.site.v == static_cast<uint32_t>(site)) {
+          floor = std::max(floor, world_->catalog.process_types[proc.type].turndown);
+          any = true;
+        }
+      if (!any) return json{{"ok", false}, {"error", s.name + " has nothing to run"}}.dump();
+      const double share = std::clamp(cmd.at("share").get<double>(), floor, 1.0);
+      for (size_t p = 0; p < world_->processes.size(); ++p)
+        if (world_->processes[p].site.v == static_cast<uint32_t>(site))
+          state_.rate_override[p] = share >= 1.0 ? -1.0 : share * world_->processes[p].design_rate_t_h;
+      state_.site_rate_share[static_cast<size_t>(site)] = share;
+      logEvent(rec_, state_.tick, "rate_set", s.key, "",
+               s.name + ": running at " + std::to_string(static_cast<int>(std::lround(share * 100.0))) +
+                   "% of design at most");
+      return json{{"ok", true}, {"share", share}, {"min_share", floor}}.dump();
+    }
+
+    if (type == "unit_state") {
+      if (!cmd.contains("unit_index") || !cmd.at("unit_index").is_number_unsigned() ||
+          !cmd.contains("down") || !cmd.at("down").is_boolean())
+        return R"({"ok":false,"error":"Say which unit, and whether it goes down or comes back"})";
+      std::string error;
+      const uint64_t unit = cmd.at("unit_index").get<uint64_t>();
+      if (!setUnitHeld(*world_, state_, rec_, static_cast<uint32_t>(std::min<uint64_t>(unit, UINT32_MAX)),
+                       cmd.at("down").get<bool>(), error))
+        return json{{"ok", false}, {"error", error}}.dump();
+      return json{{"ok", true}}.dump();
     }
 
     if (type == "place_order") {

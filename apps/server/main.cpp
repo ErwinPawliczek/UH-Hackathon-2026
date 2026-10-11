@@ -5,6 +5,7 @@
 //   --web-dir P   or CRX_WEB_DIR   — built front end to serve at / (default web/dist)
 
 #include "crx_server.h"
+#include "rooms.h"
 
 #include <httplib.h>
 
@@ -47,6 +48,15 @@ int main(int argc, char** argv) {
 
   crx::server::SessionRegistry sessions;
   httplib::Server svr;
+  // A worker thread stays with its connection for as long as the client keeps
+  // it alive, and a room's players poll four times a second, so they never
+  // let go: with the default pool (8 on a small machine) the ninth
+  // connection waited until another had served its 100 requests. One thread
+  // per connection a full room can hold open; idle ones are dropped after 2 s.
+  svr.new_task_queue = [] { return new httplib::ThreadPool(256); };
+  svr.set_keep_alive_timeout(2);
+  crx::server::RoomRegistry rooms;
+  crx::server::registerRoomRoutes(svr, rooms);
   crx::server::registerRoutes(svr, sessions, webDir);
 
   svr.set_logger([](const httplib::Request& req, const httplib::Response& res) {
@@ -57,10 +67,11 @@ int main(int argc, char** argv) {
   // reap in create(); sessions idle past the 2-minute TTL are freed (bounded
   // work, no cancellation ceremony at shutdown).
   std::atomic<bool> stop{false};
-  std::thread reaper([&sessions, &stop] {
+  std::thread reaper([&sessions, &rooms, &stop] {
     while (!stop.load(std::memory_order_relaxed)) {
       std::this_thread::sleep_for(std::chrono::seconds(30));
       sessions.reapExpired();
+      rooms.reapExpired();
     }
   });
 

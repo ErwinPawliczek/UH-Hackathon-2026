@@ -6,7 +6,8 @@ import { useEffect } from 'react';
 import { useSim } from './sim';
 import { openEngineSession, startStepLoop } from './engineSession';
 
-export function useSimEngine(): void {
+/** `enabled` false leaves the private run alone: the app is showing a multiplayer room instead (store/useRoom.ts). */
+export function useSimEngine(enabled = true): void {
   const backendKind = useSim((s) => s.backendKind);
   const seed = useSim((s) => s.seed);
   const scenario = useSim((s) => s.scenario);
@@ -16,9 +17,10 @@ export function useSimEngine(): void {
   // session lifecycle: reopen when any session-defining setting changes.
   // Every new run opens paused at day 0 and waits for "Start simulation".
   useEffect(() => {
+    if (!enabled) return;
     useSim.setState({ playing: false, started: false, ended: false });
     return openEngineSession({ kind: backendKind, seed, scenario, world: worldName });
-  }, [backendKind, seed, scenario, worldName, retryNonce]);
+  }, [enabled, backendKind, seed, scenario, worldName, retryNonce]);
 
   // step loop: fixed cadence, created once — playing state is read at tick time
   useEffect(() => startStepLoop(), []);

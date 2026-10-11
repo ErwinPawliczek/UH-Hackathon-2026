@@ -80,7 +80,8 @@ FetchContent_Declare(httplib
 FetchContent_MakeAvailable(httplib)
 
 add_library(crx_server_core STATIC
-  apps/server/crx_server.cpp)
+  apps/server/crx_server.cpp
+  apps/server/rooms.cpp)
 target_include_directories(crx_server_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/apps/server)
 target_link_libraries(crx_server_core PUBLIC crx_engine httplib::httplib)
 target_compile_options(crx_server_core PRIVATE

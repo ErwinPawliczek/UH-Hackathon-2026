@@ -89,6 +89,9 @@ Quote quoteLot(const World& world, const State& state, const PathCache& paths,
   // §5.6 price formation and cost, all per tonne.
   const double base = mat.base_price;
   q.ask = base * (1.0 + params.beta * (1.0 - 2.0 * q.seller_fill));
+  // The seller's own markup (set_price) on top of the rule.
+  const double markup = state.site_markup[seller.site.v];
+  if (markup != 0.0) q.ask *= 1.0 + markup;
   q.bid = base * (1.0 + params.beta * urgency);
   q.switch_cost =
       (static_cast<int>(seller_tank) == contract_seller) ? 0.0 : params.switch_cost_frac * base;

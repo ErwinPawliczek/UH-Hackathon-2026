@@ -27,6 +27,19 @@ const POLL_MS = 25;
 /** The live backend session; null between sessions and while one is opening. */
 let session: { id: string; backend: SimBackend } | null = null;
 
+/** False while the live session is a shared room: the server runs its clock, and the client never steps or releases it. */
+let clientSteps = true;
+
+/**
+ * Stand a session in that someone else owns and advances (a multiplayer
+ * room): the panels' reads go through it like any session, but the step loop
+ * leaves it alone and it is never released from here. Null takes it away.
+ */
+export function adoptSession(live: { id: string; backend: SimBackend } | null): void {
+  session = live;
+  clientSteps = live === null;
+}
+
 /** Backend + id of the current session, for the step loop and UI commands. */
 export function engineSession(): { id: string; backend: SimBackend } | null {
   return session;
@@ -114,6 +127,12 @@ async function rewindSession({ id, backend }: LiveSession, tick: number): Promis
 /** Fire-and-forget DELETE of the current server-side session, if any. */
 function releaseCurrent(): void {
   if (session === null) return;
+  if (!clientSteps) {
+    // a room is the server's: just let go of it
+    session = null;
+    clientSteps = true;
+    return;
+  }
   const { id, backend } = session;
   session = null;
   void backend.release(id).catch(() => {
@@ -266,7 +285,7 @@ export function startStepLoop(): () => void {
   let carry = 0; // fraction of a tick owed to the next step
   const timer = setInterval(() => {
     const s = useSim.getState();
-    if (!s.playing || inFlight) return;
+    if (!s.playing || inFlight || !clientSteps) return;
     const current = session;
     if (current === null) return;
     const now = performance.now();
