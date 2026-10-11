@@ -1130,3 +1130,127 @@ TEST_CASE("M15: place_order books a buyer's own lot exactly as the hourly pass w
   third->step(200);
   CHECK(again->stateHash() == third->stateHash());
 }
+
+TEST_CASE("M16: smooth_km rounds interior corners and leaves the ends where they are") {
+  const auto lengthOf = [](const std::vector<double>& xy) {
+    double len = 0;
+    for (size_t i = 2; i + 1 < xy.size(); i += 2)
+      len += std::hypot(xy[i] - xy[i - 2], xy[i + 1] - xy[i - 1]);
+    return len;
+  };
+
+  // A right angle: 100 km east, then 100 km south (y grows downward).
+  const std::vector<double> corner = {0, 0, 100, 0, 100, 100};
+  const std::vector<double> r = roundPolylineCorners(corner, 8.0);
+  REQUIRE(r.size() == 2 * 9);  // start, a 7-point curve, end
+  CHECK(r[0] == 0.0);
+  CHECK(r[1] == 0.0);
+  CHECK(r[16] == 100.0);
+  CHECK(r[17] == 100.0);
+  // The curve leaves the first leg 8 km before the corner and joins the
+  // second 8 km after it; its middle is the Bezier midpoint.
+  CHECK(r[2] == doctest::Approx(92.0));
+  CHECK(r[3] == doctest::Approx(0.0));
+  CHECK(r[14] == doctest::Approx(100.0));
+  CHECK(r[15] == doctest::Approx(8.0));
+  CHECK(r[8] == doctest::Approx(98.0));
+  CHECK(r[9] == doctest::Approx(2.0));
+  for (size_t i = 2; i < 16; i += 2) {  // inside the corner, never past it
+    CHECK(r[i] >= 92.0 - 1e-9);
+    CHECK(r[i] <= 100.0 + 1e-9);
+    CHECK(r[i + 1] >= -1e-9);
+    CHECK(r[i + 1] <= 8.0 + 1e-9);
+  }
+  // Shorter than the drawn path, longer than the straight line between the ends.
+  CHECK(lengthOf(r) < lengthOf(corner));
+  CHECK(lengthOf(r) > std::hypot(100.0, 100.0));
+  CHECK(lengthOf(r) == doctest::Approx(200.0 - 16.0 + 12.98).epsilon(0.01));
+
+  // Off, too few points, a near-straight bend and repeated points.
+  CHECK(roundPolylineCorners(corner, 0.0) == corner);
+  const std::vector<double> two = {0, 0, 50, 50};
+  CHECK(roundPolylineCorners(two, 8.0) == two);
+  const std::vector<double> gentle = {0, 0, 100, 0, 200, 5};  // under 3 degrees
+  CHECK(roundPolylineCorners(gentle, 8.0) == gentle);
+  const std::vector<double> repeated = {0, 0, 100, 0, 100, 0, 100, 0, 100, 100};
+  const std::vector<double> rr = roundPolylineCorners(repeated, 8.0);
+  CHECK(rr == r);  // the duplicates vanish and the corner is rounded once
+  const std::vector<double> stacked = {5, 5, 5, 5, 5, 5};
+  CHECK(roundPolylineCorners(stacked, 8.0) == stacked);
+  for (const double v : rr) CHECK(std::isfinite(v));
+  // Short legs limit the curve: it takes at most 45% of either one.
+  const std::vector<double> tight = roundPolylineCorners({0, 0, 10, 0, 10, 4}, 8.0);
+  CHECK(tight[2] == doctest::Approx(10.0 - 1.8));  // 0.45 x the 4 km leg
+  CHECK(tight[tight.size() - 3] == doctest::Approx(1.8));
+  // Two corners in a row never overlap.
+  const std::vector<double> zig = roundPolylineCorners({0, 0, 10, 0, 10, 10, 20, 10}, 8.0);
+  for (size_t i = 2; i + 1 < zig.size(); i += 2) {
+    const double step = std::hypot(zig[i] - zig[i - 2], zig[i + 1] - zig[i - 1]);
+    CHECK(step > 0.0);
+  }
+  CHECK(zig.front() == 0.0);
+  CHECK(zig.back() == 10.0);
+
+  // On the map world: without the key (or with 0) every path is as drawn;
+  // with it the nodes stay put, each edge keeps its ends, gets no longer
+  // and stays at least as long as the straight line between them.
+  json file = json::parse(readWorldFile());
+  file.erase("smooth_km");
+  World plain, zero, smooth;
+  std::string error;
+  REQUIRE(buildWorldFromJson("erwin-world-v1", file.dump(), 42, plain, error));
+  file["smooth_km"] = 0;
+  REQUIRE(buildWorldFromJson("erwin-world-v1", file.dump(), 42, zero, error));
+  CHECK(zero.polyline_xy == plain.polyline_xy);
+  file["smooth_km"] = 8;
+  REQUIRE(buildWorldFromJson("erwin-world-v1", file.dump(), 42, smooth, error));
+  REQUIRE(smooth.nodes.size() == plain.nodes.size());
+  REQUIRE(smooth.edges.size() == plain.edges.size());
+  for (size_t n = 0; n < plain.nodes.size(); ++n) {
+    CHECK(smooth.nodes[n].x_km == plain.nodes[n].x_km);
+    CHECK(smooth.nodes[n].y_km == plain.nodes[n].y_km);
+  }
+  size_t rounded_edges = 0;
+  double plain_km = 0, smooth_km = 0;
+  for (size_t e = 0; e < plain.edges.size(); ++e) {
+    const RouteEdge& a = plain.edges[e];
+    const RouteEdge& b = smooth.edges[e];
+    CHECK(b.a == a.a);
+    CHECK(b.b == a.b);
+    const size_t a0 = 2 * a.polyline.begin, a1 = 2 * (a.polyline.begin + a.polyline.count - 1);
+    const size_t b0 = 2 * b.polyline.begin, b1 = 2 * (b.polyline.begin + b.polyline.count - 1);
+    CHECK(smooth.polyline_xy[b0] == plain.polyline_xy[a0]);
+    CHECK(smooth.polyline_xy[b0 + 1] == plain.polyline_xy[a0 + 1]);
+    CHECK(smooth.polyline_xy[b1] == plain.polyline_xy[a1]);
+    CHECK(smooth.polyline_xy[b1 + 1] == plain.polyline_xy[a1 + 1]);
+    CHECK(b.length_km <= a.length_km + 1e-9);
+    const double chord = std::hypot(plain.polyline_xy[a1] - plain.polyline_xy[a0],
+                                    plain.polyline_xy[a1 + 1] - plain.polyline_xy[a0 + 1]);
+    CHECK(b.length_km >= chord - 1e-9);
+    // The edge is exactly as long as the path it carries.
+    std::vector<double> xy(smooth.polyline_xy.begin() + static_cast<long>(b0),
+                           smooth.polyline_xy.begin() + static_cast<long>(b1) + 2);
+    CHECK(b.length_km == doctest::Approx(std::max(lengthOf(xy), 0.01)).epsilon(1e-9));
+    if (b.polyline.count > a.polyline.count) ++rounded_edges;
+    plain_km += a.length_km;
+    smooth_km += b.length_km;
+  }
+  CHECK(rounded_edges > 20);
+  CHECK(smooth_km < plain_km);
+  CHECK(smooth_km > 0.98 * plain_km);  // corners only: the network barely shrinks
+  // Pipelines keep their ends too.
+  for (size_t i = 0; i < plain.pipelines.size(); ++i) {
+    const Range<uint32_t> a = plain.pipelines[i].polyline, b = smooth.pipelines[i].polyline;
+    REQUIRE(a.count >= 2);
+    CHECK(b.count >= a.count);
+    CHECK(smooth.polyline_xy[2 * b.begin] == plain.polyline_xy[2 * a.begin]);
+    CHECK(smooth.polyline_xy[2 * (b.begin + b.count - 1) + 1] ==
+          plain.polyline_xy[2 * (a.begin + a.count - 1) + 1]);
+  }
+  // A bad radius is a load error.
+  file["smooth_km"] = -1;
+  World bad_world;
+  CHECK(!buildWorldFromJson("erwin-world-v1", file.dump(), 42, bad_world, error));
+  file["smooth_km"] = "wide";
+  CHECK(!buildWorldFromJson("erwin-world-v1", file.dump(), 42, bad_world, error));
+}
