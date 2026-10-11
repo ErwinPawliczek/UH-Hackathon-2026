@@ -22,6 +22,9 @@ struct Recorder {
   // runs nobody looks at (a room's shadow engines); the simulation itself
   // never reads the recorder, so a muted run steps to the same state hash.
   bool muted = false;
+  // The player whose command is being applied, if any: stamped on every log
+  // line written meanwhile (Sim::command sets and clears it).
+  std::string actor_id, actor_name;
 
   // Economy history (inspect.h economyJson): one row per recorded hour since
   // tick 0, never trimmed (a 60-day run of the 22-site world is about

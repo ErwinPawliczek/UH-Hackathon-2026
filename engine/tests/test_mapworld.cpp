@@ -2379,3 +2379,162 @@ TEST_CASE("M30: scores add up per site, pipelines included, ranked by profit") {
   CHECK(row("GAS_PLANT").at("feedUsd").get<double>() > 0.0);
   CHECK(row("GAS_PLANT").at("revenueUsd").get<double>() > 0.0);
 }
+
+TEST_CASE("M31: a trade block stops lots and pipeline flow between two sites, one way") {
+  auto plain = makeMapSim();
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  const World& w = sim->world();
+  plain->step(96 * 25);
+  // The pair that trades most by vehicle in an untouched run.
+  std::map<std::pair<uint32_t, uint32_t>, int> lots;
+  for (const Order& o : plain->state().order)
+    ++lots[{w.tanks[o.from].site.v, w.tanks[o.to].site.v}];
+  REQUIRE(!lots.empty());
+  std::pair<uint32_t, uint32_t> pair = lots.begin()->first;
+  for (const auto& kv : lots)
+    if (kv.second > lots[pair]) pair = kv.first;
+  const uint32_t seller = pair.first, buyer = pair.second;
+  const auto cmd = [&](const json& c) { return json::parse(sim->command(c.dump())); };
+
+  sim->step(96 * 5);
+  const json before = json::parse(partnersJson(w, sim->state(), seller));
+  bool listed = false;
+  for (const json& b : before.at("buyers"))
+    if (b.at("site") == buyer) {
+      listed = true;
+      CHECK(b.at("blocked") == false);
+      CHECK(!b.at("materials").empty());
+    }
+  CHECK(listed);
+
+  // A site that never buys from this one is refused by name.
+  CHECK(cmd({{"type", "trade_block"}, {"site", seller}, {"partner", seller}, {"direction", "sell"}, {"blocked", true}})
+            .at("error") == w.sites[seller].name + " does not sell to " + w.sites[seller].name);
+  CHECK(cmd({{"type", "trade_block"}, {"site", seller}, {"partner", buyer}, {"direction", "up"}, {"blocked", true}}).at("ok") == false);
+  CHECK(cmd({{"type", "trade_block"}, {"site", seller}, {"partner", buyer}, {"direction", "sell"}, {"blocked", false}}).at("ok") == false);
+  const uint64_t hash_before = sim->stateHash();
+  REQUIRE(cmd({{"type", "trade_block"}, {"site", seller}, {"partner", buyer}, {"direction", "sell"}, {"blocked", true}}).at("ok") == true);
+  CHECK(sim->stateHash() != hash_before);
+  CHECK(cmd({{"type", "trade_block"}, {"site", seller}, {"partner", buyer}, {"direction", "sell"}, {"blocked", true}}).at("ok") == false);
+  const uint64_t at = sim->state().tick;
+  sim->step(96 * 20);
+  int after = 0, other = 0;
+  for (const Order& o : sim->state().order) {
+    if (o.created_tick < at) continue;
+    const bool same = w.tanks[o.from].site.v == seller && w.tanks[o.to].site.v == buyer;
+    after += same ? 1 : 0;
+    other += same ? 0 : 1;
+  }
+  CHECK(after == 0);
+  CHECK(other > 0);  // everyone else still trades
+  for (const json& b : json::parse(partnersJson(w, sim->state(), seller)).at("buyers"))
+    if (b.at("site") == buyer) CHECK(b.at("blocked") == true);
+  // Seen from the buyer it is the same block, in the "buy" direction.
+  for (const json& s : json::parse(partnersJson(w, sim->state(), buyer)).at("suppliers"))
+    if (s.at("site") == seller) CHECK(s.at("blocked") == true);
+  REQUIRE(cmd({{"type", "trade_block"}, {"site", buyer}, {"partner", seller}, {"direction", "buy"}, {"blocked", false}}).at("ok") == true);
+  CHECK(sim->state().trade_blocks.empty());
+  bool logged = false;
+  for (const LogEntry& e : sim->recorder().log)
+    logged = logged || e.text == w.sites[seller].name + " stopped selling to " + w.sites[buyer].name;
+  CHECK(logged);
+
+  // A pipeline between two sites: blocked from the buying end, nothing flows.
+  int pipe = -1;
+  for (size_t i = 0; i < w.pipelines.size() && pipe < 0; ++i)
+    if (w.tanks[w.pipelines[i].from.v].site.v != w.tanks[w.pipelines[i].to.v].site.v &&
+        sim->state().pipe_flow_t_h[i] > 0.0)
+      pipe = static_cast<int>(i);
+  REQUIRE(pipe >= 0);
+  const uint32_t up = w.tanks[w.pipelines[static_cast<size_t>(pipe)].from.v].site.v;
+  const uint32_t down = w.tanks[w.pipelines[static_cast<size_t>(pipe)].to.v].site.v;
+  REQUIRE(cmd({{"type", "trade_block"}, {"site", w.sites[down].key}, {"partner", w.sites[up].key}, {"direction", "buy"}, {"blocked", true},
+               {"player", "p1"}, {"player_name", "Maya \"M\""}})
+              .at("ok") == true);
+  sim->step(8);
+  CHECK(sim->state().pipe_flow_t_h[static_cast<size_t>(pipe)] == 0.0);
+  // The line names the player, and the events JSON survives the quotes in her name.
+  const json events = json::parse(eventsJson(sim->recorder(), 0));
+  bool named = false;
+  for (const json& e : events)
+    if (e.contains("player")) {
+      named = true;
+      CHECK(e.at("player") == "p1");
+      CHECK(e.at("playerName") == "Maya \"M\"");
+      CHECK(e.at("text") == "Maya \"M\" stopped buying from " + w.sites[up].name);
+    }
+  CHECK(named);
+}
+
+TEST_CASE("M32: a hurricane slows the roads and a water restriction holds barges and ships") {
+  auto sim = makeMapSim();
+  auto plain = makeMapSim();
+  REQUIRE(sim);
+  const World& w = sim->world();
+  sim->step(96 * 5);
+  plain->step(96 * 5);
+  const auto cmd = [&](const json& c) { return json::parse(sim->command(c.dump())); };
+  const auto has = [&](const std::string& text) {
+    int n = 0;
+    for (const LogEntry& e : sim->recorder().log) n += e.text == text ? 1 : 0;
+    return n;
+  };
+  const auto modeOf = [&](size_t v) { return w.catalog.vehicle_classes[w.fleet[v].cls].mode; };
+  const auto roadKm = [&](const Sim& s, const std::vector<double>& x0, const std::vector<double>& y0) {
+    double km = 0;
+    for (size_t v = 0; v < s.state().vehicle.size(); ++v)
+      if (modeOf(v) == Mode::Road)
+        km += std::hypot(s.state().vehicle[v].x_km - x0[v], s.state().vehicle[v].y_km - y0[v]);
+    return km;
+  };
+
+  CHECK(cmd({{"type", "hurricane"}, {"duration_h", -1}}).at("ok") == false);
+  REQUIRE(cmd({{"type", "hurricane"}}).at("until_tick") == sim->state().tick + 72 * 4);
+  CHECK(has("A hurricane has slowed every road to a quarter speed") == 1);
+  // One tick of travel: road vehicles cover about a quarter of the ground.
+  std::vector<double> x0, y0;
+  for (const VehicleState& v : sim->state().vehicle) {
+    x0.push_back(v.x_km);
+    y0.push_back(v.y_km);
+  }
+  sim->step(1);
+  plain->step(1);
+  const double slow = roadKm(*sim, x0, y0), fast = roadKm(*plain, x0, y0);
+  CHECK(fast > 0.0);
+  CHECK(slow < fast * 0.5);
+  sim->step(72 * 4);
+  CHECK(sim->state().hurricane_until == 0);
+  CHECK(has("The hurricane has passed") == 1);
+
+  REQUIRE(cmd({{"type", "water_restriction"}, {"duration_h", 48}}).at("ok") == true);
+  CHECK(has("A water restriction has stopped all barges and ships") == 1);
+  std::vector<uint8_t> idle;
+  for (size_t v = 0; v < sim->state().vehicle.size(); ++v)
+    idle.push_back(modeOf(v) != Mode::Road && sim->state().vehicle[v].status == VehStatus::Idle);
+  int water = 0;
+  for (size_t v = 0; v < idle.size(); ++v) water += modeOf(v) != Mode::Road ? 1 : 0;
+  REQUIRE(water > 0);
+  for (int t = 0; t < 48 * 4 - 1; ++t) {
+    sim->step(1);
+    for (size_t v = 0; v < idle.size(); ++v) {
+      if (modeOf(v) == Mode::Road) continue;
+      const VehStatus st = sim->state().vehicle[v].status;
+      if (idle[v]) CHECK(st == VehStatus::Idle);  // none sets off
+    }
+  }
+  // By the end every barge and ship is at rest: idle, or held at a berth.
+  for (size_t v = 0; v < idle.size(); ++v)
+    if (modeOf(v) != Mode::Road) {
+      const VehStatus st = sim->state().vehicle[v].status;
+      CHECK(st != VehStatus::ToDropoff);
+      CHECK(st != VehStatus::ToPickup);
+    }
+  sim->step(2);
+  CHECK(has("The water restriction is lifted") == 1);
+  sim->step(96 * 3);
+  int moving = 0;
+  for (size_t v = 0; v < idle.size(); ++v)
+    moving += modeOf(v) != Mode::Road && sim->state().vehicle[v].status != VehStatus::Idle ? 1 : 0;
+  CHECK(moving > 0);  // and they sail again
+}

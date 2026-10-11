@@ -451,9 +451,22 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
       if (std::find(site.units.begin(), site.units.end(), unit) == site.units.end())
         return sendJson(res, 200, no("That unit is not at " + site.name + ", your plant"));
       command = {{"type", "unit_state"}, {"unit_index", unit}, {"down", b["down"].get<bool>()}};
+    } else if (action == "block") {
+      const std::string direction = str(b, "direction");
+      if (!b.contains("partner") || !b["partner"].is_number_unsigned() ||
+          (direction != "sell" && direction != "buy") || !b.contains("blocked") ||
+          !b["blocked"].is_boolean())
+        return sendJson(res, 200, no("Say which partner, whether to stop selling or buying, and on or off"));
+      if (b["partner"].get<uint64_t>() >= room->sites.size())
+        return sendJson(res, 200, no("There is no such site"));
+      command = {{"type", "trade_block"}, {"site", me->site}, {"partner", b["partner"].get<uint64_t>()},
+                 {"direction", direction}, {"blocked", b["blocked"].get<bool>()}};
     } else {
       return sendJson(res, 200, no("Unknown action"));
     }
+    // The engine names the player in the log line the action writes.
+    command["player"] = me->id;
+    command["player_name"] = me->name;
     sendJson(res, 200, issue(*room, command, me->id));
   });
 
@@ -579,6 +592,19 @@ void registerRoomRoutes(httplib::Server& svr, RoomRegistry& rooms) {
       out.status = 200;
       out.set_content(std::string(reinterpret_cast<const char*>(data), n * sizeof(float)),
                       "application/octet-stream");
+    });
+  });
+  svr.Get("/api/room/" + code + "/partners", [view](const Req& req, Res& res) {
+    uint32_t site = 0;
+    try {
+      site = static_cast<uint32_t>(std::stoul(req.get_param_value("site")));
+    } catch (...) {
+      return sendJson(res, 400, no("query must be ?site=N"));
+    }
+    view(req, res, [site](Room& r, Res& out) {
+      const char* text = crx_partners(r.sim, site);
+      if (text == nullptr) return sendJson(out, 400, no("There is no such site"));
+      sendJson(out, 200, text);
     });
   });
   svr.Get("/api/room/" + code + "/scores", [view](const Req& req, Res& res) {

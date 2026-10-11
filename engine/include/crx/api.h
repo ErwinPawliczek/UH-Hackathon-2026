@@ -62,6 +62,12 @@ const char* crx_step_report(crx_sim* sim, uint32_t ticks);
    kept only for their totals. */
 void crx_mute(crx_sim* sim);
 
+/* One site's trading partners as JSON: {"site","name","buyers":[{"site",
+   "key","name","materials":[..],"blocked"}],"suppliers":[same]}: who can buy
+   its products, who can supply its feeds, and which the trade_block command
+   has switched off. NULL when `site` is not a site index. */
+const char* crx_partners(const crx_sim* sim, uint32_t site);
+
 /* One vehicle as JSON: class, status, cargo, the order it serves with both
    ends named, where its current leg ends, and the path from here to there.
    NULL when `index` is not a vehicle. Reply valid until the next call. */

@@ -61,8 +61,26 @@ void Recorder::rejectedTotals(const World& world, const State& state, double& to
 void logEvent(Recorder& rec, uint64_t tick, const std::string& type, const std::string& site,
               const std::string& unit, const std::string& text) {
   if (rec.muted) return;
-  rec.log.push_back({rec.next_seq++, tick, type, site, unit, text});
+  rec.log.push_back({rec.next_seq++, tick, type, site, unit, text, rec.actor_id, rec.actor_name});
 }
+
+namespace {
+// Text that may carry a player's name goes into JSON escaped.
+std::string escaped(const std::string& s) {
+  std::string out;
+  for (const char c : s) {
+    if (c == '"' || c == '\\') {
+      out += '\\';
+      out += c;
+    } else if (static_cast<unsigned char>(c) < 0x20) {
+      out += ' ';
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+}  // namespace
 
 std::string eventsJson(const Recorder& rec, uint64_t since_seq) {
   std::string out = "[";
@@ -77,7 +95,11 @@ std::string eventsJson(const Recorder& rec, uint64_t since_seq) {
     std::snprintf(buf, sizeof buf, "%llu", static_cast<unsigned long long>(e.tick));
     out += buf;
     out += ",\"type\":\"" + e.type + "\",\"site\":\"" + e.site + "\",\"unit\":\"" + e.unit +
-           "\",\"text\":\"" + e.text + "\"}";
+           "\",\"text\":\"" + escaped(e.text) + "\"";
+    if (!e.player.empty())
+      out += ",\"player\":\"" + escaped(e.player) + "\",\"playerName\":\"" +
+             escaped(e.player_name) + "\"";
+    out += "}";
   }
   out += "]";
   return out;
@@ -158,6 +180,9 @@ uint64_t hashState(const World& world, const State& state) {
   for (const double r : state.rate_override) h.mixF64(r);
   // Only sites with a markup enter the hash, so a run nobody priced hashes
   // exactly as it did before markups existed.
+  for (const uint64_t b : state.trade_blocks) h.mixU64(b);
+  if (state.hurricane_until != 0) h.mixU64(state.hurricane_until ^ 0x4855525249ull);
+  if (state.water_stop_until != 0) h.mixU64(state.water_stop_until ^ 0x5741544552ull);
   for (size_t s = 0; s < state.site_markup.size(); ++s)
     if (state.site_markup[s] != 0.0) {
       h.mixU32(static_cast<uint32_t>(s));

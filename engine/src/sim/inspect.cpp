@@ -765,5 +765,55 @@ std::string scoresJson(const World& world, const State& state) {
   return json{{"tick", state.tick}, {"scores", scores}}.dump();
 }
 
+std::vector<uint16_t> tradedMaterials(const World& world, uint32_t seller, uint32_t buyer) {
+  std::vector<uint16_t> out;
+  if (seller == buyer) return out;
+  const auto add = [&](uint16_t m) {
+    if (std::find(out.begin(), out.end(), m) == out.end()) out.push_back(m);
+  };
+  const uint8_t vehicle_modes = (1u << static_cast<uint8_t>(Mode::Road)) |
+                                (1u << static_cast<uint8_t>(Mode::River)) |
+                                (1u << static_cast<uint8_t>(Mode::Sea));
+  for (const Tank& from : world.tanks) {
+    if (from.site.v != seller) continue;
+    if (from.role != TankRole::Product && from.role != TankRole::Both) continue;
+    if (!(world.catalog.materials[from.material].modes & vehicle_modes)) continue;
+    for (const Tank& to : world.tanks)
+      if (to.site.v == buyer && to.material == from.material &&
+          (to.role == TankRole::Feed || to.role == TankRole::Both))
+        add(from.material);
+  }
+  for (const Pipeline& pipe : world.pipelines)
+    if (world.tanks[pipe.from.v].site.v == seller && world.tanks[pipe.to.v].site.v == buyer)
+      add(world.tanks[pipe.to.v].material);
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
+std::string partnersJson(const World& world, const State& state, uint32_t site) {
+  if (site >= world.sites.size()) return std::string();
+  const auto list = [&](bool selling) {
+    json rows = json::array();
+    for (uint32_t other = 0; other < world.sites.size(); ++other) {
+      const uint32_t seller = selling ? site : other, buyer = selling ? other : site;
+      const std::vector<uint16_t> mats = tradedMaterials(world, seller, buyer);
+      if (mats.empty()) continue;
+      json names = json::array();
+      for (const uint16_t m : mats) names.push_back(materialWord(world.catalog, m));
+      rows.push_back({{"site", other},
+                      {"key", world.sites[other].key},
+                      {"name", world.sites[other].name},
+                      {"materials", names},
+                      {"blocked", state.tradeBlocked(seller, buyer)}});
+    }
+    return rows;
+  };
+  return json{{"site", site},
+              {"name", world.sites[site].name},
+              {"buyers", list(true)},
+              {"suppliers", list(false)}}
+      .dump();
+}
+
 }  // namespace sim
 }  // namespace crx

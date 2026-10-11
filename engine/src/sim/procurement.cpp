@@ -47,6 +47,7 @@ Quote quoteLot(const World& world, const State& state, const PathCache& paths,
   if (!(mat.modes & (1u << static_cast<uint8_t>(vc.mode)))) return q;
   if (vc.carries != mat.phase) return q;
   if (vc.capacity_t <= 0.0 || vc.speed_kmh <= 0.0) return q;
+  if (state.tradeBlocked(seller.site.v, buyer.site.v)) return q;  // one side refuses the other
   const bool no_vehicles = class_nodes[cls].empty();  // the world has no such vehicle
   if (no_vehicles && !explain) return q;
 
