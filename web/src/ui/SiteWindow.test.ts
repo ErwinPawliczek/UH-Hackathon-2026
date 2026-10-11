@@ -74,3 +74,15 @@ describe('hasBothFlows', () => {
     for (const key of ['FUEL_DEPOT', 'OIL_FIELD']) expect(hasBothFlows(sheetOf(key)!)).toBe(false);
   });
 });
+
+describe('a limited site', () => {
+  it("says what a shock has cut, and to how much", () => {
+    const s = snap(0.5);
+    s.siteStatus[siteIdx] = 5;
+    expect(stateWords(sheet, world, s, siteIdx)).toEqual({ text: 'Output cut to 50%', alarm: false });
+    const depot = world.sites.findIndex((x) => x.key === 'FUEL_DEPOT');
+    const d = snap(0.4);
+    d.siteStatus[depot] = 5;
+    expect(stateWords(buildFlowsheet(world, depot), world, d, depot).text).toBe('Demand cut to 40%');
+  });
+});

@@ -8,6 +8,7 @@ import type { WorldSpec } from '../engine/world';
 import { useSim } from '../store/sim';
 import { DraggableWindow } from './DraggableWindow';
 import { SiteBadge } from './SiteIcon';
+import { SITE_LIMITED } from './eventKinds';
 import { SITE_ICON_ORDER, iconKey, presetLabel } from './siteIcons';
 
 export const SITES_WINDOW_ID = 'sites';
@@ -64,6 +65,7 @@ export function SitesKey() {
       <ul className="p-1" data-testid="sites-key">
         {kinds.map((kind) => {
           const down = kind.sites.some((i) => siteStatus?.[i] === 3);
+          const limited = !down && kind.sites.some((i) => siteStatus?.[i] === SITE_LIMITED);
           const here = kind.sites.includes(selectedSite);
           return (
             <li key={kind.preset}>
@@ -73,8 +75,9 @@ export function SitesKey() {
                 title={world === null ? undefined : kind.sites.map((i) => world.sites[i].name).join(', ')}
                 data-testid={`sites-key-${kind.preset}`}
               >
-                <SiteBadge preset={kind.preset} down={down} />
+                <SiteBadge preset={kind.preset} down={down} limited={limited} />
                 <span className="min-w-0 flex-1 truncate text-ink">{kind.label}</span>
+                {limited && <span className="text-[11px] text-blue">limited</span>}
                 {kind.sites.length > 1 && <span className="data text-muted">×{kind.sites.length}</span>}
               </button>
             </li>

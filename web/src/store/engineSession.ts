@@ -230,38 +230,15 @@ export function isGoneSession(err: unknown): boolean {
   return err instanceof HttpError && (err.status === 404 || err.status === 410);
 }
 
-let recovering = false;
-
 /**
- * Replace a dead session with a fresh one (same settings, fresh id) and
- * retry the failed step once. Silent: the visitor keeps watching — an error
- * is surfaced only when recovery itself fails.
+ * The session is gone on the server (it restarted, or dropped a run left
+ * idle): this run cannot continue. Stop, and say so — the visitor starts a
+ * new one. Nothing is recreated behind their back: a fresh run would stand
+ * at day 0 with everything they did gone, which must not happen silently.
  */
-export async function recoverFromGoneSession(ticks: number): Promise<void> {
-  const dead = session;
-  if (recovering || dead === null) return;
-  recovering = true;
-  try {
-    const s = useSim.getState();
-    session = null;
-    // The dead id's own DELETE would only 404 — skip it and go straight to a
-    // fresh session; openSessionFor restores the world and first snapshot.
-    // (A settings change racing this recovery can orphan one session —
-    // bounded by the server's 2-minute idle expiry and LRU eviction.)
-    const fresh = await openSessionFor(
-      { kind: dead.backend.kind, seed: s.seed, scenario: s.scenario, world: s.worldName },
-      dead.backend,
-    );
-    if (fresh === null) return;
-    session = fresh;
-    // The failed request, retried once on the fresh session.
-    useSim.getState().pushSnapshot(await dead.backend.step(fresh.id, ticks));
-  } catch (err) {
-    session = null;
-    useSim.getState().setError(err instanceof Error ? err.message : String(err));
-  } finally {
-    recovering = false;
-  }
+export function endRun(): void {
+  session = null;
+  useSim.setState({ ended: true, playing: false, error: null });
 }
 
 /**
@@ -310,7 +287,7 @@ export function startStepLoop(): () => void {
         useSim.getState().setError(null);
       } catch (err) {
         if (isGoneSession(err)) {
-          void recoverFromGoneSession(ticks);
+          endRun();
         } else {
           useSim.getState().setError(err instanceof Error ? err.message : String(err));
         }

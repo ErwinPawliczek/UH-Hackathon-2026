@@ -45,6 +45,8 @@ const STATE_STYLE: Record<number, { fill: string; line: string; ink: string; acc
   2: { fill: '#e8f0fc', line: '#1764d6', ink: '#0a0a0a', accent: '#1764d6', border: '#79aef2', text: '#5f656c' },
   3: { fill: '#d1372f', line: '#d1372f', ink: '#ffffff', accent: '#ffffff', border: '#d1372f', text: '#d1372f' },
   4: { fill: '#ffffff', line: '#d1372f', ink: '#0a0a0a', accent: '#d1372f', border: '#d1372f', text: '#5f656c' },
+  // limited: running, but with its output or demand cut by a shock — blue like holding, with blue text to set it apart from running
+  5: { fill: '#e8f0fc', line: '#1764d6', ink: '#0a0a0a', accent: '#1764d6', border: '#1764d6', text: '#1764d6' },
 };
 
 export class SiteLabels {

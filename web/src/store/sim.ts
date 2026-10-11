@@ -11,7 +11,7 @@ import { persist } from 'zustand/middleware';
 import type { Snapshot } from '../engine/snapshot';
 import type { SimEvent, BackendKind, VehicleDetail } from '../engine/api';
 import type { WorldSpec } from '../engine/world';
-import { scenarioSite, type EngineScenario } from '../engine/scenarios';
+import { scenarioSite, type EngineScenario, scenarioTicks } from '../engine/scenarios';
 import { userSeq } from './userNotes';
 import {
   DEFAULT_SEED, DEFAULT_WORLD, STORAGE_KEY, dropLegacyPersistedState, backendOverride, seedFromParams,
@@ -110,6 +110,8 @@ export interface SimState {
   lastSeq: number;
   selected: Selection;
   error: string | null;
+  /** the server no longer has this run (it restarted, or the run sat idle too long): only a new run can follow */
+  ended: boolean;
   /**
    * Live backend command dispatcher, wired by the engine session; null
    * between sessions. A command the engine accepts leaves a note in the log
@@ -196,6 +198,7 @@ export const useSim = create<SimState>()(
       lastSeq: -1,
       selected: null,
       error: null,
+      ended: false,
       sendCommand: null,
       fetchVehicle: null,
       fetchSeries: null,
@@ -225,8 +228,11 @@ export const useSim = create<SimState>()(
         }),
       setError: (error) => set({ error }),
       triggerScenario: async (scenario) => {
-        const { sendCommand, triggered } = get();
-        if (sendCommand === null || triggered.includes(scenario.key)) return;
+        const { sendCommand, triggered, triggeredAt, snap } = get();
+        // once at a time: it can be run again when its duration has passed
+        const running = triggered.includes(scenario.key)
+          && Number(snap?.tick ?? 0) < (triggeredAt[scenario.key] ?? 0) + scenarioTicks(scenario);
+        if (sendCommand === null || running) return;
         let reply: unknown;
         try {
           reply = await sendCommand(scenario.command, { note: false }); // the scenario's own note follows
@@ -245,7 +251,7 @@ export const useSim = create<SimState>()(
         // (The session serialises commands with steps, so the snapshot in the
         // store is the tick the engine was at when it took the command.)
         set((s) => ({
-          triggered: [...s.triggered, scenario.key],
+          triggered: [...s.triggered.filter((k) => k !== scenario.key), scenario.key],
           triggeredAt: { ...s.triggeredAt, [scenario.key]: Number(s.snap?.tick ?? 0) },
           events: [
             ...s.events,

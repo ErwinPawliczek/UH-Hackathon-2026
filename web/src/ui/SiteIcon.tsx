@@ -44,7 +44,7 @@ export function SiteIcon({ preset, size = 18 }: { preset: string; size?: number 
  * A preset's icon in a small hexagon badge. `down` paints it alarm red with a
  * white icon — the same "plant down" state the map labels show.
  */
-export function SiteBadge({ preset, icon = 16, down = false }: { preset: string; icon?: number; down?: boolean }) {
+export function SiteBadge({ preset, icon = 16, down = false, limited = false }: { preset: string; icon?: number; down?: boolean; /** running with its output or demand cut: a blue badge */ limited?: boolean }) {
   const g = badgeGeometry(icon);
   const style = down
     ? ({ '--icon-ink': '#ffffff', '--icon-accent': '#ffffff' } as React.CSSProperties)
@@ -65,8 +65,8 @@ export function SiteBadge({ preset, icon = 16, down = false }: { preset: string;
     >
       <polygon
         points={g.points}
-        fill={down ? 'var(--alarm)' : 'var(--white)'}
-        stroke={down ? 'var(--alarm)' : 'var(--ink)'}
+        fill={down ? 'var(--alarm)' : limited ? 'var(--blue-soft)' : 'var(--white)'}
+        stroke={down ? 'var(--alarm)' : limited ? 'var(--blue)' : 'var(--ink)'}
         strokeWidth={1.5}
       />
       <g transform={`translate(${g.inset[0]} ${g.inset[1]}) scale(${icon / ICON_GRID})`}>

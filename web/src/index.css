@@ -372,6 +372,18 @@ h2 {
   --btn-ring: 2px;
 }
 
+/* a refused entry: the field flashes red while the old value comes back */
+.btn-field-rejected {
+  --btn-line: var(--alarm);
+  --btn-ring: 2px;
+  animation: field-rejected 0.9s ease-out;
+}
+
+@keyframes field-rejected {
+  0%, 40% { --btn-fill: #fbeceb; color: var(--alarm); }
+  100% { color: inherit; }
+}
+
 .btn-field input {
   width: 4ch; /* "64.0" — the hexagon keeps its width whatever the number */
   border: 0;
