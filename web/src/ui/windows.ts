@@ -93,7 +93,7 @@ export function clampToViewport(
   y: number,
   width: number,
   viewport: { width: number; height: number },
-  insets: { top: number; titleBar: number } = { top: 48, titleBar: 40 },
+  insets: { top: number; titleBar: number } = { top: 56, titleBar: 40 },
 ): { x: number; y: number } {
   const maxX = Math.max(0, viewport.width - width);
   const maxY = Math.max(insets.top, viewport.height - insets.titleBar);

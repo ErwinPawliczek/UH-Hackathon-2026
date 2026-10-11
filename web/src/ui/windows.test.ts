@@ -39,7 +39,7 @@ describe('clampToViewport', () => {
     expect(clampToViewport(100, 100, 400, viewport)).toEqual({ x: 100, y: 100 });
   });
   it('keeps the window inside the sides and under the top bar', () => {
-    expect(clampToViewport(-50, 10, 400, viewport)).toEqual({ x: 0, y: 48 });
+    expect(clampToViewport(-50, 10, 400, viewport)).toEqual({ x: 0, y: 56 });
     expect(clampToViewport(900, 100, 400, viewport)).toEqual({ x: 600, y: 100 });
   });
   it('never lets the title bar drop off the bottom', () => {
