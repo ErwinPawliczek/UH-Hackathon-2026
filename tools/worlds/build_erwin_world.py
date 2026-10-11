@@ -34,6 +34,7 @@ STYRENE_TO_PAINTS = 0.18 # share of styrene sold as monomer instead of made into
 PP_TO_PACKAGING = 0.60
 NORTH_PORT_BUNKER = 12.0 # t/h of fuel oil trucked to the north port
 FLEET_SPARE = 1.30
+SMOOTH_KM = 8.0          # corners of drawn roads, lanes and pipelines are rounded with this radius
 TRUCK_LEAD = 64.0       # starting lead time (h) for truck-fed tanks; they hold about 2.5 x half of it
 # Ordering rules for this world (engine MarketParams overrides): a buyer waits
 # until it can fill most of a vehicle, places at most a few lots per hour, and
@@ -458,7 +459,7 @@ def main():
              "cellKm": layout["cellKm"], "water": layout["water"], "sites": sites,
              "pipelines": pipelines, "network": network, "fleet": fleet,
              "contracts": [], "stranded_materials": [], "market": MARKET,
-             "warm_start": True}
+             "warm_start": True, "smooth_km": SMOOTH_KM}
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(world, separators=(",", ":")) + "\n")
 
