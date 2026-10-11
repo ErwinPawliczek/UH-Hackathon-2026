@@ -2,6 +2,7 @@
 // binary snapshot handling (the step reply is the §7.3 snapshot, decoded into
 // typed-array views with no copy). Inject the fetch implementation for tests.
 
+import type { SiteEconReply } from '../ui/siteEcon';
 import { decode, type Snapshot } from './snapshot';
 import type { WorldSpec } from './world';
 import type {
@@ -224,6 +225,11 @@ export class HttpBackend implements SimBackend {
 
   async economy(id: string, bucketH: number): Promise<EconomyReply> {
     return this.json(`/api/sim/${encodeURIComponent(id)}/economy?bucket_h=${Math.max(1, Math.floor(bucketH))}`);
+  }
+
+  /** GET /api/sim/{id}/site-econ?site=N — the model's curves and where one site sits on them. */
+  async siteEcon(id: string, site: number): Promise<SiteEconReply> {
+    return this.json(`/api/sim/${encodeURIComponent(id)}/site-econ?site=${Math.max(0, Math.floor(site))}`);
   }
 
   async market(id: string): Promise<MarketReply> {

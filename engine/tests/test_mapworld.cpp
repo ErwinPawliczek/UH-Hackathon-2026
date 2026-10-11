@@ -2709,3 +2709,101 @@ TEST_CASE("M35: dearer feed moves down the chain, and a unit with no margin turn
   CHECK(loss->state().proc[pp].status != ProcStatus::Shutdown);
   CHECK(plain->state().margin_signal[pp] > 0.9);
 }
+
+TEST_CASE("M36: the site economics view puts each site on the engine's own curves, in both worlds") {
+  for (const bool market : {false, true}) {
+    CAPTURE(market);
+    auto sim = market ? makeMarketSim() : makeMapSim();
+    const World& w = sim->world();
+    sim->step(96 * 10);
+    std::vector<TankSignals> signals;
+    computeSignals(w, sim->state(), signals);
+    const auto doc = [&](const char* key) {
+      return json::parse(siteEconJson(*sim, static_cast<uint32_t>(w.findSite(key))));
+    };
+    const auto inRange = [](const json& v, double lo, double hi) {
+      return v.is_number() && v.get<double>() >= lo - 1e-9 && v.get<double>() <= hi + 1e-9;
+    };
+    // One plant, one customer, one source.
+    for (const char* key : {"POLYPROPYLENE", "PACKAGING", "SALT_MINE"}) {
+      CAPTURE(key);
+      const json d = doc(key);
+      CHECK(d.at("tick") == 96 * 10);
+      CHECK(d.at("rules").at("priceAwareBuying") == market);
+      CHECK(d.at("rules").at("marginControl") == market);
+      CHECK(d.at("rules").at("demandElasticity") == (market ? 0.2 : 0.0));
+      const json& c = d.at("curves");
+      CHECK(c.at("feed").at("lo") == 0.25);
+      CHECK(c.at("feed").at("hi") == 1.25);
+      CHECK(c.at("room").at("lo") == 0.10);
+      CHECK(c.at("urgency").at("hi") == 2.5);
+      CHECK(c.at("ask").at("swing") == 0.5);
+      CHECK(c.at("buy").at("normalCover") == 2.5);
+      CHECK(c.at("buy").at("cheapCover") == (market ? 4.0 : 2.5));
+      CHECK(c.at("buy").at("dearCover") == (market ? 1.5 : 2.5));
+      CHECK(c.at("buy").at("cheapFill").is_null() == !market);
+      CHECK(c.at("margin").at("fullAtShareOfBase") == 0.5);
+      REQUIRE(!d.at("tanks").empty());
+      for (const json& t : d.at("tanks")) {
+        const uint32_t i = t.at("tank").get<uint32_t>();
+        CHECK(w.tanks[i].site.v == static_cast<uint32_t>(w.findSite(key)));
+        CHECK(inRange(t.at("fill"), 0, 1));
+        CHECK(inRange(t.at("signal"), 0, 1));
+        // The dot is the engine's own signal for that tank.
+        CHECK(t.at("signal").get<double>() == (t.at("role") == "product" ? signals[i].h : signals[i].f));
+        if (!t.at("cover").is_null()) {
+          CHECK(t.at("urgency").get<double>() == signals[i].u);
+          CHECK(inRange(t.at("orderBelowCover"), 1.5, 4.0));
+          CHECK(inRange(t.at("fillTarget"), 0.3, 0.95));
+          if (!market) {
+            CHECK(t.at("orderBelowCover") == 2.5);
+            CHECK(t.at("fillTarget") == w.tanks[i].target_frac);
+          }
+          CHECK((t.at("bestOfferRatio").is_null() || inRange(t.at("bestOfferRatio"), 0.3, 3.0)));
+        }
+        if (!t.at("askRatio").is_null()) CHECK(inRange(t.at("askRatio"), 0.3, 3.0));
+        if (!t.at("demandFactor").is_null()) {
+          CHECK(inRange(t.at("demandFactor"), 0.6, 1.2));
+          if (!market) CHECK(t.at("demandFactor") == 1.0);
+        }
+      }
+      const json& plant = d.at("plant");
+      REQUIRE(plant.is_object());
+      CHECK(inRange(plant.at("rate"), 0, 1));
+      CHECK(inRange(plant.at("governor"), 0, 1));
+      CHECK(inRange(plant.at("marginSignal"), 0, 1));
+      if (!market) {
+        CHECK(plant.at("marginSignal") == 1.0);
+        CHECK(plant.at("margin").is_null());
+      }
+    }
+    // What each kind of site shows.
+    const json pp = doc("POLYPROPYLENE"), pack = doc("PACKAGING"), mine = doc("SALT_MINE");
+    bool buys = false, sells = false, line = false, mine_sells = false;
+    for (const json& t : pp.at("tanks")) {
+      buys = buys || (t.at("material") == "PROPYLENE" && !t.at("cover").is_null());
+      sells = sells || (t.at("material") == "PP" && !t.at("askRatio").is_null());
+    }
+    for (const json& t : pack.at("tanks")) line = line || !t.at("demandFactor").is_null();
+    for (const json& t : mine.at("tanks")) mine_sells = mine_sells || !t.at("askRatio").is_null();
+    CHECK(buys);
+    CHECK(sells);
+    CHECK(line);
+    CHECK(mine_sells);
+    if (market) CHECK(pp.at("plant").at("margin").is_number());
+    CHECK(siteEconJson(*sim, 9999).empty());
+
+    // Starve the polypropylene plant of propylene: it says so, with the tank.
+    const int site = w.findSite("POLYPROPYLENE");
+    uint32_t feed = 0;
+    for (uint32_t t = 0; t < w.tanks.size(); ++t)
+      if (w.tanks[t].site.v == static_cast<uint32_t>(site) &&
+          w.catalog.materials[w.tanks[t].material].key == "PROPYLENE")
+        feed = t;
+    sim->state().tank[feed].level_t = 0.0;
+    const json starved = doc("POLYPROPYLENE");
+    CHECK(starved.at("plant").at("limitedBy").at("kind") == "feed");
+    CHECK(starved.at("plant").at("limitedBy").at("tank") == feed);
+    CHECK(starved.at("plant").at("governor") == 0.0);
+  }
+}

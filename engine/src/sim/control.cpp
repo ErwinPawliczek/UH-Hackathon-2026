@@ -271,5 +271,22 @@ void stepControl(const World& world, State& state, const std::vector<TankSignals
   }
 }
 
+GovernorInfo governorOf(const World& world, const State& state,
+                        const std::vector<TankSignals>& signals, size_t process) {
+  GovernorInfo info;
+  const ProcView view = makeViews(world)[process];
+  const ProcessType& type = world.catalog.process_types[world.processes[process].type];
+  for (const TankId t : view.feeds)
+    if (signals[t.v].f < info.governor) info = {signals[t.v].f, 1, static_cast<int>(t.v)};
+  for (const TankId t : view.products)
+    if (signals[t.v].h < info.governor) info = {signals[t.v].h, 2, static_cast<int>(t.v)};
+  if (state.margin_control && type.boundary == Boundary::None) {
+    const double g_margin = type.turndown + (1.0 - type.turndown) * state.margin_signal[process];
+    if (g_margin < info.governor) info = {g_margin, 3, -1};
+  }
+  if (info.governor >= 0.999) info.kind = 0, info.tank = -1;
+  return info;
+}
+
 }  // namespace sim
 }  // namespace crx

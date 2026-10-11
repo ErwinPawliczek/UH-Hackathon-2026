@@ -11,6 +11,9 @@ namespace sim {
 // Energy prices used by production's energy booking and by plant margins.
 constexpr double kMarketHeatUsdGJ = 8.0;
 constexpr double kMarketPowerUsdMWh = 80.0;
+// The margin signal is 1 while a unit keeps this share of its base-price
+// margin, and falls to 0 as the margin goes to nothing.
+constexpr double kMarginFullShare = 0.5;
 
 // Recomputes, for every plant, what a tonne of basis costs to make at the
 // prices its feeds cost now and what its products fetch, and from that:

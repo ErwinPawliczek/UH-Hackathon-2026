@@ -29,6 +29,19 @@ struct ControlDecision {
 void stepControl(const World& world, State& state, const std::vector<TankSignals>& signals,
                  Recorder& rec, std::vector<ControlDecision>& out);
 
+// What holds one process back right now, from the same signals control
+// uses: the lowest of its feed tanks' f, its product tanks' h, and (with
+// margin control) the margin signal mapped onto turndown..1. `kind` is 0 for
+// nothing (governor about 1), 1 feed, 2 room, 3 margin; `tank` is the tank
+// behind a feed or room limit, -1 otherwise.
+struct GovernorInfo {
+  double governor = 1.0;
+  int kind = 0;
+  int tank = -1;
+};
+GovernorInfo governorOf(const World& world, const State& state,
+                        const std::vector<TankSignals>& signals, size_t process);
+
 }  // namespace sim
 }  // namespace crx
 
