@@ -498,3 +498,32 @@ h2 {
 :root[data-damage-view='1'] .site-label-box[data-broken='1'] {
   box-shadow: 0 0 0 3px var(--alarm) !important;
 }
+
+/* ---- the phone layout (see ui/narrow.ts: the same 700 px) ---- */
+@custom-variant narrow (@media (max-width: 699px));
+
+@media (max-width: 699px) {
+  html,
+  body {
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+
+  /* the Menu: every control a full-width row, tall enough for a thumb */
+  .phone-menu > .btn,
+  .phone-menu > div > .btn,
+  .phone-menu > a.btn {
+    --hex-h: 44px;
+    width: 100%;
+    font-size: 14px;
+  }
+
+  .phone-menu > div {
+    width: 100%;
+  }
+
+  /* in the Menu there is room for a button's whole name */
+  .phone-menu .btn .hidden {
+    display: inline;
+  }
+}

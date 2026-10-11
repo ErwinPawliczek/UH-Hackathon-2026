@@ -9,6 +9,8 @@
 // for the rest of the run and the button shows its name. On the in-page stub
 // it is the stub-era scripted-scenario setting (a session restart).
 
+import { useState } from 'react';
+import { useNarrow } from './narrow';
 import { EDITOR_PATH, leaveCustomMap } from '../store/customMap';
 import { useId } from 'react';
 import { useSim } from '../store/sim';
@@ -72,10 +74,15 @@ function ChainEdge() {
   );
 }
 
+/** Top-bar buttons on a phone: tall enough for a thumb. */
+const PHONE_BTN = { '--hex-h': '40px', fontSize: 14 } as React.CSSProperties;
+
 export function TopBar() {
   const playing = useSim((s) => s.playing);
   const started = useSim((s) => s.started);
   const scenario = useSim((s) => s.scenario);
+  const narrow = useNarrow();
+  const [menuOpen, setMenuOpen] = useState(false);
   const tick = useSim((s) => s.snap?.tick);
   const error = useSim((s) => s.error);
   const backendKind = useSim((s) => s.backendKind);
@@ -96,6 +103,175 @@ export function TopBar() {
   const engineScenarios = backendKind === 'http' ? scenariosFor(world).filter((s) => !customMap || s.group !== 'routes') : [];
   // a scenario whose duration has passed is over: the button goes back to "Scenario" and its entry can be picked again
   const triggered = activeScenarios(engineScenarios, triggeredAll, triggeredAt, Number(tick ?? 0));
+
+  // The same controls in two layouts. On a desktop they sit in the bar; on a
+  // phone the bar keeps the mark, the clock and Start, and one Menu holds the
+  // rest. The pieces are built once so both layouts use the very same ones.
+  const marketSwitch = (
+    <>
+      {/* the same map with or without the market rules: switching starts the run again */}
+      {backendKind === 'http' && !customMap && (
+        <button
+          className={`btn ${worldName === MARKET_WORLD ? 'btn-active' : ''}`}
+          aria-pressed={worldName === MARKET_WORLD}
+          onClick={() => useSim.setState({ worldName: worldName === MARKET_WORLD ? DEFAULT_WORLD : MARKET_WORLD })}
+          title="Buyers time their orders by price, customers buy less when prices rise, and plants slow down when they lose money. Switching starts the run again."
+          data-testid="market-toggle"
+        >
+          Market: {worldName === MARKET_WORLD ? 'on' : 'off'}
+        </button>
+      )}
+
+    </>
+  );
+  const scenarioMenu = (
+    <>
+      {/* One control: the button is named "Scenario" and opens the list. */}
+      {backendKind === 'http' ? (
+        <DropdownMenu
+          label={scenarioButtonLabel(engineScenarios, triggered)}
+          items={engineScenarios.map((s, i) => ({
+            key: s.key,
+            label: s.label,
+            checked: triggered.includes(s.key),
+            disabled: triggered.includes(s.key),
+            // route closures follow the plant scenarios, under their own divider
+            heading: s.group !== 'plants' && engineScenarios[i - 1]?.group !== s.group ? (s.group === 'routes' ? 'Routes' : 'Whole network') : undefined,
+          }))}
+          disabled={!live || engineScenarios.length === 0}
+          emptyText="No scenarios for this world"
+          onPick={(key) => {
+            const picked = engineScenarios.find((s) => s.key === key);
+            if (picked !== undefined) void triggerScenario(picked);
+          }}
+          testId="scenario-select"
+        />
+      ) : (
+        <DropdownMenu
+          label={scenario === 'none' ? 'Scenario' : SCENARIOS.find((s) => s.key === scenario)?.label ?? 'Scenario'}
+          items={SCENARIOS.map((s) => ({ key: s.key, label: s.label, checked: s.key === scenario }))}
+          onPick={setScenario}
+          testId="scenario-select"
+        />
+      )}
+
+    </>
+  );
+  const customTag = (
+    <>
+      {/* on a map from the map builder: say so, with the way back to the default world */}
+      {customMap && (
+        <span className="flex items-center gap-1 rounded-sm bg-blue-soft px-2 py-1 text-xs text-blue-strong" data-testid="custom-map-tag">
+          Custom map
+          <button
+            type="button"
+            className="cursor-pointer underline hover:text-ink"
+            onClick={() => { leaveCustomMap(); useSim.getState().retry(); }}
+            data-testid="default-world"
+          >
+            Default world
+          </button>
+        </span>
+      )}
+
+    </>
+  );
+  const windowToggles = (
+    <>
+      {/* floating windows: each toggle opens or closes one draggable panel */}
+      <button
+        className={`btn ${rewindOpen ? 'btn-active' : ''}`}
+        onClick={() => useWindows.getState().toggle(REWIND_WINDOW_ID, REWIND_WINDOW_AT)}
+        disabled={!canRewind && !rewindOpen}
+        aria-pressed={rewindOpen}
+        data-testid="rewind-toggle"
+      >
+        <span>↶ Back<span className="hidden lg:inline"> in time</span></span>
+      </button>
+      <button
+        className={`btn ${sitesOpen ? 'btn-active' : ''}`}
+        onClick={() => useWindows.getState().toggle(SITES_WINDOW_ID, SITES_WINDOW_AT)}
+        aria-pressed={sitesOpen}
+        data-testid="sites-toggle"
+      >
+        Sites
+      </button>
+      <button
+        className={`btn ${economyOpen ? 'btn-active' : ''}`}
+        onClick={() => useWindows.getState().toggle(ECONOMY_WINDOW_ID, ECONOMY_WINDOW_AT)}
+        aria-pressed={economyOpen}
+        data-testid="economy-toggle"
+      >
+        Economy
+      </button>
+      <button
+        className={`btn ${logOpen ? 'btn-active' : ''}`}
+        onClick={() => useWindows.getState().toggle(LOG_WINDOW_ID, LOG_WINDOW_AT)}
+        aria-pressed={logOpen}
+        data-testid="log-toggle"
+      >
+        Log
+      </button>
+
+    </>
+  );
+  const errorBanner = (
+    <>
+      {error !== null && (
+        <span
+          className="rounded-sm border border-alarm/50 bg-alarm/10 px-2 py-1 text-xs font-medium text-alarm"
+          data-testid="error-banner"
+          role="alert"
+        >
+          {error}
+        </span>
+      )}
+    </>
+  );
+
+  if (narrow) {
+    return (
+      <header className="pointer-events-auto absolute inset-x-0 top-0 z-[60] flex h-12 items-center gap-2 bg-panel px-2" data-testid="top-bar" data-layout="phone">
+        <ChainEdge />
+        <span className="flex shrink-0 items-center" data-testid="wordmark">
+          <img src="/logo.svg" alt="PetroGrid" width={22} height={22} />
+        </span>
+        <span className="data shrink-0 rounded-sm bg-panel-2 px-2 py-1" data-testid="clock">
+          {tick === undefined ? '—' : fmtClock(Number(tick))}
+        </span>
+        <button className={`btn ${playing ? 'btn-active' : 'btn-primary'}`} style={PHONE_BTN} onClick={togglePlay} data-testid="play-pause">
+          {!started ? '▶ Start' : playing ? '⏸ Pause' : '▶ Resume'}
+        </button>
+        <button
+          type="button"
+          className={`btn ml-auto ${menuOpen ? 'btn-active' : ''}`}
+          style={PHONE_BTN}
+          onClick={() => setMenuOpen(!menuOpen)}
+          aria-haspopup="true"
+          aria-expanded={menuOpen}
+          data-testid="phone-menu"
+        >
+          Menu <span aria-hidden="true" className="ml-2 text-[9px]">{menuOpen ? '▲' : '▼'}</span>
+        </button>
+        {menuOpen && (
+          // everything else the bar holds on a desktop, one under another; a tap on a panel's button closes the menu
+          <div
+            className="phone-menu absolute inset-x-0 top-12 flex max-h-[calc(100dvh-48px)] flex-col gap-2 overflow-auto border-b border-line-2 bg-panel p-3"
+            onClick={(e) => { if ((e.target as HTMLElement).closest('[data-testid$="-toggle"]:not([data-testid="market-toggle"])') !== null) setMenuOpen(false); }}
+            data-testid="phone-menu-list"
+          >
+            <SpeedControl />
+            {marketSwitch}
+            {scenarioMenu}
+            {customTag}
+            {windowToggles}
+            {errorBanner}
+          </div>
+        )}
+        {!menuOpen && error !== null && <span className="absolute inset-x-0 top-12 bg-alarm px-3 py-1 text-xs text-white" role="alert" data-testid="error-banner">{error}</span>}
+      </header>
+    );
+  }
 
   return (
     // z-[60]: above every floating window (they stack from 20 up, see DraggableWindow),

@@ -10,6 +10,7 @@
 // shows while `open` is true (a selected vehicle, a selected site) and tells
 // its owner when the close button is pressed. Its place is still remembered.
 
+import { useNarrow, useSheet } from './narrow';
 import { useEffect, useLayoutEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { bestPlacement, clampToViewport, placementCandidates, recentPress, useWindows, type Rect } from './windows';
 
@@ -20,6 +21,9 @@ import { bestPlacement, clampToViewport, placementCandidates, recentPress, useWi
  */
 const BASE_Z = 20;
 const DEFAULT_AT = { x: 96, y: 72 };
+
+/** A sheet's title-bar buttons, tall enough for a thumb. */
+const SHEET_BTN = { '--hex-h': '44px', fontSize: 14 } as React.CSSProperties;
 
 export function DraggableWindow({
   id,
@@ -110,7 +114,61 @@ export function DraggableWindow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, open, width]);
 
+  // On a phone a window is a bottom sheet, and one shows at a time: the one
+  // opened last. A window that opens takes the sheet; one that has lost it
+  // closes itself, so the menu's buttons always open rather than close.
+  const narrow = useNarrow();
+  const current = useSheet((s) => s.current);
+  const full = useSheet((s) => s.full);
+  useEffect(() => {
+    if (narrow && open) useSheet.getState().show(id);
+    // only when it opens: taking the sheet back later is the visitor's doing
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [narrow, open]);
+  useEffect(() => {
+    const now = useSheet.getState().current;
+    if (!narrow || !open || now === null || now === id) return;
+    if (onClose !== undefined) onClose();
+    else useWindows.getState().close(id);
+    // `current` is the trigger; the rest is read when it fires
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current]);
+
   if (!open) return null;
+
+  if (narrow) {
+    if (current !== id) return null;
+    const shut = () => {
+      useSheet.getState().show(null);
+      if (onClose !== undefined) onClose();
+      else useWindows.getState().close(id);
+    };
+    return (
+      <section
+        className="pointer-events-auto fixed inset-x-0 bottom-0 z-40 flex flex-col border-t border-line-2 bg-panel"
+        style={{ height: full ? 'calc(100dvh - 48px)' : '62dvh' }}
+        role="dialog"
+        aria-label={title}
+        data-window-id={id}
+        data-testid={`window-${id}`}
+        data-sheet={full ? 'full' : 'half'}
+      >
+        <header className="flex min-h-[52px] shrink-0 items-center gap-2 border-b border-line px-3 py-1" data-testid={`window-${id}-titlebar`}>
+          {header !== undefined
+            ? <div className="mr-auto min-w-0 flex-1">{header}</div>
+            : <h2 className="label mr-auto">{title}</h2>}
+          {actions}
+          <button type="button" className="btn" style={SHEET_BTN} onClick={() => useSheet.getState().setFull(!full)} aria-label={full ? 'Make the panel smaller' : 'Make the panel fill the screen'} data-testid={`window-${id}-expand`}>
+            {full ? '▼' : '▲'}
+          </button>
+          <button type="button" className="btn" style={SHEET_BTN} onClick={shut} aria-label={`Close ${title}`} data-testid={`window-${id}-close`}>
+            ✕
+          </button>
+        </header>
+        <div className="scroll-steady min-h-0 flex-1 overflow-auto" data-testid={`window-${id}-body`}>{children}</div>
+      </section>
+    );
+  }
 
   const onPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
     if (e.button !== 0) return;

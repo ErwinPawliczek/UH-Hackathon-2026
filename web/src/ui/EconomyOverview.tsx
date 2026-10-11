@@ -172,9 +172,9 @@ export function EconomyOverview({ open }: { open: boolean }) {
   const failed = economy.error ?? forecast.error ?? prices.error;
   return (
     <div className="flex flex-col gap-2 px-3 py-3" data-testid="economy-overview">
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-3 gap-2 narrow:grid-cols-1">
         <Panel label="Customers served" className="min-h-[150px]" testId="overview-served"><Served reply={economy.data} /></Panel>
-        <Panel label="Cost of the current disruption" className="col-span-2 min-h-[150px]" testId="overview-cost-panel"><Cost f={forecast.data} /></Panel>
+        <Panel label="Cost of the current disruption" className="col-span-2 min-h-[150px] narrow:col-span-1" testId="overview-cost-panel"><Cost f={forecast.data} /></Panel>
         <Panel label="What stops next" className="min-h-[196px]" testId="overview-stops"><StopsNext f={forecast.data} /></Panel>
         <Panel label="Price pressure" className="min-h-[196px]" testId="overview-pressure"><Pressure reply={prices.data} /></Panel>
         <Panel label="Plants running" className="min-h-[196px]" testId="overview-plants"><Plants reply={economy.data} /></Panel>

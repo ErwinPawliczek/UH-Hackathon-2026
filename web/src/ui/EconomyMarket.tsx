@@ -73,7 +73,7 @@ export function EconomyMarket({ open }: { open: boolean }) {
         {d.materials === undefined ? <Empty>Not available yet.</Empty> : materials.length === 0 ? <Empty>Nothing has been sold yet.</Empty> : (
           <ul className="divide-y divide-line">
             {materials.map((m) => (
-              <li key={m.material} className="grid grid-cols-[9rem_1fr_5.5rem_3.5rem] items-center gap-3 py-1.5 text-sm" data-testid="market-price-row">
+              <li key={m.material} className="grid grid-cols-[9rem_1fr_5.5rem_3.5rem] narrow:grid-cols-[6.5rem_1fr_5rem_3rem] narrow:gap-2 items-center gap-3 py-1.5 text-sm" data-testid="market-price-row">
                 <span className="truncate text-ink">{marketTitle(m.material, m.name)}</span>
                 <ChangeBar pct={m.paidUsdPerT === null ? 0 : m.changePct} />
                 <span className="data text-right text-ink">{perTonne(m.paidUsdPerT)}</span>
@@ -92,7 +92,7 @@ export function EconomyMarket({ open }: { open: boolean }) {
               const change = paidChangePct(c);
               return (
                 <li key={`${c.site}-${c.material}`}>
-                  <button type="button" className="grid w-full cursor-pointer grid-cols-[11rem_1fr_6rem] items-center gap-3 py-1.5 text-left text-sm hover:bg-panel-2" onClick={() => pick(c.site)} title={`Show ${c.name} on the map`} data-testid="market-customer-row">
+                  <button type="button" className="grid w-full cursor-pointer grid-cols-[11rem_1fr_6rem] narrow:grid-cols-[6.5rem_1fr_5.5rem] narrow:gap-2 items-center gap-3 py-1.5 text-left text-sm hover:bg-panel-2" onClick={() => pick(c.site)} title={`Show ${c.name} on the map`} data-testid="market-customer-row">
                     <span className="min-w-0">
                       <span className="block truncate text-ink">{c.name}</span>
                       <span className="block truncate text-xs text-muted">{marketTitle(c.material)}</span>
@@ -134,7 +134,7 @@ export function EconomyMarket({ open }: { open: boolean }) {
                 const losing = p.marginUsdPerT !== null && p.marginUsdPerT < 0;
                 return (
                   <li key={p.site}>
-                    <button type="button" className="grid w-full cursor-pointer grid-cols-[13rem_1fr_5.5rem_3rem] items-center gap-3 py-1.5 text-left text-sm hover:bg-panel-2" onClick={() => pick(p.site)} title={`Show ${p.name} on the map`} data-testid="market-plant-row">
+                    <button type="button" className="grid w-full cursor-pointer grid-cols-[13rem_1fr_5.5rem_3rem] narrow:grid-cols-[7rem_1fr_4.5rem_2.5rem] narrow:gap-2 items-center gap-3 py-1.5 text-left text-sm hover:bg-panel-2" onClick={() => pick(p.site)} title={`Show ${p.name} on the map`} data-testid="market-plant-row">
                       <span className="min-w-0">
                         <span className="block truncate text-ink">{p.name}</span>
                         {/* the phrase is the point of the row: it wraps, it is never cut */}
