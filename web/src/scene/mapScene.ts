@@ -16,6 +16,7 @@ import { SiteLabels } from './siteLabels';
 import { PipelineLabels } from './pipelineLabels';
 import { buildRails, resizeRails, type RailLayer } from './rails';
 import { TripOverlay, type VehicleTrip } from './tripOverlay';
+import { buildBridges } from './bridges';
 import { buildSiteLayer, updateInstances, type SiteLayer } from './siteClusters';
 import {
   buildVehicleLayer, classMode, updateVehicleCargo, updateVehicles, waterSpan,
@@ -203,6 +204,10 @@ export class MapScene {
         if (known === undefined || dist(berth) < dist(known)) this.berths.set(key, berth);
       });
     });
+
+    // roads over water are carried on small bridges
+    const bridges = buildBridges(world, isWater, deck, surface);
+    if (bridges !== null) this.scene.add(bridges);
 
     // rail lines: drawn as small tracks, nothing runs on them
     this.rails = buildRails(world, deck, isWater);
