@@ -89,7 +89,10 @@ export function TopBar() {
   const engineScenarios = backendKind === 'http' ? scenariosFor(world) : [];
 
   return (
-    <header className="pointer-events-auto absolute inset-x-0 top-0 z-10 flex h-12 items-center gap-2 bg-panel px-4">
+    // z-[60]: above every floating window (they stack from 20 up, see DraggableWindow),
+    // so a menu opened from the bar — Scenario — is never hidden under a window
+    // that sits just below it. Windows cannot be dragged over the bar itself.
+    <header className="pointer-events-auto absolute inset-x-0 top-0 z-[60] flex h-12 items-center gap-2 bg-panel px-4" data-testid="top-bar">
       <ChainEdge />
       <span className="flex items-center gap-2" data-testid="wordmark">
         <img src="/logo.svg" alt="PetroGrid mark" width={20} height={20} />

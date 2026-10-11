@@ -827,3 +827,173 @@ TEST_CASE("M12: sourcing lists every way to supply a tank and names what the nex
   CHECK(json::parse(sourcingJson(*sim, "VINYLS", "PE")).contains("error"));
   CHECK(json::parse(sourcingJson(*sim, "11", "CHLORINE")).at("tank").at("site") == "VINYLS");
 }
+
+namespace {
+
+// The first route edge on the way between two sites in a mode.
+uint32_t firstEdgeBetween(const Sim& sim, const char* from, const char* to, crx::Mode mode) {
+  const World& w = sim.world();
+  PathCache paths = sim.paths();
+  refreshPaths(w, sim.state(), paths);
+  const int m = modeIndex(mode);
+  const uint32_t a = w.sites[static_cast<size_t>(w.findSite(from))].node[m];
+  const uint32_t b = w.sites[static_cast<size_t>(w.findSite(to))].node[m];
+  const std::vector<uint32_t> path = buildPath(w, paths, mode, a, b);
+  REQUIRE(path.size() >= 2);
+  return edgeBetween(w, mode, path[0], path[1]);
+}
+
+bool routeOpen(const Sim& sim, const char* from, const char* to, crx::Mode mode) {
+  const World& w = sim.world();
+  PathCache paths;
+  refreshPaths(w, sim.state(), paths);
+  const int m = modeIndex(mode);
+  return std::isfinite(travelKm(w, paths, mode,
+                                w.sites[static_cast<size_t>(w.findSite(from))].node[m],
+                                w.sites[static_cast<size_t>(w.findSite(to))].node[m]));
+}
+
+// Books stay sane while routes are cut: nothing negative, no vehicle
+// carrying more than its order, mass conserved over the stretch.
+void checkBooks(const Sim& sim) {
+  const World& w = sim.world();
+  const State& st = sim.state();
+  for (size_t t = 0; t < st.tank.size(); ++t) {
+    CHECK_MESSAGE(st.tank[t].level_t >= -1e-6, w.tanks[t].key << " level " << st.tank[t].level_t);
+    CHECK_MESSAGE(st.tank[t].reserved_out_t >= -1e-6,
+                  w.tanks[t].key << " reserved " << st.tank[t].reserved_out_t);
+    CHECK_MESSAGE(st.tank[t].inbound_t >= -1e-6, w.tanks[t].key << " inbound " << st.tank[t].inbound_t);
+  }
+  for (size_t v = 0; v < st.vehicle.size(); ++v) {
+    const VehicleState& vs = st.vehicle[v];
+    if (vs.status == VehStatus::Idle || vs.order >= st.order.size()) continue;
+    CHECK_MESSAGE(vs.cargo_t <= st.order[vs.order].qty_t + 1e-6,
+                  "vehicle " << v << " carries " << vs.cargo_t << " t of a "
+                             << st.order[vs.order].qty_t << " t lot");
+  }
+}
+
+}  // namespace
+
+TEST_CASE("M13: a route edge can be closed by index, traffic copes, and it reopens") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  const World& w = sim->world();
+  const auto ok = [&](const json& cmd) {
+    return json::parse(sim->command(cmd.dump())).at("ok").get<bool>();
+  };
+
+  // Validation: the index must be a route of this world; the site form still works.
+  CHECK(!ok({{"type", "route_break"}, {"edge", w.edges.size()}, {"duration_h", 24}}));
+  CHECK(!ok({{"type", "route_break"}, {"edge", -1}, {"duration_h", 24}}));
+  CHECK(!ok({{"type", "route_break"}, {"edge", "43"}, {"duration_h", 24}}));
+  CHECK(!ok({{"type", "route_break"}, {"duration_h", 24}}));
+
+  sim->step(960);  // day 10
+  const uint32_t river = firstEdgeBetween(*sim, "SALT_MINE", "CHLOR_ALKALI", crx::Mode::River);
+  REQUIRE(river < w.edges.size());
+  REQUIRE(w.edges[river].mode == crx::Mode::River);
+  REQUIRE(routeOpen(*sim, "SALT_MINE", "CHLOR_ALKALI", crx::Mode::River));
+  const double stock0 = stockSum(sim->state());
+  const double supplied0 = sim->state().cum_supplied_t, consumed0 = sim->state().cum_consumed_t,
+               loss0 = sim->state().cum_loss_t;
+
+  // Close the salt barges' river lane for five days.
+  const uint64_t version = sim->state().graph_version;
+  REQUIRE(ok({{"type", "route_break"}, {"edge", river}, {"duration_h", 120}}));
+  sim->step(1);
+  CHECK(sim->state().edge_open[river] == 0);
+  CHECK(sim->state().graph_version > version);
+  CHECK(!routeOpen(*sim, "SALT_MINE", "CHLOR_ALKALI", crx::Mode::River));  // the river is a tree
+  for (int hour = 0; hour < 119; ++hour) {
+    sim->step(4);
+    CHECK(sim->state().edge_open[river] == 0);
+    if (hour % 12 == 0) checkBooks(*sim);
+  }
+  sim->step(8);
+  CHECK(sim->state().edge_open[river] == 1);
+  CHECK(routeOpen(*sim, "SALT_MINE", "CHLOR_ALKALI", crx::Mode::River));
+  bool logged_close = false, logged_open = false;
+  for (const LogEntry& e : sim->recorder().log) {
+    if (e.type == "route_break" && e.unit == std::to_string(river)) logged_close = true;
+    if (e.type == "route_reopened" && e.unit == std::to_string(river)) logged_open = true;
+  }
+  CHECK(logged_close);
+  CHECK(logged_open);
+
+  // While the river was shut, salt went by road.
+  const int bulk_truck = w.catalog.findVehicle("TRUCK_BULK");
+  const int salt = w.catalog.findMaterial("SALT");
+  REQUIRE(bulk_truck >= 0);
+  size_t salt_by_truck = 0;
+  for (const Order& o : sim->state().order)
+    if (o.material == salt && o.cls == bulk_truck && o.created_tick > 960) ++salt_by_truck;
+  CHECK(salt_by_truck > 10);
+
+  // On to day 60: nothing is left waiting, the customers were served, and
+  // mass is conserved across the whole episode.
+  while (sim->state().tick < 60 * 96) sim->step(96);
+  checkBooks(*sim);
+  for (const Order& o : sim->state().order)
+    if (o.status == OrdStatus::Open)
+      CHECK(sim->state().tick - o.created_tick < 10 * 96);
+  std::vector<double> kpis;
+  sim->computeKpis(kpis);
+  CHECK(kpis[0] > 0.99);
+  const State& st = sim->state();
+  const double residual = (stockSum(st) - stock0) - ((st.cum_supplied_t - supplied0) -
+                                                     (st.cum_consumed_t - consumed0) -
+                                                     (st.cum_loss_t - loss0));
+  CHECK(std::fabs(residual) <= 1e-6 * conservationScale(st));
+}
+
+TEST_CASE("M14: a closed sea lane holds loaded ships at the berth without loading them twice") {
+  auto sim = makeMapSim();
+  REQUIRE(sim);
+  const World& w = sim->world();
+  sim->step(960);
+  // The lane every ship between the refinery and the fuel depot uses.
+  PathCache paths = sim->paths();
+  refreshPaths(w, sim->state(), paths);
+  const int sea = modeIndex(crx::Mode::Sea);
+  const std::vector<uint32_t> path =
+      buildPath(w, paths, crx::Mode::Sea, w.sites[static_cast<size_t>(w.findSite("REFINERY"))].node[sea],
+                w.sites[static_cast<size_t>(w.findSite("FUEL_DEPOT"))].node[sea]);
+  REQUIRE(path.size() >= 3);
+  const uint32_t lane = edgeBetween(w, crx::Mode::Sea, path[path.size() - 3], path[path.size() - 2]);
+  REQUIRE(lane < w.edges.size());
+
+  // Two overlapping closures of the same lane: the longer one holds it shut.
+  REQUIRE(json::parse(sim->command(json{{"type", "route_break"}, {"edge", lane}, {"duration_h", 96}}
+                                       .dump()))
+              .at("ok") == true);
+  REQUIRE(json::parse(sim->command(json{{"type", "route_break"}, {"edge", lane}, {"duration_h", 240}}
+                                       .dump()))
+              .at("ok") == true);
+  size_t held_at_berth = 0;
+  for (int hour = 0; hour < 239; ++hour) {
+    sim->step(4);
+    CHECK(sim->state().edge_open[lane] == 0);  // still shut after the first one ends
+    checkBooks(*sim);  // the regression: a held ship used to load its lot again and again
+    for (size_t v = 0; v < sim->state().vehicle.size(); ++v) {
+      const VehicleState& vs = sim->state().vehicle[v];
+      if (vs.status == VehStatus::Loading && vs.order < sim->state().order.size() &&
+          vs.cargo_t >= sim->state().order[vs.order].qty_t - 1e-6)
+        ++held_at_berth;
+    }
+  }
+  CHECK(held_at_berth > 0);  // some ship did sit loaded, waiting for the lane
+  sim->step(8);
+  CHECK(sim->state().edge_open[lane] == 1);
+
+  // It recovers: by day 45 every plant is running again and customers are served.
+  while (sim->state().tick < 45 * 96) sim->step(96);
+  checkBooks(*sim);
+  std::vector<double> at45, at60;
+  sim->computeKpis(at45);
+  while (sim->state().tick < 60 * 96) sim->step(96);
+  sim->computeKpis(at60);
+  CHECK(at60[1] - at45[1] == doctest::Approx(0.0).epsilon(1e-9));  // no unmet demand days 45 to 60
+  for (size_t p = 0; p < w.processes.size(); ++p)
+    CHECK(sim->state().proc[p].status == ProcStatus::Running);
+}

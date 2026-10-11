@@ -13,7 +13,12 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { clampToViewport, useWindows } from './windows';
 
-const BASE_Z = 20; // above the top bar, inspector and timeline (z-10)
+/**
+ * Windows stack from here up, one step each in focus order — above the map
+ * and its overlays, below the top bar (z 60) so the bar's menus open over
+ * any window.
+ */
+const BASE_Z = 20;
 const DEFAULT_AT = { x: 96, y: 72 };
 
 export function DraggableWindow({

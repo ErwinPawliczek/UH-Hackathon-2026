@@ -417,6 +417,44 @@ TEST_CASE("sourcing: the buying tanks, one tank's options, and refusals") {
   CHECK(cli.Post("/api/sim/" + id + "/step", R"({"ticks":0})", "application/json")->body == before);
 }
 
+TEST_CASE("route_break by edge: the index is the route's position in the world JSON") {
+  TestServer srv;
+  auto cli = client(srv.port);
+  const std::string id = createSession(cli, R"({"seed":42,"world":"erwin-world-v1"})");
+  const auto world = cli.Get("/api/sim/" + id + "/world");
+  REQUIRE(world);
+  const json routes = json::parse(world->body).at("routes");
+  REQUIRE(routes.size() == 88);
+  size_t river = routes.size();
+  for (size_t i = 0; i < routes.size() && river == routes.size(); ++i)
+    if (routes[i].at("mode") == "river") river = i;
+  REQUIRE(river < routes.size());
+
+  const auto command = [&](const json& cmd) {
+    auto res = cli.Post("/api/sim/" + id + "/command", cmd.dump(), "application/json");
+    REQUIRE(res);
+    return json::parse(res->body);
+  };
+  CHECK(command({{"type", "route_break"}, {"edge", river}, {"duration_h", 48}}).at("ok") == true);
+  CHECK(command({{"type", "route_break"}, {"edge", routes.size()}, {"duration_h", 48}}).at("ok") ==
+        false);
+  REQUIRE(cli.Post("/api/sim/" + id + "/step", R"({"ticks":8})", "application/json"));
+  const auto events = cli.Get("/api/sim/" + id + "/events?since=0");
+  REQUIRE(events);
+  bool closed = false;
+  for (const json& e : json::parse(events->body))
+    if (e.at("type") == "route_break" && e.at("unit") == std::to_string(river))
+      closed = e.at("text").get<std::string>().rfind("River lane closed", 0) == 0;
+  CHECK(closed);
+
+  // A rewind to before the closure forgets it, like any other disruption.
+  REQUIRE(cli.Post("/api/sim/" + id + "/rewind", R"({"tick":0})", "application/json"));
+  REQUIRE(cli.Post("/api/sim/" + id + "/step", R"({"ticks":8})", "application/json"));
+  const auto after = cli.Get("/api/sim/" + id + "/events?since=0");
+  REQUIRE(after);
+  for (const json& e : json::parse(after->body)) CHECK(e.at("type") != "route_break");
+}
+
 TEST_CASE("world json: fleet manifest without a fabricated shuttle schedule") {
   TestServer srv;
   auto cli = client(srv.port);

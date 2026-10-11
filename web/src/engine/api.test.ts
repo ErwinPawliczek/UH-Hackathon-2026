@@ -166,6 +166,20 @@ describe('HttpBackend request mapping', () => {
     expect((err as HttpError).reason).toBe('tick is ahead of the run');
   });
 
+  it('reads the hourly series as the raw float32 array the engine sends', async () => {
+    const impl: typeof fetch = async () =>
+      new Response(new Float32Array([1, 0.5, 0.25]).buffer, {
+        status: 200,
+        headers: { 'Content-Type': 'application/octet-stream' },
+      });
+    const b = new HttpBackend('http://x', impl);
+    expect(await b.series('sim-7', 1, 5)).toEqual([1, 0.5, 0.25]);
+    // nothing recorded yet: an empty body is an empty series
+    const empty: typeof fetch = async () =>
+      new Response(new ArrayBuffer(0), { status: 200, headers: { 'Content-Type': 'application/octet-stream' } });
+    expect(await new HttpBackend('http://x', empty).series('sim-7', 0, 9)).toEqual([]);
+  });
+
   it('throws with the status on a failed request', async () => {
     const impl: typeof fetch = async () => new Response('gone', { status: 410 });
     const b = new HttpBackend('http://x', impl);

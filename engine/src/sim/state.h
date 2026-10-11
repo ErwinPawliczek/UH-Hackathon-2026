@@ -100,6 +100,7 @@ struct EventDef {
   Type type = Type::UnitOutage;
   uint32_t site = 0;
   uint32_t site2 = UINT32_MAX;  // route_break: the far end of the closed span
+  uint32_t edge = UINT32_MAX;   // route_break by edge: the one route edge closed
   int32_t unit = -1;      // world unit index; unit-level events only
   uint32_t trains = 0;    // unit_outage
   double multiplier = 1;  // demand/supply shocks

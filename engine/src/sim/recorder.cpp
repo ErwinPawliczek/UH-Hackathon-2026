@@ -103,6 +103,7 @@ uint64_t hashState(const World& world, const State& state) {
     h.mixU64(e.start_tick);
     h.mixU64(e.end_tick);
     h.mix(&e.applied, sizeof e.applied);
+    if (e.edge != UINT32_MAX) h.mixU32(e.edge);  // only edge breaks carry one
   }
   for (const EventDef& e : state.active) {
     // Applied events are deterministic from their pending form; mix the
