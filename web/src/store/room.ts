@@ -56,10 +56,13 @@ export interface RoomSource {
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 
-async function json<T>(url: string, init?: RequestInit): Promise<T> {
+/** Room codes the server has answered 404 for: nothing more is fetched for them. */
+const goneRooms = new Set<string>();
+
+async function fetchJson<T>(url: string, init?: RequestInit, fetcher: typeof fetch = fetch): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(url, init);
+    res = await fetcher(url, init);
   } catch (err) {
     throw new Error(`Cannot reach the game server (${err instanceof Error ? err.message : String(err)})`);
   }
@@ -77,7 +80,7 @@ export function roomFromLocation(): string | null {
 
 /** POST /api/room: a new room on the default world, paused at tick 0. */
 export async function createRoom(password?: string, world?: string): Promise<{ code: string; hostToken: string }> {
-  const r = await json<{ code?: string; hostToken?: string; error?: string }>('/api/room', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ ...(password ? { password } : {}), ...(world ? { world } : {}) }) });
+  const r = await fetchJson<{ code?: string; hostToken?: string; error?: string }>('/api/room', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ ...(password ? { password } : {}), ...(world ? { world } : {}) }) });
   if (typeof r.code !== 'string' || typeof r.hostToken !== 'string') throw new Error(r.error ?? 'The room could not be opened.');
   return { code: r.code, hostToken: r.hostToken };
 }
@@ -85,8 +88,20 @@ export async function createRoom(password?: string, world?: string): Promise<{ c
 /** The room's HTTP calls. Its read-only views live under /api/room/{code}/… in the shapes of /api/sim/{id}/…. */
 export function roomSource(code: string): RoomSource {
   const base = `/api/room/${encodeURIComponent(code)}`;
+  // A room the server no longer knows (it ended, or the server restarted) is
+  // gone for good: once its own address answers 404, nothing more is sent for
+  // it. A forgotten tab would otherwise poll for ever and keep the server awake.
+  const guarded: typeof fetch = async (input, init) => {
+    const url = String(input);
+    if (goneRooms.has(code)) return new Response('{"ok":false,"error":"There is no room with that code"}', { status: 404 });
+    const res = await fetch(input, init);
+    const path = url.split('?')[0];
+    if (res.status === 404 && (path === base || path === `${base}/snapshot`)) goneRooms.add(code);
+    return res;
+  };
+  const json = <T,>(url: string, init?: RequestInit) => fetchJson<T>(url, init, guarded);
   // the panels ask a session for /api/sim/{id}/…: answer from the room's copy of the same routes
-  const backend = new HttpBackend('', (input, init) => fetch(String(input).replace('/api/sim/', '/api/room/'), init));
+  const backend = new HttpBackend('', (input, init) => guarded(String(input).replace('/api/sim/', '/api/room/'), init));
   let etag: string | null = null;
   let who: string | null = null;
   return {
@@ -95,7 +110,7 @@ export function roomSource(code: string): RoomSource {
     identify: (token) => { who = token; },
     world: () => json<unknown>(`${base}/world`),
     async snapshot(lastTick) {
-      const res = await fetch(`${base}/snapshot`, etag !== null && lastTick !== null ? { headers: { 'If-None-Match': etag } } : undefined);
+      const res = await guarded(`${base}/snapshot`, etag !== null && lastTick !== null ? { headers: { 'If-None-Match': etag } } : undefined);
       if (res.status === 304) return null;
       if (!res.ok) throw new HttpError(res.status, `GET ${base}/snapshot -> ${res.status}`, await res.text().catch(() => ''));
       etag = res.headers.get('ETag');
