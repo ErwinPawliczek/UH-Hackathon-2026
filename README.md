@@ -41,6 +41,53 @@ plant how fast to run from a few simple signals, so the network reacts to an ups
   the session with the same run in which nothing was changed: what broke, which prices moved, and who caused
   what.
 
+## The economic engine
+
+Prices are not typed in anywhere. They come out of the physical state of the network, and in the market world
+the network then reacts to them. `docs/MODEL.md` has every rule and constant; this is the short version.
+
+**How a price forms.** Every chemical has a base price. Each side of a trade moves away from it by one number
+of its own:
+
+```
+asking price = base × (1 + 0.5 × (1 − 2 × how full the seller's tank is))     full tank: −50%, empty: +50%
+bid          = base × (1 + 0.5 × the buyer's urgency)                          calm: base, nearly out: +50%
+price paid   = halfway between the two
+```
+
+**Who a buyer buys from.** Once an hour, each tank that is running short compares every seller and vehicle that
+can physically make the delivery, and takes the lowest delivered cost:
+
+```
+delivered cost per tonne = asking price + freight rate × distance + urgency × $0.50 × trip hours
+```
+
+**The market rules** (the Market switch; world `erwin-market-v1`):
+
+| Rule | What it does |
+|---|---|
+| Price-aware buying | A buyer orders early and fills to 90% when the best offer is 10% under base, and waits and fills to 50% when it is 10% over. Below one delivery time of stock it buys at any price. |
+| Demand reacts to price | A customer wants normal demand × (price paid ÷ base)^−0.2, kept between 60% and 120% of normal. |
+| Margin and cost pass-through | A plant whose margin falls to nothing turns down to its minimum rate. A rise in feed cost is added to its asking prices, so it moves down the chain a stage at a time. |
+
+**What a disruption costs.** The same moment is run forward 30 days twice, once as it is and once as if nothing
+had broken:
+
+```
+cost = extra lost sales + stock run down + extra energy + extra freight
+```
+
+Stock is counted because customers live off existing stock at first; without it a week-long outage would look
+like an energy saving.
+
+**Damage in a shared session.** The server keeps a second run in which nobody changed anything, and one run per
+player that leaves out that player's moves. Damage is the customer sales lost in the session beyond that run:
+product not delivered, plus demand priced out.
+
+**Known limits.** The market is closed (no imports or exports), every trade is a spot trade, and nothing is
+calibrated against real prices. A bid is never below base, so prices settle somewhat above base even when
+nothing is wrong: read the changes, not the level.
+
 ## How it is built
 
 | Part | Where | What it is |
@@ -96,6 +143,7 @@ the same.
 
 ## More
 
+- `docs/MODEL.md`: the complete model, every rule and constant in the order the engine applies them.
 - `deploy/README.md`: the Docker image, Fly.io and the domains.
 - `design/`: the design system and the hand-drawn map.
 - `docs/OUTLINE.md`: the original technical outline. The engine's rules follow it; the interface and the
