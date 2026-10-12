@@ -23,9 +23,9 @@ primary_region = "dfw"          # Dallas–Fort Worth; demo audience is US-centr
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = false      # demo stays up: no idle stop, no cold starts
+  auto_stop_machines = "stop"     # sleeps when nobody is visiting; the next visit wakes it in a few seconds
   auto_start_machines = true
-  min_machines_running = 1
+  min_machines_running = 0        # running sessions and rooms end when it sleeps (only with no visitors)
 
 [[vm]]
   size = "shared-cpu-1x"

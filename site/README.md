@@ -12,7 +12,7 @@ The page served at petrogrid.xyz. One static HTML file, no build step.
 
 ## Deploy
 
-Runs on Fly.io as the app `petrogrid-site` (two small machines in Dallas, always on).
+Runs on Fly.io as the app `petrogrid-site` (one small machine in Dallas that sleeps when nobody is visiting).
 The simulation app is a separate Fly app; see `/deploy`.
 
 ```
